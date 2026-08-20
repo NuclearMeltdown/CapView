@@ -72,6 +72,13 @@ const char* StatsDetailName(int i) {
   return T(de[i], en[i]);
 }
 
+const char* MicTrackModeName(int i) {
+  static const char* de[3] = {"Gemischt und getrennt", "Nur gemischt", "Nur getrennt"};
+  static const char* en[3] = {"Mixed and separate", "Mixed only", "Separate only"};
+  i = Pick(i, 3);
+  return T(de[i], en[i]);
+}
+
 const char* RecordContainerName(int i) {
   static const char* names[2] = {"MKV (Matroska)", "MP4"};
   return names[Pick(i, 2)];
@@ -293,6 +300,7 @@ json::Value WriteProfile(const Profile& p) {
   aud["micEnabled"] = p.audio.micEnabled;
   aud["micDevice"] = WriteDevice(p.audio.micDevice);
   aud["micGain"] = p.audio.micGain;
+  aud["micTrackMode"] = (int)p.audio.micTrackMode;
   o["audio"] = aud;
 
   return o;
@@ -332,6 +340,7 @@ Profile ReadProfile(const json::Value& v) {
   p.audio.micEnabled = a["micEnabled"].AsBool(false);
   p.audio.micDevice = ReadDevice(a["micDevice"]);
   p.audio.micGain = (float)Clamp(a["micGain"].AsNumber(1.0), 0.0, 4.0);
+  p.audio.micTrackMode = ReadEnum<MicTrackMode>(a, "micTrackMode", 3, MicTrackMode::Both);
 
   return p;
 }

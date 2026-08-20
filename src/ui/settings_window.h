@@ -16,6 +16,7 @@
 #include "record/ffmpeg_download.h"
 #include "record/ffmpeg_locator.h"
 #include "record/remuxer.h"
+#include "ui/file_dialog.h"
 
 namespace cap {
 
@@ -91,8 +92,10 @@ class SettingsWindow {
   void DrawToolsTab(FfmpegInfo* ffmpeg);
   void DrawHotkeysTab();
   // Text field plus Browse / Default / Open, shared by both output folders.
-  void FolderRow(const char* id, char* buffer, size_t bufferSize, std::string* value,
-                 const std::wstring& defaultFolder);
+  void FolderRow(const char* id, int pickTag, char* buffer, size_t bufferSize,
+                 std::string* value, const std::wstring& defaultFolder);
+  // Applies a finished file dialog to whichever field opened it.
+  void PollFileDialog(FfmpegInfo* ffmpeg);
  public:
   void setProbeBusy(bool busy) { probeBusy_ = busy; }
  private:
@@ -133,6 +136,11 @@ class SettingsWindow {
   // Recording tab.
   FfmpegDownloader downloader_;
   Remuxer remuxer_;
+
+  // One dialog at a time, tagged so the result finds its way back. The tags are
+  // PickTarget values.
+  AsyncFileDialog picker_;
+  enum PickTarget { kPickNone = 0, kPickRecordFolder, kPickShotFolder, kPickFfmpeg, kPickRemux };
   bool probeRequested_ = false;
   bool cropPickRequested_ = false;
   bool probeBusy_ = false;

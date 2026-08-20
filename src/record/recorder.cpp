@@ -86,10 +86,39 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
     cmd += L" -i \"" + micPipe + L"\"";
   }
 
+  // With both sources there is a choice of what the file should contain. The
+  // mix is made by ffmpeg rather than here, so the separate tracks stay exactly
+  // what each device delivered.
+  //
+  // normalize=0 matters: amix otherwise divides every input by the number of
+  // inputs, which would make the game quieter in the mix than on its own track
+  // and leave people wondering what happened. The sum can clip if both are hot,
+  // which is what the level meters are for.
+  const bool bothSources = audioRate > 0 && micRate > 0;
+  const bool wantMix = bothSources && micTrackMode_ != MicTrackMode::Separate;
+  const bool wantSeparate = !bothSources || micTrackMode_ != MicTrackMode::Mixed;
+
+  if (wantMix) {
+    cmd += L" -filter_complex \"[1:a][2:a]amix=inputs=2:duration=first:normalize=0[mix]\"";
+  }
+
   cmd += L" -map 0:v";
   int audioIndex = 0;
-  if (audioRate > 0) cmd += L" -map 1:a";
-  if (micRate > 0) cmd += L" -map " + std::to_wstring(audioRate > 0 ? 2 : 1) + L":a";
+  std::vector<std::wstring> titles;
+  if (wantMix) {
+    cmd += L" -map \"[mix]\"";
+    titles.push_back(L"Mix");
+  }
+  if (wantSeparate) {
+    if (audioRate > 0) {
+      cmd += L" -map 1:a";
+      titles.push_back(L"Capture");
+    }
+    if (micRate > 0) {
+      cmd += L" -map " + std::to_wstring(audioRate > 0 ? 2 : 1) + L":a";
+      titles.push_back(L"Microphone");
+    }
+  }
 
   cmd += L" -c:v " + ToWide(encoder.ffmpegName);
   // 4:2:0 eight bit: the one format every hardware encoder and every player
@@ -105,15 +134,12 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
     cmd += L" -preset " + ToWide(RecordSpeedName((int)settings.speed));
   }
 
-  if (audioRate > 0 || micRate > 0) {
+  if (!titles.empty()) {
     cmd += L" -c:a aac -b:a 192k";
     // Named tracks, so a player and an editor both show which is which instead
     // of "Audio 1" and "Audio 2".
-    if (audioRate > 0) {
-      cmd += L" -metadata:s:a:" + std::to_wstring(audioIndex++) + L" title=\"Capture\"";
-    }
-    if (micRate > 0) {
-      cmd += L" -metadata:s:a:" + std::to_wstring(audioIndex++) + L" title=\"Microphone\"";
+    for (const std::wstring& title : titles) {
+      cmd += L" -metadata:s:a:" + std::to_wstring(audioIndex++) + L" title=\"" + title + L"\"";
     }
   }
 
@@ -125,7 +151,7 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
 
 bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, int width,
                      int height, double sourceFps, const AudioSource& main,
-                     const AudioSource& mic, std::string* error) {
+                     const AudioSource& mic, MicTrackMode micTrackMode, std::string* error) {
   Stop();
 
   auto fail = [&](const std::string& msg) {
@@ -158,6 +184,7 @@ bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, i
   fps_ = settings.fps > 0.0 ? settings.fps : (sourceFps > 1.0 ? sourceFps : 60.0);
   audioRate_ = main.active() ? main.sampleRate : 0;
   micRate_ = mic.active() ? mic.sampleRate : 0;
+  micTrackMode_ = micTrackMode;
   frameBytes_ = (size_t)width_ * (size_t)height_ * 4;
   pullAudio_ = main.pull;
   pullMic_ = mic.pull;

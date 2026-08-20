@@ -1,0 +1,108 @@
+#include "ui/file_dialog.h"
+
+#include <shobjidl.h>
+
+namespace cap {
+
+AsyncFileDialog::~AsyncFileDialog() {
+  // The dialog is modal to the user, not to us: there is no way to cancel it
+  // from here, so the only correct thing on shutdown is to wait for it.
+  if (thread_.joinable()) thread_.join();
+}
+
+bool AsyncFileDialog::Start(const FileDialogRequest& request, HWND owner, int tag) {
+  if (running_.load(std::memory_order_relaxed)) return false;
+  if (thread_.joinable()) thread_.join();  // reap the previous one
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    results_.clear();
+  }
+  tag_ = tag;
+  ready_.store(false, std::memory_order_relaxed);
+  running_.store(true, std::memory_order_relaxed);
+  thread_ = std::thread(&AsyncFileDialog::Run, this, request, owner);
+  return true;
+}
+
+bool AsyncFileDialog::TakeResult(std::vector<std::wstring>* out, int* tag) {
+  if (!ready_.load(std::memory_order_acquire)) return false;
+  ready_.store(false, std::memory_order_relaxed);
+  if (thread_.joinable()) thread_.join();
+  if (out) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    *out = results_;
+  }
+  if (tag) *tag = tag_;
+  return true;
+}
+
+void AsyncFileDialog::Run(FileDialogRequest request, HWND owner) {
+  std::vector<std::wstring> picked;
+
+  // Apartment threaded, which is what the common item dialogs require.
+  const HRESULT init = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+  if (SUCCEEDED(init)) {
+    ComPtr<IFileOpenDialog> dialog;
+    if (SUCCEEDED(::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                     IID_PPV_ARGS(&dialog)))) {
+      DWORD options = 0;
+      dialog->GetOptions(&options);
+      options |= FOS_FORCEFILESYSTEM;
+      if (request.mode == FileDialogRequest::Mode::Folder) {
+        options |= FOS_PICKFOLDERS | FOS_PATHMUSTEXIST;
+      } else {
+        options |= FOS_FILEMUSTEXIST;
+        if (request.mode == FileDialogRequest::Mode::OpenFiles) options |= FOS_ALLOWMULTISELECT;
+      }
+      dialog->SetOptions(options);
+
+      if (!request.title.empty()) dialog->SetTitle(request.title.c_str());
+
+      if (!request.filters.empty()) {
+        std::vector<COMDLG_FILTERSPEC> specs;
+        specs.reserve(request.filters.size());
+        for (const auto& f : request.filters) {
+          specs.push_back(COMDLG_FILTERSPEC{f.first.c_str(), f.second.c_str()});
+        }
+        dialog->SetFileTypes((UINT)specs.size(), specs.data());
+      }
+
+      if (!request.startPath.empty()) {
+        ComPtr<IShellItem> item;
+        if (SUCCEEDED(::SHCreateItemFromParsingName(request.startPath.c_str(), nullptr,
+                                                    IID_PPV_ARGS(&item)))) {
+          dialog->SetFolder(item.Get());
+        }
+      }
+
+      // Cancelling returns a failure code, which is not an error worth logging.
+      if (SUCCEEDED(dialog->Show(owner))) {
+        ComPtr<IShellItemArray> items;
+        if (SUCCEEDED(dialog->GetResults(&items)) && items) {
+          DWORD count = 0;
+          items->GetCount(&count);
+          for (DWORD i = 0; i < count; ++i) {
+            ComPtr<IShellItem> item;
+            if (FAILED(items->GetItemAt(i, &item)) || !item) continue;
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)) && path) {
+              picked.emplace_back(path);
+              ::CoTaskMemFree(path);
+            }
+          }
+        }
+      }
+    }
+    ::CoUninitialize();
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    results_ = std::move(picked);
+  }
+  running_.store(false, std::memory_order_relaxed);
+  ready_.store(true, std::memory_order_release);
+}
+
+}  // namespace cap
