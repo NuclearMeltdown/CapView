@@ -1,0 +1,22 @@
+# Build output. Everyone builds their own with build.bat, or takes a release.
+build/
+
+# Settings are per machine and hold device names and paths.
+CapView.json
+CapView.log
+
+# ffmpeg is downloaded from upstream at runtime, never committed: it is ~100 MB
+# and the usual Windows builds are GPL.
+ffmpeg/
+
+# Visual Studio / editors
+.vs/
+*.user
+*.vcxproj*
+CMakeSettings.json
+.cache/
+compile_commands.json
+
+# Python helper leftovers in tools/
+__pycache__/
+*.pyc

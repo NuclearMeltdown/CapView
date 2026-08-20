@@ -1,0 +1,131 @@
+#pragma once
+
+// Writes what the viewer shows to a file, by feeding raw frames and raw audio
+// to an ffmpeg child process.
+//
+// Two rules shape the whole design:
+//
+//   1. The display path is never blocked. PushVideo copies into a triple buffer
+//      and returns; a writer thread owns the pipes. If the encoder cannot keep
+//      up, frames are dropped from the *recording*, never from the screen.
+//
+//   2. Audio is the master clock. The card's clock and the PC's clock drift
+//      apart over an hour, so the video timeline is derived from the number of
+//      audio samples written, duplicating or dropping frames to match. That
+//      makes sync arithmetic instead of hope, and produces constant frame rate
+//      output, which both MKV and MP4 prefer.
+
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "common.h"
+#include "config.h"
+#include "record/ffmpeg_locator.h"
+
+namespace cap {
+
+// Pulls up to `frames` interleaved stereo float frames; returns how many it
+// actually delivered. Called from the recorder's own thread.
+using AudioPullFn = std::function<size_t(float* out, size_t frames)>;
+
+struct RecordStats {
+  bool running = false;
+  double seconds = 0.0;
+  uint64_t videoFrames = 0;
+  uint64_t duplicated = 0;  // written twice to hold the audio timeline
+  uint64_t dropped = 0;     // arrived faster than the timeline needed
+  uint64_t bytesWritten = 0;
+  std::string file;
+  std::string encoder;
+  std::string error;
+};
+
+class Recorder {
+ public:
+  Recorder() = default;
+  ~Recorder();
+
+  Recorder(const Recorder&) = delete;
+  Recorder& operator=(const Recorder&) = delete;
+
+  // `audioRate` of 0 means no audio: the wall clock becomes the master instead.
+  bool Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, int width, int height,
+             double sourceFps, int audioRate, AudioPullFn pullAudio, std::string* error);
+  void Stop();
+
+  bool recording() const { return running_.load(std::memory_order_relaxed); }
+  // Set when ffmpeg died on its own; the app should stop and report.
+  bool failed() const { return failed_.load(std::memory_order_relaxed); }
+
+  // Called from the render thread with a freshly read back frame.
+  void PushVideo(const uint8_t* pixels, int stride);
+
+  RecordStats stats() const;
+
+  // Size of the file being written, for the optional size based split.
+  uint64_t outputFileSize() const;
+
+ private:
+  void VideoThread();
+  void AudioThread();
+  void StderrThread();
+  void Fail(const std::string& message);
+  bool WriteAll(HANDLE pipe, const uint8_t* data, size_t size);
+  int PickWriteSlotLocked() const;
+
+  std::wstring BuildCommandLine(const RecordSettings& settings, const EncoderInfo& encoder,
+                                const std::wstring& audioPipe, const std::wstring& outFile,
+                                int audioRate) const;
+
+  std::atomic<bool> running_{false};
+  std::atomic<bool> failed_{false};
+
+  HANDLE process_ = nullptr;
+  HANDLE videoPipe_ = nullptr;  // our write end of the child's stdin
+  HANDLE audioPipe_ = nullptr;  // named pipe, our end
+  std::wstring audioPipeName_;
+
+  std::thread videoThread_;
+  std::thread audioThread_;
+  std::thread stderrThread_;
+  HANDLE stderrPipe_ = nullptr;  // our read end of the child's stderr
+  AudioPullFn pullAudio_;
+
+  int width_ = 0;
+  int height_ = 0;
+  double fps_ = 60.0;
+  int audioRate_ = 0;
+  size_t frameBytes_ = 0;
+
+  // Triple buffer, same shape as the capture sink: the writer holds one slot
+  // while it works, so the render thread always has somewhere to write.
+  mutable std::mutex frameMutex_;
+  std::vector<uint8_t> slots_[3];
+  int readyIdx_ = -1;
+  int heldIdx_ = -1;
+
+  std::atomic<uint64_t> audioFramesWritten_{0};
+  std::atomic<uint64_t> videoFramesWritten_{0};
+  std::atomic<uint64_t> duplicated_{0};
+  std::atomic<uint64_t> dropped_{0};
+  std::atomic<uint64_t> bytesWritten_{0};
+  int64_t startQpc_ = 0;
+
+  // Video thread only: notices when the audio stops advancing so the frame
+  // timeline can fall back to the system clock instead of freezing.
+  uint64_t lastAudioSeen_ = 0;
+  int64_t lastAudioProgressQpc_ = 0;
+  bool audioStallLogged_ = false;
+
+  mutable std::mutex infoMutex_;
+  std::string file_;
+  std::string encoderLabel_;
+  std::string error_;
+};
+
+}  // namespace cap
