@@ -186,6 +186,7 @@ void App::Shutdown() {
   StopRecording();
   if (probeThread_.joinable()) probeThread_.join();
   StopCapture();
+  mic_.Stop();
   audio_.Stop();
   renderer_.Shutdown();
   ShutdownImGui();
@@ -689,6 +690,12 @@ void App::StartRecording() {
   if (wantAudio) audio_.SetTapEnabled(true);
   renderer_.SetReadbackEnabled(true);
 
+  // Start the microphone before asking it for its rate: the device decides that,
+  // and ffmpeg has to be told it on the command line.
+  SyncMicrophone(true);
+  const bool wantMic = mic_.running() && mic_.sampleRate() > 0;
+  if (wantMic) mic_.ResetBuffer();
+
   // Resolve the folder before handing it over, so a deleted directory is
   // recreated -- or answered with the default -- instead of failing the start.
   RecordSettings settings = config_.record;
@@ -704,10 +711,20 @@ void App::StartRecording() {
 
   const VideoFormatInfo format = renderer_.sourceFormat();
   std::string error;
-  const bool ok = recorder_.Start(
-      settings, ffmpeg_, renderer_.croppedWidth(), renderer_.croppedHeight(), format.fps,
-      wantAudio ? audio_.tapSampleRate() : 0,
-      [this](float* out, size_t frames) { return audio_.ReadTap(out, frames); }, &error);
+  Recorder::AudioSource mainTrack;
+  if (wantAudio) {
+    mainTrack.sampleRate = audio_.tapSampleRate();
+    mainTrack.pull = [this](float* out, size_t frames) { return audio_.ReadTap(out, frames); };
+  }
+  Recorder::AudioSource micTrack;
+  if (wantMic) {
+    micTrack.sampleRate = mic_.sampleRate();
+    micTrack.pull = [this](float* out, size_t frames) { return mic_.Read(out, frames); };
+  }
+
+  const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.croppedWidth(),
+                                  renderer_.croppedHeight(), format.fps, mainTrack, micTrack,
+                                  &error);
 
   if (!ok) {
     renderer_.SetReadbackEnabled(false);
@@ -747,6 +764,41 @@ std::wstring App::ResolveOutputFolder(std::string* configured, const std::wstrin
     return fallback;
   }
   return {};
+}
+
+void App::SyncMicrophone(bool aboutToRecord) {
+  const AudioSettings& a = config_.active().audio;
+
+  // Held open only while it is actually being used: during a recording, and
+  // while the settings are open so the level meter means something. Keeping a
+  // microphone open the rest of the time would light up the Windows privacy
+  // indicator for no reason and tell the user something untrue.
+  const bool wanted =
+      a.micEnabled && (aboutToRecord || recorder_.recording() || settings_.isOpen());
+
+  // Changing the device is a fresh start, and clears a previous failure.
+  if (!(micApplied_ == a.micDevice)) {
+    micApplied_ = a.micDevice;
+    micAttempted_ = false;
+    micFailed_ = false;
+    if (mic_.running()) mic_.Stop();
+  }
+
+  if (wanted && !mic_.running() && !micFailed_) {
+    std::string error;
+    micAttempted_ = true;
+    if (!mic_.Start(a.micDevice, &error)) {
+      // Not fatal: the recording still happens, just without the second track.
+      // Latched, because retrying every frame would fill the log and the screen
+      // with the same message sixty times a second.
+      micFailed_ = true;
+      if (!error.empty()) Toast(error);
+    }
+  } else if (!wanted && mic_.running()) {
+    mic_.Stop();
+    micAttempted_ = false;
+  }
+  mic_.SetGain(a.micGain);
 }
 
 void App::WriteScreenshot() {
@@ -1195,6 +1247,7 @@ void App::RenderFrame() {
   ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
   if (sink) lastFrameAgeMs_ = sink->stats().lastArrivalAgeMs;
+  SyncMicrophone();
   FeedRecorder();
   d3d_.EndFrame(config_.app.vsync);
 
@@ -1341,6 +1394,7 @@ void App::DrawUi() {
   }
   settings_.SetDetectedRange(&detectedRangeText_);
   settings_.SetSourceFps(renderer_.sourceFormat().fps);
+  settings_.SetLevels(audio_.inputPeak(), mic_.peak(), mic_.running());
   if (settings_.takeCropPickRequest()) BeginCropPick();
   settings_.setProbeBusy(probing_.load(std::memory_order_relaxed));
   if (settings_.Draw(capture_.running() ? &capture_.capabilities() : nullptr, &ffmpeg_) ==
