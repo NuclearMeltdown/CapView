@@ -30,6 +30,10 @@ struct OverlayStats {
   int displayHeight = 0;
   const char* filterName = "";
   int videoDelayMs = 0;
+  StatsDetail detail = StatsDetail::Full;
+  // What the automatic colour handling settled on; empty when it is still
+  // measuring or the user picked the values by hand.
+  std::string colorInfo;
 };
 
 void DrawStatsPanel(const OverlayStats& stats);

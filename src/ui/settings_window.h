@@ -46,6 +46,9 @@ class SettingsWindow {
   // selector so "Automatic" is not a black box. Points at a static string owned
   // by the caller, or null while nothing has been measured.
   void SetDetectedRange(const char* const* text) { detectedRange_ = text; }
+
+  // Frame rate the card is currently delivering; caps the recording rate.
+  void SetSourceFps(double fps) { sourceFps_ = fps; }
   bool isOpen() const { return open_; }
 
   // `liveCaps` are the capabilities of the device that is currently running, so
@@ -57,6 +60,9 @@ class SettingsWindow {
   // Set by the dialog when the user asks for a full encoder test; the app runs
   // it in the background and clears the flag.
   bool takeProbeRequest();
+  // Set when the user wants to drag the crop on the picture; the app closes the
+  // dialog and takes over.
+  bool takeCropPickRequest();
 
   // True while the binding editor is waiting for a key press. The app routes
   // key messages here instead of acting on them.
@@ -74,6 +80,7 @@ class SettingsWindow {
   void DrawAudioTab();
   void DrawDisplayTab();
   void DrawRecordTab(FfmpegInfo* ffmpeg);
+  void DrawFfmpegBlock(FfmpegInfo* ffmpeg);
   void DrawToolsTab(FfmpegInfo* ffmpeg);
   void DrawHotkeysTab();
   // Text field plus Browse / Default / Open, shared by both output folders.
@@ -120,6 +127,7 @@ class SettingsWindow {
   FfmpegDownloader downloader_;
   Remuxer remuxer_;
   bool probeRequested_ = false;
+  bool cropPickRequested_ = false;
   bool probeBusy_ = false;
   char folderBuffer_[512] = {};
   char ffmpegPathBuffer_[512] = {};
@@ -129,6 +137,7 @@ class SettingsWindow {
   // Index into Hotkeys::items currently being rebound, -1 when idle.
   int captureAction_ = -1;
   const char* const* detectedRange_ = nullptr;
+  double sourceFps_ = 0.0;
 };
 
 }  // namespace cap
