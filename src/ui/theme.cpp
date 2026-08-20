@@ -236,12 +236,22 @@ void LoadUiFont(float sizePixels) {
   cfg.OversampleV = 1;
   cfg.PixelSnapH = false;
 
+  // ImGui's default range stops at the end of Latin-1, which covers the umlauts
+  // but not the punctuation the interface actually uses. An em dash outside the
+  // baked range does not fall back to anything -- it renders as "?", which is
+  // how "— nothing selected —" ended up looking like an error message.
+  static const ImWchar ranges[] = {
+      0x0020, 0x00FF,  // Basic Latin + Latin-1 Supplement
+      0x2010, 0x2027,  // dashes, quotation marks, ellipsis
+      0x20AC, 0x20AC,  // euro sign
+      0,
+  };
+
   for (const wchar_t* rel : candidates) {
     std::wstring path = std::wstring(windir) + rel;
     if (::GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) continue;
     // ImGui takes UTF-8 paths.
-    if (io.Fonts->AddFontFromFileTTF(ToUtf8(path).c_str(), sizePixels, &cfg,
-                                     io.Fonts->GetGlyphRangesDefault())) {
+    if (io.Fonts->AddFontFromFileTTF(ToUtf8(path).c_str(), sizePixels, &cfg, ranges)) {
       return;
     }
   }
