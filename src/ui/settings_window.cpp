@@ -1201,8 +1201,8 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   }
   ImGui::EndDisabled();
   ImGui::SameLine();
-  HelpMarker(T("Automatisch nimmt den besten verfügbaren, Hardware zuerst.",
-               "Automatic takes the best available one, hardware first."));
+  HelpMarker(T("Automatisch: der verträglichste, der hier läuft — H.264 vor H.265 vor AV1, Hardware vor CPU.",
+               "Automatic: the most compatible one that works here — H.264 before H.265 before AV1, hardware before CPU."));
 
   if (!tested) {
     ImGui::TextWrapped(
