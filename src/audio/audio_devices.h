@@ -8,6 +8,8 @@
 // a Windows sound device at all and expose it only as a DirectShow audio input;
 // those are listed here too and are read through a DirectShow graph instead.
 
+#include <mmdeviceapi.h>
+
 #include <string>
 #include <vector>
 
@@ -28,6 +30,14 @@ struct AudioDeviceInfo {
     return DeviceRef{name, id, directShow ? "dshow" : "wasapi"};
   }
 };
+
+// Opens the endpoint a reference names, falling back to the system default.
+// Shared by the passthrough engine and the microphone capture.
+ComPtr<IMMDevice> OpenAudioEndpoint(const AudioDeviceInfo& info, bool capture);
+
+// Raises the calling thread to the "Pro Audio" MMCSS class so the scheduler
+// stops treating it like ordinary work. The handle reverts it on exit.
+HANDLE JoinProAudio();
 
 // `capture` selects recording devices (WASAPI plus DirectShow-only ones),
 // otherwise WASAPI playback endpoints.

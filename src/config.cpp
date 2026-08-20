@@ -290,6 +290,9 @@ json::Value WriteProfile(const Profile& p) {
   aud["avOffsetMs"] = p.audio.avOffsetMs;
   aud["volume"] = p.audio.volume;
   aud["mute"] = p.audio.mute;
+  aud["micEnabled"] = p.audio.micEnabled;
+  aud["micDevice"] = WriteDevice(p.audio.micDevice);
+  aud["micGain"] = p.audio.micGain;
   o["audio"] = aud;
 
   return o;
@@ -326,6 +329,9 @@ Profile ReadProfile(const json::Value& v) {
   p.audio.avOffsetMs = Clamp(a["avOffsetMs"].AsInt(0), -500, 500);
   p.audio.volume = (float)Clamp(a["volume"].AsNumber(1.0), 0.0, 1.0);
   p.audio.mute = a["mute"].AsBool(false);
+  p.audio.micEnabled = a["micEnabled"].AsBool(false);
+  p.audio.micDevice = ReadDevice(a["micDevice"]);
+  p.audio.micGain = (float)Clamp(a["micGain"].AsNumber(1.0), 0.0, 4.0);
 
   return p;
 }

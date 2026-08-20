@@ -55,7 +55,9 @@ void Recorder::Fail(const std::string& message) {
 std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
                                         const EncoderInfo& encoder,
                                         const std::wstring& audioPipe,
-                                        const std::wstring& outFile, int audioRate) const {
+                                        const std::wstring& micPipe,
+                                        const std::wstring& outFile, int audioRate,
+                                        int micRate) const {
   std::wstring cmd;
   cmd += L"-hide_banner -loglevel error -y";
 
@@ -77,8 +79,17 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
     cmd += L" -i \"" + audioPipe + L"\"";
   }
 
+  // Input 2: the microphone, at whatever rate its device runs at. No resampling
+  // here -- ffmpeg is told the rate and does it on the way into AAC.
+  if (micRate > 0) {
+    cmd += L" -f f32le -ar " + std::to_wstring(micRate) + L" -ac 2";
+    cmd += L" -i \"" + micPipe + L"\"";
+  }
+
   cmd += L" -map 0:v";
+  int audioIndex = 0;
   if (audioRate > 0) cmd += L" -map 1:a";
+  if (micRate > 0) cmd += L" -map " + std::to_wstring(audioRate > 0 ? 2 : 1) + L":a";
 
   cmd += L" -c:v " + ToWide(encoder.ffmpegName);
   // 4:2:0 eight bit: the one format every hardware encoder and every player
@@ -94,7 +105,17 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
     cmd += L" -preset " + ToWide(RecordSpeedName((int)settings.speed));
   }
 
-  if (audioRate > 0) cmd += L" -c:a aac -b:a 192k";
+  if (audioRate > 0 || micRate > 0) {
+    cmd += L" -c:a aac -b:a 192k";
+    // Named tracks, so a player and an editor both show which is which instead
+    // of "Audio 1" and "Audio 2".
+    if (audioRate > 0) {
+      cmd += L" -metadata:s:a:" + std::to_wstring(audioIndex++) + L" title=\"Capture\"";
+    }
+    if (micRate > 0) {
+      cmd += L" -metadata:s:a:" + std::to_wstring(audioIndex++) + L" title=\"Microphone\"";
+    }
+  }
 
   cmd += L" \"" + outFile + L"\"";
   return cmd;
@@ -103,8 +124,8 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
 // -------------------------------------------------------------------- start
 
 bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, int width,
-                     int height, double sourceFps, int audioRate, AudioPullFn pullAudio,
-                     std::string* error) {
+                     int height, double sourceFps, const AudioSource& main,
+                     const AudioSource& mic, std::string* error) {
   Stop();
 
   auto fail = [&](const std::string& msg) {
@@ -135,9 +156,11 @@ bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, i
   width_ = width & ~1;
   height_ = height & ~1;
   fps_ = settings.fps > 0.0 ? settings.fps : (sourceFps > 1.0 ? sourceFps : 60.0);
-  audioRate_ = audioRate;
+  audioRate_ = main.active() ? main.sampleRate : 0;
+  micRate_ = mic.active() ? mic.sampleRate : 0;
   frameBytes_ = (size_t)width_ * (size_t)height_ * 4;
-  pullAudio_ = std::move(pullAudio);
+  pullAudio_ = main.pull;
+  pullMic_ = mic.pull;
 
   std::wstring folder = settings.outputFolder.empty() ? DefaultRecordFolder()
                                                       : ToWide(settings.outputFolder);
@@ -161,18 +184,29 @@ bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, i
   }
   ::SetHandleInformation(videoPipe_, HANDLE_FLAG_INHERIT, 0);
 
+  // ffmpeg cannot take a second anonymous pipe -- only stdin is inheritable as a
+  // standard handle -- so every audio track goes through a named pipe it opens
+  // by path.
+  auto makeAudioPipe = [&](const wchar_t* prefix, std::wstring* name) -> HANDLE {
+    *name = std::wstring(L"\\\\.\\pipe\\") + prefix + std::to_wstring(::GetCurrentProcessId());
+    HANDLE h = ::CreateNamedPipeW(name->c_str(), PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED,
+                                  PIPE_TYPE_BYTE | PIPE_WAIT, 1, 1 << 20, 1 << 20, 0, nullptr);
+    return h == INVALID_HANDLE_VALUE ? nullptr : h;
+  };
+
   if (audioRate_ > 0) {
-    // ffmpeg cannot take a second anonymous pipe -- only stdin is inheritable
-    // as a standard handle -- so audio goes through a named pipe it opens by
-    // path.
-    audioPipeName_ = L"\\\\.\\pipe\\capview_audio_" + std::to_wstring(::GetCurrentProcessId());
-    audioPipe_ = ::CreateNamedPipeW(audioPipeName_.c_str(),
-                                    PIPE_ACCESS_OUTBOUND | FILE_FLAG_OVERLAPPED,
-                                    PIPE_TYPE_BYTE | PIPE_WAIT, 1, 1 << 20, 1 << 20, 0, nullptr);
-    if (audioPipe_ == INVALID_HANDLE_VALUE) {
-      audioPipe_ = nullptr;
+    audioPipe_ = makeAudioPipe(L"capview_audio_", &audioPipeName_);
+    if (!audioPipe_) {
       ::CloseHandle(videoRead);
       return fail(T("Audiopipe konnte nicht erstellt werden.", "Could not create the audio pipe."));
+    }
+  }
+  if (micRate_ > 0) {
+    micPipe_ = makeAudioPipe(L"capview_mic_", &micPipeName_);
+    if (!micPipe_) {
+      ::CloseHandle(videoRead);
+      return fail(T("Mikrofonpipe konnte nicht erstellt werden.",
+                    "Could not create the microphone pipe."));
     }
   }
 
@@ -196,8 +230,8 @@ bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, i
     si.hStdError = ::GetStdHandle(STD_ERROR_HANDLE);
   }
 
-  const std::wstring args =
-      BuildCommandLine(settings, *encoder, audioPipeName_, outFile, audioRate_);
+  const std::wstring args = BuildCommandLine(settings, *encoder, audioPipeName_, micPipeName_,
+                                            outFile, audioRate_, micRate_);
   std::wstring commandLine = L"\"" + ToWide(ffmpeg.path) + L"\" " + args;
   CAP_LOG("ffmpeg %s", ToUtf8(args).c_str());
 
@@ -238,7 +272,12 @@ bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, i
 
   running_.store(true, std::memory_order_relaxed);
   if (stderrPipe_) stderrThread_ = std::thread(&Recorder::StderrThread, this);
-  if (audioRate_ > 0) audioThread_ = std::thread(&Recorder::AudioThread, this);
+  if (audioRate_ > 0) {
+    audioThread_ = std::thread(&Recorder::AudioThread, this, audioPipe_, pullAudio_, true);
+  }
+  if (micRate_ > 0) {
+    micThread_ = std::thread(&Recorder::AudioThread, this, micPipe_, pullMic_, false);
+  }
   videoThread_ = std::thread(&Recorder::VideoThread, this);
 
   CAP_LOG("Aufnahme gestartet: %s, %dx%d @ %.3f fps, %s", ToUtf8(outFile).c_str(), width_,
@@ -251,6 +290,7 @@ void Recorder::Stop() {
 
   if (videoThread_.joinable()) videoThread_.join();
   if (audioThread_.joinable()) audioThread_.join();
+  if (micThread_.joinable()) micThread_.join();
 
   // Closing the pipes is what tells ffmpeg the streams ended. It then writes
   // the container index and exits -- an MP4 killed before that point has no
@@ -262,6 +302,10 @@ void Recorder::Stop() {
   if (audioPipe_) {
     ::CloseHandle(audioPipe_);
     audioPipe_ = nullptr;
+  }
+  if (micPipe_) {
+    ::CloseHandle(micPipe_);
+    micPipe_ = nullptr;
   }
 
   // The stderr reader ends by itself once the child closes its end, which
@@ -422,7 +466,7 @@ void Recorder::VideoThread() {
   }
 }
 
-void Recorder::AudioThread() {
+void Recorder::AudioThread(HANDLE pipe, AudioPullFn pull, bool countsAsClock) {
   // Wait for ffmpeg to open its end. Overlapped, so a ffmpeg that never starts
   // cannot leave this thread stuck and hang the whole shutdown.
   HANDLE event = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -431,7 +475,7 @@ void Recorder::AudioThread() {
   OVERLAPPED ov = {};
   ov.hEvent = event;
   bool connected = false;
-  if (::ConnectNamedPipe(audioPipe_, &ov)) {
+  if (::ConnectNamedPipe(pipe, &ov)) {
     connected = true;
   } else if (::GetLastError() == ERROR_PIPE_CONNECTED) {
     connected = true;
@@ -444,14 +488,14 @@ void Recorder::AudioThread() {
     }
   }
   if (!connected) {
-    ::CancelIo(audioPipe_);
+    ::CancelIo(pipe);
     ::CloseHandle(event);
     return;
   }
 
   std::vector<float> buffer(4096 * 2);
   while (running_.load(std::memory_order_relaxed)) {
-    const size_t got = pullAudio_ ? pullAudio_(buffer.data(), 4096) : 0;
+    const size_t got = pull ? pull(buffer.data(), 4096) : 0;
     if (got == 0) {
       ::Sleep(2);
       continue;
@@ -462,20 +506,20 @@ void Recorder::AudioThread() {
     OVERLAPPED wov = {};
     wov.hEvent = event;
     DWORD wrote = 0;
-    if (!::WriteFile(audioPipe_, buffer.data(), (DWORD)bytes, &wrote, &wov)) {
+    if (!::WriteFile(pipe, buffer.data(), (DWORD)bytes, &wrote, &wov)) {
       if (::GetLastError() != ERROR_IO_PENDING) {
         Fail(T("Audiopipe abgebrochen.", "The audio pipe broke."));
         running_.store(false, std::memory_order_relaxed);
         break;
       }
-      if (!::GetOverlappedResult(audioPipe_, &wov, &wrote, TRUE)) {
+      if (!::GetOverlappedResult(pipe, &wov, &wrote, TRUE)) {
         Fail(T("Audiopipe abgebrochen.", "The audio pipe broke."));
         running_.store(false, std::memory_order_relaxed);
         break;
       }
     }
     bytesWritten_.fetch_add(wrote, std::memory_order_relaxed);
-    audioFramesWritten_.fetch_add(got, std::memory_order_relaxed);
+    if (countsAsClock) audioFramesWritten_.fetch_add(got, std::memory_order_relaxed);
   }
 
   ::CloseHandle(event);

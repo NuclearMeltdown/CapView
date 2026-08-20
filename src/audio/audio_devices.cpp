@@ -1,5 +1,8 @@
 #include "audio/audio_devices.h"
 
+// avrt.h has no includes of its own and needs windows.h and SAL first.
+#include <avrt.h>
+
 #include <mmdeviceapi.h>
 // Must come after mmdeviceapi.h: it needs the PROPERTYKEY macros pulled in there.
 #include <functiondiscoverykeys_devpkey.h>
@@ -290,6 +293,28 @@ bool FindEmbeddedAudioDevice(const VideoDeviceInfo& video, AudioDeviceInfo* out)
           best->name.c_str(), best->directShow ? "DirectShow" : "WASAPI", bestScore);
   if (out) *out = *best;
   return true;
+}
+
+ComPtr<IMMDevice> OpenAudioEndpoint(const AudioDeviceInfo& info, bool capture) {
+  ComPtr<IMMDeviceEnumerator> enumerator;
+  if (FAILED(::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                IID_PPV_ARGS(&enumerator)))) {
+    return nullptr;
+  }
+  ComPtr<IMMDevice> device;
+  if (!info.id.empty()) {
+    if (SUCCEEDED(enumerator->GetDevice(ToWide(info.id).c_str(), &device))) return device;
+  }
+  if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(capture ? eCapture : eRender, eConsole,
+                                                    &device))) {
+    return device;
+  }
+  return nullptr;
+}
+
+HANDLE JoinProAudio() {
+  DWORD taskIndex = 0;
+  return ::AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex);
 }
 
 }  // namespace cap

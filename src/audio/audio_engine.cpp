@@ -15,30 +15,6 @@ const REFERENCE_TIME kMsToRefTime = 10000;
 // known and the render thread can read it without synchronising on that.
 const size_t kRingCapacityFrames = 96000;
 
-ComPtr<IMMDevice> OpenEndpoint(const AudioDeviceInfo& info, bool capture) {
-  ComPtr<IMMDeviceEnumerator> enumerator;
-  if (FAILED(::CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                                IID_PPV_ARGS(&enumerator)))) {
-    return nullptr;
-  }
-  ComPtr<IMMDevice> device;
-  if (!info.id.empty()) {
-    if (SUCCEEDED(enumerator->GetDevice(ToWide(info.id).c_str(), &device))) return device;
-  }
-  if (SUCCEEDED(enumerator->GetDefaultAudioEndpoint(capture ? eCapture : eRender, eConsole,
-                                                    &device))) {
-    return device;
-  }
-  return nullptr;
-}
-
-// Raises the thread to the "Pro Audio" MMCSS class so the scheduler stops
-// treating it like ordinary work. Returns a handle to revert on exit.
-HANDLE JoinProAudio() {
-  DWORD taskIndex = 0;
-  return ::AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex);
-}
-
 }  // namespace
 
 // ---------------------------------------------------------------- AudioEngine
@@ -164,6 +140,17 @@ void AudioEngine::Stop() {
 }
 
 void AudioEngine::OnCapturedAudio(const float* interleaved, size_t frames) {
+  // Peak with decay, for the level meter in the settings.
+  if (interleaved && frames > 0) {
+    float blockPeak = 0.0f;
+    for (size_t i = 0; i < frames * 2; ++i) {
+      const float magnitude = std::abs(interleaved[i]);
+      if (magnitude > blockPeak) blockPeak = magnitude;
+    }
+    const float decayed = inputPeak_.load(std::memory_order_relaxed) * 0.80f;
+    inputPeak_.store(std::max(blockPeak, decayed), std::memory_order_relaxed);
+  }
+
   ring_.Write(interleaved, frames);
   if (tapEnabled_.load(std::memory_order_relaxed)) {
     tapRing_.Write(interleaved, frames);
@@ -231,7 +218,7 @@ void AudioEngine::CaptureThread(AudioDeviceInfo device) {
     if (mmcss) ::AvRevertMmThreadCharacteristics(mmcss);
   };
 
-  ComPtr<IMMDevice> endpoint = OpenEndpoint(device, true);
+  ComPtr<IMMDevice> endpoint = OpenAudioEndpoint(device, true);
   if (!endpoint) {
     Fail("Audioeingang konnte nicht geöffnet werden");
     cleanup();
@@ -337,7 +324,7 @@ void AudioEngine::RenderThread(AudioDeviceInfo device, bool exclusive) {
     if (mmcss) ::AvRevertMmThreadCharacteristics(mmcss);
   };
 
-  ComPtr<IMMDevice> endpoint = OpenEndpoint(device, false);
+  ComPtr<IMMDevice> endpoint = OpenAudioEndpoint(device, false);
   if (!endpoint) {
     Fail("Wiedergabegerät konnte nicht geöffnet werden");
     cleanup();

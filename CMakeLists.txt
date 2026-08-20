@@ -26,6 +26,7 @@ add_executable(CapView WIN32
   src/audio/audio_engine.cpp
   src/audio/audio_ring.cpp
   src/audio/dshow_audio_capture.cpp
+  src/audio/mic_capture.cpp
   src/audio/pcm.cpp
   src/record/ffmpeg_download.cpp
   src/record/ffmpeg_locator.cpp
@@ -98,7 +99,7 @@ target_include_directories(capview_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/sr
 target_compile_definitions(capview_probe PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(capview_probe PRIVATE
-  strmiids ole32 oleaut32 uuid dxguid user32 advapi32 shlwapi propsys
+  strmiids ole32 oleaut32 uuid dxguid user32 advapi32 shlwapi propsys avrt
   mfplat mf mfuuid mfreadwrite)
 if(MSVC)
   target_compile_options(capview_probe PRIVATE /W3 /permissive- /Zc:__cplusplus /utf-8)

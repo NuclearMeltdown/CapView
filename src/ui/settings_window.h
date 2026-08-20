@@ -49,6 +49,13 @@ class SettingsWindow {
 
   // Frame rate the card is currently delivering; caps the recording rate.
   void SetSourceFps(double fps) { sourceFps_ = fps; }
+
+  // Current input levels, 0..1, for the meters on the audio tab.
+  void SetLevels(float input, float mic, bool micRunning) {
+    inputPeak_ = input;
+    micPeak_ = mic;
+    micRunning_ = micRunning;
+  }
   bool isOpen() const { return open_; }
 
   // `liveCaps` are the capabilities of the device that is currently running, so
@@ -138,6 +145,9 @@ class SettingsWindow {
   int captureAction_ = -1;
   const char* const* detectedRange_ = nullptr;
   double sourceFps_ = 0.0;
+  float inputPeak_ = 0.0f;
+  float micPeak_ = 0.0f;
+  bool micRunning_ = false;
 };
 
 }  // namespace cap

@@ -80,6 +80,11 @@ class AudioEngine {
   // Counts how often the tap ring overflowed, i.e. the recorder fell behind.
   uint64_t tapOverruns() const { return tapRing_.overruns(); }
 
+  // Loudest sample seen recently on the input, 0..1, with a decay. Measured
+  // before volume and mute, so it shows what the card is delivering rather than
+  // how loud you have it.
+  float inputPeak() const { return inputPeak_.load(std::memory_order_relaxed); }
+
   bool running() const { return running_.load(std::memory_order_relaxed); }
   // Set when a device disappeared; the app can then offer a restart.
   bool failed() const { return failed_.load(std::memory_order_relaxed); }
@@ -110,6 +115,7 @@ class AudioEngine {
   mutable std::mutex statsMutex_;
   std::string lastError_;
 
+  std::atomic<float> inputPeak_{0.0f};
   std::atomic<float> volume_{1.0f};
   std::atomic<bool> mute_{false};
   std::atomic<int> targetMs_{30};

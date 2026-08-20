@@ -36,12 +36,17 @@ Colour range and matrix are measured from the picture and can be overridden.
 
 **Audio** — the card's embedded audio or any Windows input, played out over
 WASAPI with a configurable buffer, optional exclusive mode, and an A/V offset.
-Drift between the two clocks is corrected continuously.
+Drift between the two clocks is corrected continuously. Level meters on both
+inputs, so you can see there is signal before you record ten minutes of silence.
+
+**Microphone** — an optional second input that goes into the recording as its
+own track, never mixed in and never played back. Its own gain, on top of
+whatever Windows is doing.
 
 **Recording** — H.264, H.265 or AV1 through NVENC, QuickSync, AMF or x264/x265,
 via ffmpeg. Records the picture at source resolution; window size is irrelevant.
-Audio is the master clock, so the result is constant frame rate and stays in
-sync (measured: 1 ms drift over 15 seconds).
+The capture audio is the master clock, so the result is constant frame rate and
+stays in sync (measured: 1 ms drift over 15 seconds).
 
 **Screenshots** — PNG or JPEG at source resolution, without the interface,
 written through Windows' own imaging stack. No ffmpeg needed.
@@ -80,9 +85,14 @@ Dear ImGui is vendored in `third_party/`.
 build.bat
 ```
 
-The result is a single self-contained `build\bin\CapView.exe`, about 1.5 MB,
-statically linked against the CRT. Settings live in `CapView.json` next to it;
-nothing is written to the registry.
+The result is a single self-contained `CapView.exe` in the repository root,
+about 1.6 MB, statically linked against the CRT. Everything else the build
+produced is deleted afterwards, so what is left is the program and nothing
+else. Settings live in `CapView.json` next to it; nothing is written to the
+registry.
+
+`build.bat keep` leaves the build tree in place for incremental rebuilds, and
+`build.bat debug` builds a debug configuration.
 
 Or take a build from [Releases](../../releases).
 
