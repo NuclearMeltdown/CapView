@@ -724,7 +724,7 @@ void App::StartRecording() {
 
   const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.croppedWidth(),
                                   renderer_.croppedHeight(), format.fps, mainTrack, micTrack,
-                                  &error);
+                                  config_.active().audio.micTrackMode, &error);
 
   if (!ok) {
     renderer_.SetReadbackEnabled(false);
