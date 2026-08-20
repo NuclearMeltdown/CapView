@@ -91,7 +91,7 @@ const char* ScreenshotFormatName(int i) {
 
 const char* RecordEncoderName(int i) {
   // Only the first entry differs between languages; the rest are product names.
-  static const char* names[10] = {
+  static const char* names[kRecordEncoderCount] = {
       "",
       "H.264 (CPU, x264)",
       "H.264 (NVIDIA NVENC)",
@@ -102,9 +102,15 @@ const char* RecordEncoderName(int i) {
       "AV1 (NVIDIA NVENC, RTX 40+)",
       "AV1 (Intel Arc)",
       "AV1 (AMD RDNA 3+)",
+      "",
   };
-  i = Pick(i, 10);
-  if (i == 0) return T("Automatisch", "Automatic");
+  i = Pick(i, kRecordEncoderCount);
+  if (i == (int)RecordEncoder::Auto) {
+    return T("Automatisch — überall abspielbar", "Automatic — plays anywhere");
+  }
+  if (i == (int)RecordEncoder::AutoEfficient) {
+    return T("Automatisch — kleinere Dateien", "Automatic — smaller files");
+  }
   return names[i];
 }
 
@@ -482,7 +488,8 @@ bool Config::Load(std::string* error) {
   const json::Value& r = root["record"];
   record.outputFolder = r["outputFolder"].AsString();
   record.container = ReadEnum<RecordContainer>(r, "container", 2, RecordContainer::Mkv);
-  record.encoder = ReadEnum<RecordEncoder>(r, "encoder", 10, RecordEncoder::Auto);
+  record.encoder =
+      ReadEnum<RecordEncoder>(r, "encoder", kRecordEncoderCount, RecordEncoder::Auto);
   record.speed = ReadEnum<RecordSpeed>(r, "speed", 5, RecordSpeed::VeryFast);
   record.bitrateKbps = Clamp(r["bitrateKbps"].AsInt(20000), 500, 500000);
   record.fps = Clamp(r["fps"].AsNumber(0.0), 0.0, 480.0);

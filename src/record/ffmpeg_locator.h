@@ -34,12 +34,19 @@ struct FfmpegInfo {
   std::vector<EncoderInfo> encoders;
 
   const EncoderInfo* Find(RecordEncoder id) const;
-  // What RecordEncoder::Auto resolves to: the first entry of the fixed
-  // preference order that passed the test. That order is compatibility first
-  // -- H.264 before H.265 before AV1 -- with hardware ahead of the CPU
-  // encoders. Not "best": AV1 would win on quality per bit, and is skipped on
-  // purpose because a file nobody can play is not a good default.
-  const EncoderInfo* BestAvailable() const;
+  // What the automatic modes resolve to: the first entry of a fixed preference
+  // order that passed the test.
+  //
+  //   compatibility  H.264, then H.265, then AV1 -- hardware ahead of CPU
+  //   efficiency     AV1, then H.265, then H.264 -- hardware ahead of CPU
+  //
+  // There is no scoring. Which order applies is the user's choice, because the
+  // two goals genuinely conflict: AV1 is the better codec and the one an older
+  // television cannot play.
+  const EncoderInfo* BestAvailable(bool preferEfficiency = false) const;
+
+  // Resolves either automatic mode, or looks up a specific encoder.
+  const EncoderInfo* Resolve(RecordEncoder wanted) const;
   bool AnyAvailable() const;
 };
 
