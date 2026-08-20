@@ -15,6 +15,7 @@ Windows version reads, so there is no Pillow dependency to install.
 import math
 import os
 import struct
+import zlib
 
 ACCENT = (0x8B, 0x5C, 0xF6)      # violet, matching the default accent colour
 ACCENT_BRIGHT = (0xC4, 0xA6, 0xFF)
@@ -172,6 +173,34 @@ def to_bmp_image(pixels, size):
     return bytes(header) + bytes(body) + mask
 
 
+def write_png(pixels, size, path):
+    """Writes 8-bit RGBA PNG. Standard library only, same as the rest of this
+    file: the README needs a format GitHub will render, and .ico is not one."""
+    raw = bytearray()
+    for y in range(size):
+        raw.append(0)  # filter type 0 for every scanline
+        for x in range(size):
+            r, g, b, a = pixels[y * size + x]
+            raw += bytes((
+                int(round(min(max(r, 0.0), 255.0))),
+                int(round(min(max(g, 0.0), 255.0))),
+                int(round(min(max(b, 0.0), 255.0))),
+                int(round(min(max(a * 255.0, 0.0), 255.0))),
+            ))
+
+    def chunk(tag, data):
+        return (struct.pack(">I", len(data)) + tag + data +
+                struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    header = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)  # 8-bit RGBA
+    blob = (b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", header) +
+            chunk(b"IDAT", zlib.compress(bytes(raw), 9)) +
+            chunk(b"IEND", b""))
+    with open(path, "wb") as f:
+        f.write(blob)
+
+
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_dir = os.path.join(root, "res")
@@ -179,9 +208,22 @@ def main():
     out_path = os.path.join(out_dir, "capview.ico")
 
     images = []
+    largest = None
     for size in SIZES:
         print("  rendering {0}x{0}".format(size))
-        images.append((size, to_bmp_image(render(size), size)))
+        pixels = render(size)
+        if size == SIZES[-1]:
+            largest = pixels
+        images.append((size, to_bmp_image(pixels, size)))
+
+    # The same mark as a PNG, for the README. Transparent background, so it
+    # reads on both the light and the dark GitHub theme.
+    if largest is not None:
+        docs_dir = os.path.join(root, "docs")
+        os.makedirs(docs_dir, exist_ok=True)
+        png_path = os.path.join(docs_dir, "icon.png")
+        write_png(largest, SIZES[-1], png_path)
+        print("  wrote {0}".format(png_path))
 
     offset = 6 + 16 * len(images)
     directory = bytearray(struct.pack("<HHH", 0, 1, len(images)))
