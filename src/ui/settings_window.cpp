@@ -54,6 +54,41 @@ bool ComboEnum(const char* label, int* value, int count, NameFn name, NameFn hel
   return changed;
 }
 
+// A level bar. Linear sample values crowd everything useful into the top of the
+// bar, so the scale is decibels: -60 dB at the left, 0 dB at the right, with the
+// last sixth coloured because that is where clipping lives.
+void LevelMeter(const char* id, float peak, bool active) {
+  const float height = ImGui::GetFrameHeight() * 0.55f;
+  const ImVec2 size(ImGui::CalcItemWidth(), height);
+  const ImVec2 pos = ImGui::GetCursorScreenPos();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const ImGuiStyle& style = ImGui::GetStyle();
+
+  dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y),
+                    ImGui::GetColorU32(ImGuiCol_FrameBg), style.FrameRounding);
+
+  if (active && peak > 0.0f) {
+    const float db = 20.0f * std::log10(std::max(peak, 1e-5f));
+    const float norm = Clamp((db + 60.0f) / 60.0f, 0.0f, 1.0f);
+    const bool hot = db > -6.0f;
+    dl->AddRectFilled(pos, ImVec2(pos.x + size.x * norm, pos.y + size.y),
+                      hot ? IM_COL32(230, 150, 60, 255) : IM_COL32(90, 200, 120, 255),
+                      style.FrameRounding);
+  }
+
+  // -6 dB mark, the usual "do not go past this" line.
+  const float markX = pos.x + size.x * (54.0f / 60.0f);
+  dl->AddLine(ImVec2(markX, pos.y), ImVec2(markX, pos.y + size.y), IM_COL32(255, 255, 255, 70));
+
+  ImGui::Dummy(size);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip(active && peak > 0.0f ? "%.1f dB" : T("kein Signal", "no signal"),
+                      20.0f * std::log10(std::max(peak, 1e-5f)));
+  }
+  ImGui::SameLine();
+  ImGui::TextUnformatted(id);
+}
+
 std::string FpsLabel(double fps) {
   std::string s = Format("%.2f", fps);
   if (CurrentLanguage() == Language::German) {
@@ -780,6 +815,60 @@ void SettingsWindow::DrawAudioTab() {
     audio.volume = Clamp(percent / 100.0f, 0.0f, 1.0f);
   }
   ImGui::Checkbox(T("Stumm", "Muted"), &audio.mute);
+
+  ImGui::Spacing();
+  ImGui::SetNextItemWidth(-260.0f);
+  LevelMeter(T("Eingangspegel", "Input level"), inputPeak_, true);
+  ImGui::SameLine();
+  HelpMarker(T("Vor Lautstärke und Stumm. Zeigt, was die Karte liefert.",
+               "Before volume and mute. Shows what the card delivers."));
+
+  // ---- microphone ----
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Mikrofon", "Microphone"));
+  ImGui::TextWrapped(
+      T("Kommt als eigene Spur in die Aufnahme und wird nicht mitgehört — sonst hättest du "
+        "dich selbst im Kopfhörer.",
+        "Recorded as its own track and never played back — otherwise you would hear yourself "
+        "in your headphones."));
+  ImGui::Spacing();
+
+  ImGui::Checkbox(T("Mikrofon aufnehmen", "Record a microphone"), &audio.micEnabled);
+
+  ImGui::BeginDisabled(!audio.micEnabled);
+  const char* micPreview = audio.micDevice.name.empty()
+                               ? T("Systemstandard", "System default")
+                               : audio.micDevice.name.c_str();
+  ImGui::SetNextItemWidth(-1.0f);
+  if (ImGui::BeginCombo("##micdev", micPreview)) {
+    if (ImGui::Selectable(T("Systemstandard", "System default"), audio.micDevice.empty())) {
+      audio.micDevice = DeviceRef{};
+    }
+    for (const AudioDeviceInfo& d : audioInputs_) {
+      // DirectShow inputs are capture card audio, not microphones.
+      if (d.directShow) continue;
+      const bool selected = (d.id == audio.micDevice.id);
+      if (ImGui::Selectable(d.name.c_str(), selected)) audio.micDevice = d.ToRef();
+      if (selected) ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
+
+  ImGui::SetNextItemWidth(-260.0f);
+  float micDb = 20.0f * std::log10(std::max(audio.micGain, 0.01f));
+  if (ImGui::SliderFloat(T("Verstärkung", "Gain"), &micDb, -20.0f, 12.0f, "%+.1f dB")) {
+    audio.micGain = std::pow(10.0f, micDb / 20.0f);
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Zusätzlich zur Windows-Einstellung, wirkt nur auf die Aufnahme.",
+               "On top of the Windows setting, affects the recording only."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  LevelMeter(T("Mikrofonpegel", "Microphone level"), micPeak_, micRunning_);
+  if (audio.micEnabled && !micRunning_) {
+    ImGui::TextDisabled(T("Wird geöffnet ...", "Opening ..."));
+  }
+  ImGui::EndDisabled();
 }
 
 // --------------------------------------------------------------- display tab

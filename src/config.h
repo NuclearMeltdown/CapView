@@ -151,6 +151,13 @@ struct AudioSettings {
   int avOffsetMs = 0;      // >0 delays audio, <0 delays video
   float volume = 1.0f;     // 0..1 linear
   bool mute = false;
+
+  // A second input that only goes into the recording, as its own track. Never
+  // played back -- monitoring your own microphone through the same speakers the
+  // game comes out of is a feedback loop, not a feature.
+  bool micEnabled = false;
+  DeviceRef micDevice;   // empty = system default recording device
+  float micGain = 1.0f;  // linear, 0..4 (up to +12 dB), independent of Windows
 };
 
 // Recording is deliberately thin: it writes what the viewer shows, at the

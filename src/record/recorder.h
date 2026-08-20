@@ -53,9 +53,20 @@ class Recorder {
   Recorder(const Recorder&) = delete;
   Recorder& operator=(const Recorder&) = delete;
 
-  // `audioRate` of 0 means no audio: the wall clock becomes the master instead.
+  // One audio source: the sample rate it delivers, and where to pull from. A
+  // rate of 0 means the source is not in use.
+  struct AudioSource {
+    int sampleRate = 0;
+    AudioPullFn pull;
+    bool active() const { return sampleRate > 0 && pull != nullptr; }
+  };
+
+  // `main` is the sound you hear, and its sample count is the master clock; a
+  // rate of 0 there hands the clock to the wall instead. `mic` is optional and
+  // becomes a second track -- never mixed in, so it stays separable later.
   bool Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, int width, int height,
-             double sourceFps, int audioRate, AudioPullFn pullAudio, std::string* error);
+             double sourceFps, const AudioSource& main, const AudioSource& mic,
+             std::string* error);
   void Stop();
 
   bool recording() const { return running_.load(std::memory_order_relaxed); }
@@ -72,15 +83,17 @@ class Recorder {
 
  private:
   void VideoThread();
-  void AudioThread();
+  // `countsAsClock` is true only for the main track, whose written frame count
+  // drives the video timeline.
+  void AudioThread(HANDLE pipe, AudioPullFn pull, bool countsAsClock);
   void StderrThread();
   void Fail(const std::string& message);
   bool WriteAll(HANDLE pipe, const uint8_t* data, size_t size);
   int PickWriteSlotLocked() const;
 
   std::wstring BuildCommandLine(const RecordSettings& settings, const EncoderInfo& encoder,
-                                const std::wstring& audioPipe, const std::wstring& outFile,
-                                int audioRate) const;
+                                const std::wstring& audioPipe, const std::wstring& micPipe,
+                                const std::wstring& outFile, int audioRate, int micRate) const;
 
   std::atomic<bool> running_{false};
   std::atomic<bool> failed_{false};
@@ -89,12 +102,17 @@ class Recorder {
   HANDLE videoPipe_ = nullptr;  // our write end of the child's stdin
   HANDLE audioPipe_ = nullptr;  // named pipe, our end
   std::wstring audioPipeName_;
+  HANDLE micPipe_ = nullptr;
+  std::wstring micPipeName_;
 
   std::thread videoThread_;
   std::thread audioThread_;
+  std::thread micThread_;
   std::thread stderrThread_;
   HANDLE stderrPipe_ = nullptr;  // our read end of the child's stderr
   AudioPullFn pullAudio_;
+  AudioPullFn pullMic_;
+  int micRate_ = 0;
 
   int width_ = 0;
   int height_ = 0;

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "audio/audio_engine.h"
+#include "audio/mic_capture.h"
 #include "capture/video_capture.h"
 #include "common.h"
 #include "config.h"
@@ -105,6 +106,15 @@ class App {
   // Grabs the next rendered frame and writes it to disk.
   void RequestScreenshot() { screenshotPending_ = true; }
   void WriteScreenshot();
+  // Starts or stops the microphone to match the settings and what is going on.
+  // `aboutToRecord` starts it for a recording that has not begun yet -- the
+  // sample rate has to be known before ffmpeg is given its command line.
+  void SyncMicrophone(bool aboutToRecord = false);
+  // What SyncMicrophone last acted on, so a failure is reported once instead of
+  // once per frame. Cleared when the settings change.
+  DeviceRef micApplied_;
+  bool micAttempted_ = false;
+  bool micFailed_ = false;
   void BeginCropPick();
   void EndCropPick(bool apply);
   void DrawCropPicker();
@@ -141,6 +151,7 @@ class App {
   VideoRenderer renderer_;
   VideoCapture capture_;
   AudioEngine audio_;
+  MicCapture mic_;
   SettingsWindow settings_;
   FrameDelayLine delayLine_;
   Recorder recorder_;
