@@ -65,6 +65,13 @@ const char* ColorMatrixName(int i) {
   return T(de[i], en[i]);
 }
 
+const char* StatsDetailName(int i) {
+  static const char* de[3] = {"Kompakt", "Normal", "Vollständig"};
+  static const char* en[3] = {"Compact", "Normal", "Full"};
+  i = Pick(i, 3);
+  return T(de[i], en[i]);
+}
+
 const char* RecordContainerName(int i) {
   static const char* names[2] = {"MKV (Matroska)", "MP4"};
   return names[Pick(i, 2)];
@@ -447,6 +454,7 @@ bool Config::Load(std::string* error) {
   app.hideCursorFullscreen = a["hideCursorFullscreen"].AsBool(true);
   app.preventSleep = a["preventSleep"].AsBool(true);
   app.showStats = a["showStats"].AsBool(false);
+  app.statsDetail = ReadEnum<StatsDetail>(a, "statsDetail", 3, StatsDetail::Compact);
   app.logToFile = a["logToFile"].AsBool(false);
   app.windowX = a["windowX"].AsInt(-1);
   app.windowY = a["windowY"].AsInt(-1);
@@ -521,6 +529,7 @@ std::string Config::Serialize() const {
   a["hideCursorFullscreen"] = app.hideCursorFullscreen;
   a["preventSleep"] = app.preventSleep;
   a["showStats"] = app.showStats;
+  a["statsDetail"] = (int)app.statsDetail;
   a["logToFile"] = app.logToFile;
   a["windowX"] = app.windowX;
   a["windowY"] = app.windowY;

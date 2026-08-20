@@ -32,6 +32,10 @@ enum class AudioSource { Embedded, Manual, None };
 
 enum class OsdCorner { TopLeft, TopRight, BottomLeft, BottomRight };
 
+// How much of the statistics panel is shown. The full panel is a wall of text
+// to read while playing, so the useful numbers come first and the rest is opt in.
+enum class StatsDetail { Compact, Normal, Full };
+
 enum class RecordContainer { Mkv, Mp4 };
 
 // PNG is lossless and the sane default for a capture card: the point of a still
@@ -60,6 +64,7 @@ const char* AspectName(int index);
 const char* ColorRangeName(int index);
 const char* ColorMatrixName(int index);
 const char* OsdCornerName(int index);
+const char* StatsDetailName(int index);
 const char* RecordContainerName(int index);
 const char* ScreenshotFormatName(int index);
 const char* RecordEncoderName(int index);
@@ -191,6 +196,7 @@ struct AppSettings {
   bool hideCursorFullscreen = true;
   bool preventSleep = true;
   bool showStats = false;
+  StatsDetail statsDetail = StatsDetail::Compact;
   bool logToFile = false;
 
   // Where the volume readout appears when it changes.

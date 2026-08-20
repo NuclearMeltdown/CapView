@@ -30,9 +30,9 @@ not advertise but does support (the classic "1080p60 shows up as 1080p30" case)
 can be forced.
 
 **Picture** — nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear
-scaling, adaptive sharpening, bob deinterlacing, crop, aspect override,
-integer scaling. Colour range and matrix are detected from the picture itself
-and can be overridden.
+scaling, adaptive sharpening, bob deinterlacing, aspect override, integer
+scaling. Crop edges are dragged on the picture itself rather than typed in.
+Colour range and matrix are measured from the picture and can be overridden.
 
 **Audio** — the card's embedded audio or any Windows input, played out over
 WASAPI with a configurable buffer, optional exclusive mode, and an A/V offset.
@@ -64,6 +64,9 @@ bundle. Set one up per console, switch with Ctrl+1…9.
 | `+` / `-` or mouse wheel | Volume |
 | Ctrl+1 … Ctrl+9 | Switch profile |
 | Right click | Menu |
+
+Statistics come in three levels: frame rates and frame age, plus format and
+audio, plus everything.
 
 Everything except Esc, the profile digits and Alt+F4 can be rebound under
 *Settings → Keys*.

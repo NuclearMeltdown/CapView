@@ -56,16 +56,27 @@ void DrawStatsPanel(const OverlayStats& s) {
     return;
   }
 
+  // Compact is what you want while playing: is it running at rate, and how old
+  // is the picture. Everything else is diagnosis, and diagnosis can wait until
+  // you go looking for it.
+  const bool normal = s.detail != StatsDetail::Compact;
+  const bool full = s.detail == StatsDetail::Full;
+
   if (ImGui::BeginTable("statstable", 2, ImGuiTableFlags_SizingFixedFit)) {
-    Row(T("Profil", "Profile"), s.profileName);
-    if (!s.deviceName.empty()) Row(T("Gerät", "Device"), s.deviceName);
-    if (!s.inputName.empty()) Row(T("Eingang", "Input"), s.inputName);
+    if (full) {
+      Row(T("Profil", "Profile"), s.profileName);
+      if (!s.deviceName.empty()) Row(T("Gerät", "Device"), s.deviceName);
+      if (!s.inputName.empty()) Row(T("Eingang", "Input"), s.inputName);
+    }
 
     if (s.format.valid()) {
-      std::string src = Format("%dx%d  %s", s.format.width, s.format.height,
-                               s.format.subtypeLabel.c_str());
-      if (s.format.interlaced) src += "  interlaced";
-      Row(T("Quelle", "Source"), src);
+      if (normal) {
+        std::string src = Format("%dx%d  %s", s.format.width, s.format.height,
+                                 s.format.subtypeLabel.c_str());
+        if (s.format.interlaced) src += "  interlaced";
+        Row(T("Quelle", "Source"), src);
+        if (!s.colorInfo.empty()) Row(T("Farbe", "Colour"), s.colorInfo);
+      }
       Row(T("Quellrate", "Source rate"),
           Decimal(s.sink.sourceFps, 2) + T(" fps  (gemeldet ", " fps  (reported ") +
               Decimal(s.format.fps, 2) + ")");
@@ -73,40 +84,50 @@ void DrawStatsPanel(const OverlayStats& s) {
       Row(T("Quelle", "Source"), "—");
     }
 
-    Row(T("Anzeige", "Display"),
-        Format("%dx%d  %s", s.displayWidth, s.displayHeight, s.filterName));
+    if (normal) {
+      Row(T("Anzeige", "Display"),
+          Format("%dx%d  %s", s.displayWidth, s.displayHeight, s.filterName));
+    }
     Row(T("Ausgabe", "Output"),
         Decimal(s.presentFps, 1) + (s.vsync ? T(" fps  VSync an", " fps  VSync on")
                                             : T(" fps  VSync aus", " fps  VSync off")) +
             ((!s.vsync && s.tearing) ? T(", Tearing erlaubt", ", tearing allowed") : ""));
-    if (s.deinterlacing) Row(T("Halbbilder", "Fields"), T("Bob aktiv", "bob active"));
+    if (normal && s.deinterlacing) Row(T("Halbbilder", "Fields"), T("Bob aktiv", "bob active"));
 
-    Row(T("Bilder", "Frames"),
-        Format(T("%llu angezeigt, %llu verworfen", "%llu shown, %llu dropped"),
-               (unsigned long long)s.sink.displayed, (unsigned long long)s.sink.dropped));
+    if (full) {
+      Row(T("Bilder", "Frames"),
+          Format(T("%llu angezeigt, %llu verworfen", "%llu shown, %llu dropped"),
+                 (unsigned long long)s.sink.displayed, (unsigned long long)s.sink.dropped));
+    }
     Row(T("Bildalter", "Frame age"), Decimal(s.frameAgeMs, 1) + " ms");
-    if (s.videoDelayMs > 0) {
+    if (full && s.videoDelayMs > 0) {
       Row(T("Bildverzögerung", "Video delay"),
           Format(T("%d ms (A/V-Versatz)", "%d ms (A/V offset)"), s.videoDelayMs));
     }
 
     if (s.audio.running) {
-      Row(T("Ton ein", "Audio in"),
-          s.audio.inputName + (s.audio.directShowInput ? "  [DirectShow]" : "  [WASAPI]"));
-      Row(T("Ton aus", "Audio out"),
-          s.audio.outputName + (s.audio.exclusive ? "  [Exclusive]" : "  [Shared]"));
-      Row(T("Tonpuffer", "Audio buffer"),
-          Decimal(s.audio.bufferMs, 1) + T(" ms  (Ziel ", " ms  (target ") +
-              Decimal(s.audio.targetMs, 0) + " ms)");
-      Row(T("Tonformat", "Audio format"),
-          Format("%d Hz -> %d Hz", s.audio.captureRate, s.audio.renderRate));
+      if (full) {
+        Row(T("Ton ein", "Audio in"),
+            s.audio.inputName + (s.audio.directShowInput ? "  [DirectShow]" : "  [WASAPI]"));
+        Row(T("Ton aus", "Audio out"),
+            s.audio.outputName + (s.audio.exclusive ? "  [Exclusive]" : "  [Shared]"));
+      }
+      if (normal) {
+        Row(T("Tonpuffer", "Audio buffer"),
+            Decimal(s.audio.bufferMs, 1) + T(" ms  (Ziel ", " ms  (target ") +
+                Decimal(s.audio.targetMs, 0) + " ms)");
+      }
+      if (full) {
+        Row(T("Tonformat", "Audio format"),
+            Format("%d Hz -> %d Hz", s.audio.captureRate, s.audio.renderRate));
+      }
       if (s.audio.underruns || s.audio.overruns) {
         Row(T("Tonaussetzer", "Audio glitches"),
             Format(T("%llu leer, %llu übergelaufen", "%llu underrun, %llu overrun"),
                    (unsigned long long)s.audio.underruns,
                    (unsigned long long)s.audio.overruns));
       }
-    } else {
+    } else if (normal) {
       Row(T("Ton", "Audio"), T("aus", "off"));
     }
     ImGui::EndTable();

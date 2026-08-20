@@ -644,8 +644,18 @@ void App::ToggleRecording() {
 void App::StartRecording() {
   if (recorder_.recording()) return;
 
+  // The path was resolved at startup and could have gone stale since -- a
+  // portable build on a stick that got unplugged, an antivirus quarantine, or
+  // simply someone tidying up. Checking costs one file attribute lookup and
+  // turns a confusing "ffmpeg exited with code 1" into an honest answer.
+  if (ffmpeg_.found &&
+      ::GetFileAttributesW(ToWide(ffmpeg_.path).c_str()) == INVALID_FILE_ATTRIBUTES) {
+    CAP_WARN("ffmpeg ist verschwunden: %s", ffmpeg_.path.c_str());
+    ffmpeg_ = FfmpegInfo{};
+  }
   if (!ffmpeg_.found) {
     ffmpeg_ = LocateFfmpeg(config_.record.ffmpegPath);
+    settings_.InvalidateFolderFields();
   }
   if (!ffmpeg_.found) {
     Toast(T("ffmpeg fehlt — in den Einstellungen unter Aufnahme holen.",
@@ -772,6 +782,200 @@ void App::WriteScreenshot() {
   Toast(T("Screenshot: ", "Screenshot: ") +
         ToUtf8(slash == std::wstring::npos ? path : path.substr(slash + 1)));
   CAP_LOG("Screenshot gespeichert: %s (%dx%d)", ToUtf8(path).c_str(), width, height);
+}
+
+// ------------------------------------------------------------- crop picker
+//
+// Typing four numbers and checking the result is a loop nobody enjoys, so the
+// edges can be dragged on the picture instead. While picking, the crop is set
+// to zero so the whole frame is visible -- otherwise you would be cropping an
+// already cropped image and the numbers would compound.
+
+void App::BeginCropPick() {
+  if (cropPick_.active) return;
+  const VideoFormatInfo format = renderer_.sourceFormat();
+  if (!format.valid() || !renderer_.hasFrame()) {
+    Toast(T("Kein Bild zum Zuschneiden.", "No picture to crop."));
+    return;
+  }
+
+  ImageSettings& img = config_.active().image;
+  cropPick_.saved = img;
+  cropPick_.left = img.cropLeft;
+  cropPick_.right = img.cropRight;
+  cropPick_.top = img.cropTop;
+  cropPick_.bottom = img.cropBottom;
+  cropPick_.drag = -1;
+  cropPick_.active = true;
+
+  // Show the full frame underneath, so screen position maps straight to source
+  // pixels and the handles start where the current crop is.
+  img.cropLeft = img.cropRight = img.cropTop = img.cropBottom = 0;
+  settings_.Close();
+}
+
+void App::EndCropPick(bool apply) {
+  if (!cropPick_.active) return;
+  ImageSettings& img = config_.active().image;
+  img = cropPick_.saved;
+  if (apply) {
+    img.cropLeft = cropPick_.left;
+    img.cropRight = cropPick_.right;
+    img.cropTop = cropPick_.top;
+    img.cropBottom = cropPick_.bottom;
+    CAP_LOG("Zuschnitt gesetzt: links %d, rechts %d, oben %d, unten %d", img.cropLeft,
+            img.cropRight, img.cropTop, img.cropBottom);
+  }
+  cropPick_.active = false;
+  OpenSettings({});
+}
+
+void App::DrawCropPicker() {
+  const VideoFormatInfo format = renderer_.sourceFormat();
+  const RECT& r = renderer_.videoRect();
+  const float rw = (float)(r.right - r.left);
+  const float rh = (float)(r.bottom - r.top);
+  if (!format.valid() || rw < 8.0f || rh < 8.0f) {
+    EndCropPick(false);
+    return;
+  }
+
+  const float srcW = (float)format.width;
+  const float srcH = (float)format.height;
+  const float scaleX = rw / srcW;
+  const float scaleY = rh / srcH;
+
+  // Source pixels <-> client pixels.
+  auto toScreenX = [&](int src) { return (float)r.left + (float)src * scaleX; };
+  auto toScreenY = [&](int src) { return (float)r.top + (float)src * scaleY; };
+  auto toSrcX = [&](float screen) { return (int)std::lround((screen - (float)r.left) / scaleX); };
+  auto toSrcY = [&](float screen) { return (int)std::lround((screen - (float)r.top) / scaleY); };
+
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImVec2 mouse = ImGui::GetMousePos();
+
+  float xL = toScreenX(cropPick_.left);
+  float xR = toScreenX(format.width - cropPick_.right);
+  float yT = toScreenY(cropPick_.top);
+  float yB = toScreenY(format.height - cropPick_.bottom);
+
+  // ---- grab handling ----
+  // Everything outside the picture is ignored, so dragging the window or using
+  // the buttons above still works.
+  const float grab = 10.0f;
+  const bool overVideo = mouse.x >= r.left - grab && mouse.x <= r.right + grab &&
+                         mouse.y >= r.top - grab && mouse.y <= r.bottom + grab;
+
+  int hot = -1;
+  if (cropPick_.drag >= 0) {
+    hot = cropPick_.drag;
+  } else if (overVideo && !ImGui::GetIO().WantCaptureMouse) {
+    float best = grab;
+    if (std::abs(mouse.x - xL) < best) { best = std::abs(mouse.x - xL); hot = 0; }
+    if (std::abs(mouse.x - xR) < best) { best = std::abs(mouse.x - xR); hot = 1; }
+    if (std::abs(mouse.y - yT) < best) { best = std::abs(mouse.y - yT); hot = 2; }
+    if (std::abs(mouse.y - yB) < best) { best = std::abs(mouse.y - yB); hot = 3; }
+  }
+
+  if (hot >= 0) {
+    ImGui::SetMouseCursor(hot < 2 ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+  }
+  if (hot >= 0 && cropPick_.drag < 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    cropPick_.drag = hot;
+  }
+  if (cropPick_.drag >= 0 && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    cropPick_.drag = -1;
+  }
+
+  if (cropPick_.drag >= 0) {
+    // At least sixteen source pixels have to survive in each direction --
+    // a zero sized picture is not a crop, it is a crash waiting to happen.
+    const int minKeep = 16;
+    switch (cropPick_.drag) {
+      case 0:
+        cropPick_.left = Clamp(toSrcX(mouse.x), 0, format.width - cropPick_.right - minKeep);
+        break;
+      case 1:
+        cropPick_.right =
+            Clamp(format.width - toSrcX(mouse.x), 0, format.width - cropPick_.left - minKeep);
+        break;
+      case 2:
+        cropPick_.top = Clamp(toSrcY(mouse.y), 0, format.height - cropPick_.bottom - minKeep);
+        break;
+      case 3:
+        cropPick_.bottom =
+            Clamp(format.height - toSrcY(mouse.y), 0, format.height - cropPick_.top - minKeep);
+        break;
+      default: break;
+    }
+    xL = toScreenX(cropPick_.left);
+    xR = toScreenX(format.width - cropPick_.right);
+    yT = toScreenY(cropPick_.top);
+    yB = toScreenY(format.height - cropPick_.bottom);
+  }
+
+  // ---- painting ----
+  const ImU32 dim = IM_COL32(0, 0, 0, 150);
+  dl->AddRectFilled(ImVec2((float)r.left, (float)r.top), ImVec2(xL, (float)r.bottom), dim);
+  dl->AddRectFilled(ImVec2(xR, (float)r.top), ImVec2((float)r.right, (float)r.bottom), dim);
+  dl->AddRectFilled(ImVec2(xL, (float)r.top), ImVec2(xR, yT), dim);
+  dl->AddRectFilled(ImVec2(xL, yB), ImVec2(xR, (float)r.bottom), dim);
+
+  const ImU32 line = IM_COL32(255, 255, 255, 230);
+  const ImU32 lineHot = IM_COL32(255, 200, 80, 255);
+  dl->AddRect(ImVec2(xL, yT), ImVec2(xR, yB), line, 0.0f, 0, 1.5f);
+
+  // A thicker bar on each edge, so there is something obvious to aim at.
+  const float bar = 4.0f;
+  dl->AddRectFilled(ImVec2(xL - bar * 0.5f, yT), ImVec2(xL + bar * 0.5f, yB),
+                    hot == 0 ? lineHot : line);
+  dl->AddRectFilled(ImVec2(xR - bar * 0.5f, yT), ImVec2(xR + bar * 0.5f, yB),
+                    hot == 1 ? lineHot : line);
+  dl->AddRectFilled(ImVec2(xL, yT - bar * 0.5f), ImVec2(xR, yT + bar * 0.5f),
+                    hot == 2 ? lineHot : line);
+  dl->AddRectFilled(ImVec2(xL, yB - bar * 0.5f), ImVec2(xR, yB + bar * 0.5f),
+                    hot == 3 ? lineHot : line);
+
+  // ---- toolbar ----
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 18.0f),
+                          ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.92f);
+  if (ImGui::Begin("##croptools", nullptr,
+                   ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize |
+                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing)) {
+    ImGui::TextUnformatted(T("Ränder ziehen", "Drag the edges"));
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::Text(T("links %d  rechts %d  oben %d  unten %d", "left %d  right %d  top %d  bottom %d"),
+                cropPick_.left, cropPick_.right, cropPick_.top, cropPick_.bottom);
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+    ImGui::Text(T("Ergebnis %dx%d", "Result %dx%d"),
+                format.width - cropPick_.left - cropPick_.right,
+                format.height - cropPick_.top - cropPick_.bottom);
+
+    ImGui::SameLine();
+    if (ImGui::Button(T("Übernehmen", "Apply"))) {
+      EndCropPick(true);
+      ImGui::End();
+      return;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Abbrechen", "Cancel"))) {
+      EndCropPick(false);
+      ImGui::End();
+      return;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton(T("Nichts##crop", "None##crop"))) {
+      cropPick_.left = cropPick_.right = cropPick_.top = cropPick_.bottom = 0;
+    }
+  }
+  ImGui::End();
 }
 
 void App::FeedRecorder() {
@@ -1071,7 +1275,24 @@ void App::DrawUi() {
     stats.displayHeight = (int)(r.bottom - r.top);
     stats.filterName = ScaleFilterName((int)profile.image.filter);
     stats.videoDelayMs = (int)delayLine_.delayMs();
+    stats.detail = config_.app.statsDetail;
+    // Spell out what "automatic" resolved to, since that is the setting people
+    // second-guess when a picture looks wrong.
+    {
+      std::string range = profile.image.range == ColorRange::Auto
+                              ? (detectedRangeText_ ? detectedRangeText_
+                                                    : T("wird gemessen", "measuring"))
+                              : ColorRangeName((int)profile.image.range);
+      std::string matrix = ColorMatrixName((int)profile.image.matrix);
+      stats.colorInfo = range + "  /  " + matrix;
+    }
     DrawStatsPanel(stats);
+  }
+
+  // ---- crop picker ----
+  if (cropPick_.active) {
+    DrawCropPicker();
+    if (!cropPick_.active) return;  // Apply or Cancel closed it this frame
   }
 
   // ---- recording indicator ----
@@ -1119,6 +1340,8 @@ void App::DrawUi() {
       break;
   }
   settings_.SetDetectedRange(&detectedRangeText_);
+  settings_.SetSourceFps(renderer_.sourceFormat().fps);
+  if (settings_.takeCropPickRequest()) BeginCropPick();
   settings_.setProbeBusy(probing_.load(std::memory_order_relaxed));
   if (settings_.Draw(capture_.running() ? &capture_.capabilities() : nullptr, &ffmpeg_) ==
       SettingsWindow::Result::Close) {
@@ -1247,6 +1470,18 @@ bool App::HandleKeyDown(WPARAM key) {
     SwitchProfile((int)(key - '1'));
     return true;
   }
+  if (cropPick_.active) {
+    if (key == VK_ESCAPE) {
+      EndCropPick(false);
+      return true;
+    }
+    if (key == VK_RETURN) {
+      EndCropPick(true);
+      return true;
+    }
+    return true;  // swallow everything else: one job at a time
+  }
+
   if (key == VK_ESCAPE) {
     if (settings_.isOpen()) {
       settings_.Close();
