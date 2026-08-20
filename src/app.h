@@ -105,6 +105,12 @@ class App {
   // Grabs the next rendered frame and writes it to disk.
   void RequestScreenshot() { screenshotPending_ = true; }
   void WriteScreenshot();
+  void BeginCropPick();
+  void EndCropPick(bool apply);
+  void DrawCropPicker();
+ public:
+  bool cropPickActive() const { return cropPick_.active; }
+ private:
   // Makes sure an output folder exists. Recreates it when it was deleted, and
   // falls back to the default when even that fails.
   std::wstring ResolveOutputFolder(std::string* configured, const std::wstring& fallback);
@@ -196,6 +202,14 @@ class App {
   double lastSerializeCheck_ = 0.0;
 
   bool screenshotPending_ = false;
+
+  // Dragging the crop edges on the picture instead of typing four numbers.
+  struct CropPick {
+    bool active = false;
+    ImageSettings saved;              // restored on cancel
+    int left = 0, right = 0, top = 0, bottom = 0;  // source pixels
+    int drag = -1;                    // 0 left, 1 right, 2 top, 3 bottom
+  } cropPick_;
   // Filled from the renderer each frame; the settings dialog reads it.
   const char* detectedRangeText_ = nullptr;
   std::string toastText_;

@@ -117,6 +117,40 @@ std::wstring PickFolder(HWND owner, const std::wstring& start) {
   return folder;
 }
 
+// Same dialog as PickFolder, for a single executable.
+std::wstring PickExecutable(HWND owner, const std::wstring& start) {
+  ComPtr<IFileOpenDialog> dialog;
+  if (FAILED(::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&dialog)))) {
+    return {};
+  }
+
+  const COMDLG_FILTERSPEC filters[] = {{L"ffmpeg.exe", L"ffmpeg.exe"},
+                                       {L"*.exe", L"*.exe"}};
+  dialog->SetFileTypes(2, filters);
+
+  DWORD options = 0;
+  dialog->GetOptions(&options);
+  dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST);
+
+  if (!start.empty()) {
+    ComPtr<IShellItem> item;
+    if (SUCCEEDED(::SHCreateItemFromParsingName(start.c_str(), nullptr, IID_PPV_ARGS(&item)))) {
+      dialog->SetFolder(item.Get());
+    }
+  }
+
+  if (FAILED(dialog->Show(owner))) return {};
+
+  ComPtr<IShellItem> result;
+  if (FAILED(dialog->GetResult(&result))) return {};
+  PWSTR path = nullptr;
+  if (FAILED(result->GetDisplayName(SIGDN_FILESYSPATH, &path)) || !path) return {};
+  std::wstring file = path;
+  ::CoTaskMemFree(path);
+  return file;
+}
+
 }  // namespace
 
 std::vector<MonitorInfoEntry> EnumerateMonitors() {
@@ -142,6 +176,12 @@ void SettingsWindow::Open(Config* live, const std::string& reason) {
 bool SettingsWindow::takeProbeRequest() {
   const bool requested = probeRequested_;
   probeRequested_ = false;
+  return requested;
+}
+
+bool SettingsWindow::takeCropPickRequest() {
+  const bool requested = cropPickRequested_;
+  cropPickRequested_ = false;
   return requested;
 }
 
@@ -222,7 +262,12 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
   ImGui::SetNextWindowSizeConstraints(ImVec2(620.0f, 460.0f), ImVec2(FLT_MAX, FLT_MAX));
 
   bool stayOpen = true;
-  if (!ImGui::Begin(T("Einstellungen", "Settings"), &stayOpen, ImGuiWindowFlags_NoCollapse)) {
+  // Everything after "###" is the id, everything before it is the label. Without
+  // this the window is a different window in each language: ImGui keys position,
+  // size and the selected tab off the name, so switching language moved the
+  // dialog, resized it and threw you back to the first tab.
+  if (!ImGui::Begin(T("Einstellungen###capview_settings", "Settings###capview_settings"),
+                    &stayOpen, ImGuiWindowFlags_NoCollapse)) {
     ImGui::End();
     return Result::None;
   }
@@ -232,9 +277,12 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
   }
 
   if (!reason_.empty()) {
+    // AutoResizeY makes the box follow the text. It used to be a fixed 1.6 rows,
+    // which turned a longer message -- "the device is already in use by another
+    // program", say -- into a scrollbar inside a banner.
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.85f, 0.55f, 0.15f, 0.18f));
-    ImGui::BeginChild("banner", ImVec2(0, ImGui::GetFrameHeight() * 1.6f), ImGuiChildFlags_Borders);
-    ImGui::AlignTextToFramePadding();
+    ImGui::BeginChild("banner", ImVec2(0, 0),
+                      ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
     ImGui::TextWrapped("%s", reason_.c_str());
     ImGui::EndChild();
     ImGui::PopStyleColor();
@@ -250,49 +298,49 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
   const float footer = ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.y * 2.0f;
 
   if (ImGui::BeginTabBar("settings_tabs", ImGuiTabBarFlags_None)) {
-    if (ImGui::BeginTabItem(T("Quelle", "Source"))) {
+    if (ImGui::BeginTabItem(T("Quelle###source", "Source###source"))) {
       ImGui::BeginChild("scroll_source", ImVec2(0, -footer));
       DrawSourceTab(caps);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Bild", "Picture"))) {
+    if (ImGui::BeginTabItem(T("Bild###picture", "Picture###picture"))) {
       ImGui::BeginChild("scroll_image", ImVec2(0, -footer));
       DrawImageTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Ton", "Audio"))) {
+    if (ImGui::BeginTabItem(T("Ton###audio", "Audio###audio"))) {
       ImGui::BeginChild("scroll_audio", ImVec2(0, -footer));
       DrawAudioTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Anzeige", "Display"))) {
+    if (ImGui::BeginTabItem(T("Anzeige###display", "Display###display"))) {
       ImGui::BeginChild("scroll_display", ImVec2(0, -footer));
       DrawDisplayTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Aufnahme", "Recording"))) {
+    if (ImGui::BeginTabItem(T("Aufnahme###recording", "Recording###recording"))) {
       ImGui::BeginChild("scroll_record", ImVec2(0, -footer));
       DrawRecordTab(ffmpeg);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Werkzeuge", "Tools"))) {
+    if (ImGui::BeginTabItem(T("Werkzeuge###tools", "Tools###tools"))) {
       ImGui::BeginChild("scroll_tools", ImVec2(0, -footer));
       DrawToolsTab(ffmpeg);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Tasten", "Keys"))) {
+    if (ImGui::BeginTabItem(T("Tasten###keys", "Keys###keys"))) {
       ImGui::BeginChild("scroll_keys", ImVec2(0, -footer));
       DrawHotkeysTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Profile", "Profiles"))) {
+    if (ImGui::BeginTabItem(T("Profile###profiles", "Profiles###profiles"))) {
       ImGui::BeginChild("scroll_profiles", ImVec2(0, -footer));
       DrawProfilesTab();
       ImGui::EndChild();
@@ -635,7 +683,13 @@ void SettingsWindow::DrawImageTab() {
   ImGui::SameLine();
   ImGui::SetNextItemWidth(quarter);
   ImGui::DragInt("##cropb", &img.cropBottom, 0.5f, 0, 2048, T("unten %d", "bottom %d"));
-  if (ImGui::SmallButton(T("Zurücksetzen##crop", "Reset##crop"))) {
+  if (ImGui::Button(T("Im Bild auswählen ...", "Pick on the picture ..."))) {
+    cropPickRequested_ = true;
+  }
+  ImGui::SetItemTooltip(T("Schließt die Einstellungen und lässt die Ränder im Bild ziehen.",
+                          "Closes the settings and lets you drag the edges on the picture."));
+  ImGui::SameLine();
+  if (ImGui::Button(T("Zurücksetzen##crop", "Reset##crop"))) {
     img.cropLeft = img.cropRight = img.cropTop = img.cropBottom = 0;
   }
 
@@ -800,7 +854,22 @@ void SettingsWindow::DrawDisplayTab() {
 
   ImGui::Checkbox(T("Statistik einblenden", "Show statistics"), &app.showStats);
   ImGui::SameLine();
-  ImGui::TextDisabled("(F1)");
+  // Read from the binding rather than written out, so rebinding the key is
+  // visible here instead of leaving a stale "(F1)" behind.
+  ImGui::TextDisabled("(%s)", HotkeyText(cfg().hotkeys[HotkeyAction::Stats]).c_str());
+
+  ImGui::BeginDisabled(!app.showStats);
+  int detail = (int)app.statsDetail;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Umfang", "Detail"), &detail, 3, StatsDetailName)) {
+    app.statsDetail = (StatsDetail)detail;
+  }
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  HelpMarker(T("Kompakt: Bildraten und Bildalter. Normal: zusätzlich Format und Ton. "
+               "Vollständig: alles.",
+               "Compact: frame rates and frame age. Normal: adds format and audio. "
+               "Full: everything."));
 
   ImGui::Spacing();
   ImGui::SeparatorText(T("Lautstärke-Anzeige", "Volume readout"));
@@ -845,18 +914,6 @@ void SettingsWindow::DrawDisplayTab() {
   HelpMarker(T("Nur zur Fehlersuche. Wirkt beim nächsten Start.",
                "For troubleshooting only. Takes effect on the next start."));
 
-  ImGui::Spacing();
-  ImGui::SeparatorText(T("Tastenkürzel", "Shortcuts"));
-  ImGui::BulletText(T("Enter — Vollbild ein/aus", "Enter — toggle fullscreen"));
-  ImGui::BulletText(T("Esc — Vollbild verlassen", "Esc — leave fullscreen"));
-  ImGui::BulletText(T("F1 — Statistik", "F1 — statistics"));
-  ImGui::BulletText(T("F2 — Einstellungen", "F2 — settings"));
-  ImGui::BulletText(T("F5 — Aufnahme neu starten", "F5 — restart capture"));
-  ImGui::BulletText(T("F9 — Aufnahme starten/stoppen", "F9 — start/stop recording"));
-  ImGui::BulletText(T("M — stumm, +/- oder Mausrad — Lautstärke",
-                      "M — mute, +/- or mouse wheel — volume"));
-  ImGui::BulletText(T("Strg+1 bis Strg+9 — Profil wechseln", "Ctrl+1 to Ctrl+9 — switch profile"));
-  ImGui::BulletText(T("Rechtsklick im Bild — Menü", "Right-click the picture — menu"));
 }
 
 // --------------------------------------------------------------- record tab
@@ -904,6 +961,73 @@ void SettingsWindow::FolderRow(const char* id, char* buffer, size_t bufferSize,
   }
 }
 
+void SettingsWindow::DrawFfmpegBlock(FfmpegInfo* ffmpeg) {
+  RecordSettings& rec = cfg().record;
+  const bool busy = downloader_.busy();
+
+  ImGui::SeparatorText("ffmpeg");
+  if (ffmpeg && ffmpeg->found) {
+    ImGui::TextWrapped("%s", ffmpeg->version.c_str());
+    ImGui::TextDisabled("%s", ffmpeg->path.c_str());
+  } else {
+    ImGui::TextWrapped(
+        T("Ohne ffmpeg keine Aufnahme. Screenshots funktionieren trotzdem.",
+          "No recording without ffmpeg. Screenshots work regardless."));
+  }
+
+  ImGui::BeginDisabled(busy);
+  if (ImGui::Button(ffmpeg && ffmpeg->found ? T("Neu herunterladen", "Download again")
+                                            : T("ffmpeg herunterladen", "Download ffmpeg"))) {
+    downloader_.Start(ExeDirectory() + L"ffmpeg");
+  }
+  ImGui::SetItemTooltip(T("Statisches Build von gyan.dev, rund 106 MB, SHA-256 wird geprüft.",
+                          "Static build from gyan.dev, about 106 MB, SHA-256 is verified."));
+  ImGui::SameLine();
+  if (ImGui::Button(T("Auf Updates prüfen", "Check for updates"))) {
+    downloader_.StartVersionCheck();
+  }
+  ImGui::EndDisabled();
+
+  if (busy) {
+    const float p = downloader_.progress();
+    if (p >= 0.0f) ImGui::ProgressBar(p, ImVec2(-1.0f, 0.0f));
+    ImGui::TextDisabled("%s", downloader_.message().c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton(T("Abbrechen", "Cancel"))) downloader_.Cancel();
+  } else if (downloader_.state() != FfmpegDownloader::State::Idle) {
+    const bool failed = downloader_.state() == FfmpegDownloader::State::Failed;
+    ImGui::TextColored(failed ? ImVec4(0.95f, 0.5f, 0.35f, 1.0f) : ImVec4(0.5f, 0.85f, 0.5f, 1.0f),
+                       "%s", downloader_.message().c_str());
+    // A fresh download only counts once the locator has confirmed it runs.
+    if (!failed && !downloader_.resultPath().empty() && ffmpeg && !ffmpeg->found) {
+      *ffmpeg = LocateFfmpeg(rec.ffmpegPath);
+    }
+  }
+
+  const ImGuiStyle& style = ImGui::GetStyle();
+  const float browse = ImGui::CalcTextSize(T("Durchsuchen", "Browse")).x + style.FramePadding.x * 2;
+  ImGui::SetNextItemWidth(-(browse + style.ItemSpacing.x));
+  if (ImGui::InputTextWithHint("##ffmpegpath",
+                               T("Eigener Pfad zu ffmpeg.exe (optional)",
+                                 "Custom path to ffmpeg.exe (optional)"),
+                               ffmpegPathBuffer_, sizeof(ffmpegPathBuffer_))) {
+    rec.ffmpegPath = ffmpegPathBuffer_;
+    if (ffmpeg) *ffmpeg = LocateFfmpeg(rec.ffmpegPath);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button(T("Durchsuchen##ffmpeg", "Browse##ffmpeg"))) {
+    const std::wstring start =
+        rec.ffmpegPath.empty() ? ExeDirectory() : ToWide(rec.ffmpegPath);
+    const std::wstring picked =
+        PickExecutable((HWND)ImGui::GetMainViewport()->PlatformHandleRaw, start);
+    if (!picked.empty()) {
+      rec.ffmpegPath = ToUtf8(picked);
+      std::snprintf(ffmpegPathBuffer_, sizeof(ffmpegPathBuffer_), "%s", rec.ffmpegPath.c_str());
+      if (ffmpeg) *ffmpeg = LocateFfmpeg(rec.ffmpegPath);
+    }
+  }
+}
+
 void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   RecordSettings& rec = cfg().record;
 
@@ -914,7 +1038,20 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
     recordBuffersLoaded_ = true;
   }
 
+  // Without ffmpeg none of the recording settings mean anything, so it leads and
+  // the rest is greyed out rather than inviting people to configure a bitrate
+  // for an encoder that cannot run.
+  const bool ready = ffmpeg && ffmpeg->found;
   ImGui::Spacing();
+  if (!ready) {
+    DrawFfmpegBlock(ffmpeg);
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+  }
+
+  ImGui::BeginDisabled(!ready);
+
   ImGui::TextWrapped(
       T("Aufgenommen wird das Bild in Quellauflösung, nach Zuschnitt und Deinterlacing, vor der "
         "Fensterskalierung. Die Fenstergröße hat keinen Einfluss auf das Ergebnis.",
@@ -938,15 +1075,22 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   ImGui::SetNextItemWidth(-260.0f);
   ImGui::SliderInt(T("Bitrate", "Bitrate"), &rec.bitrateKbps, 1000, 100000, "%d kbit/s");
 
+  // Recording faster than the card delivers would only duplicate frames, so the
+  // ceiling is the source rate rather than an arbitrary 240.
+  const int maxFps = sourceFps_ > 1.0 ? (int)std::lround(sourceFps_) : 240;
+  if (rec.fps > (double)maxFps) rec.fps = (double)maxFps;
   int fps = (int)std::lround(rec.fps);
   ImGui::SetNextItemWidth(-260.0f);
-  if (ImGui::SliderInt(T("Bildrate", "Frame rate"), &fps, 0, 240,
+  if (ImGui::SliderInt(T("Bildrate", "Frame rate"), &fps, 0, maxFps,
                        fps == 0 ? T("wie die Quelle", "same as source") : "%d fps")) {
     rec.fps = (double)fps;
   }
   ImGui::SameLine();
-  HelpMarker(T("0 = Bildrate der Quelle. Niedriger verwirft Bilder, Auflösung bleibt.",
-               "0 = source frame rate. Lower drops frames, resolution unchanged."));
+  HelpMarker(sourceFps_ > 1.0
+                 ? T("0 = Bildrate der Quelle. Höher als die Quelle ergibt nur doppelte Bilder.",
+                     "0 = source frame rate. Above the source only duplicates frames.")
+                 : T("0 = Bildrate der Quelle. Niedriger verwirft Bilder, Auflösung bleibt.",
+                     "0 = source frame rate. Lower drops frames, resolution unchanged."));
 
   FolderRow("recfolder", folderBuffer_, sizeof(folderBuffer_), &rec.outputFolder,
             DefaultRecordFolder());
@@ -1017,56 +1161,16 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   HelpMarker(T("Nur für CPU-Encoder. Hardware-Encoder behalten die Werkseinstellung.",
                "Software encoders only. Hardware encoders keep the vendor default."));
 
-  // ---- ffmpeg ----
-  ImGui::Spacing();
-  ImGui::SeparatorText("ffmpeg");
-  if (ffmpeg && ffmpeg->found) {
-    ImGui::TextWrapped("%s", ffmpeg->version.c_str());
-    ImGui::TextDisabled("%s", ffmpeg->path.c_str());
-  } else {
-    ImGui::TextColored(ImVec4(0.95f, 0.7f, 0.35f, 1.0f), "%s",
-                       T("Nicht gefunden — ohne ffmpeg keine Aufnahme.",
-                         "Not found — no recording without ffmpeg."));
+  if (ready) {
+    ImGui::Spacing();
+    DrawFfmpegBlock(ffmpeg);
   }
 
-  ImGui::BeginDisabled(busy);
-  if (ImGui::Button(ffmpeg && ffmpeg->found ? T("Neu herunterladen", "Download again")
-                                            : T("ffmpeg herunterladen", "Download ffmpeg"))) {
-    downloader_.Start(ExeDirectory() + L"ffmpeg");
-  }
-  ImGui::SetItemTooltip(T("Statisches Build von gyan.dev, rund 106 MB, SHA-256 wird geprüft.",
-                          "Static build from gyan.dev, about 106 MB, SHA-256 is verified."));
-  ImGui::SameLine();
-  if (ImGui::Button(T("Auf Updates prüfen", "Check for updates"))) {
-    downloader_.StartVersionCheck();
-  }
   ImGui::EndDisabled();
 
-  if (busy) {
-    const float p = downloader_.progress();
-    if (p >= 0.0f) ImGui::ProgressBar(p, ImVec2(-1.0f, 0.0f));
-    ImGui::TextDisabled("%s", downloader_.message().c_str());
-    ImGui::SameLine();
-    if (ImGui::SmallButton(T("Abbrechen", "Cancel"))) downloader_.Cancel();
-  } else if (downloader_.state() != FfmpegDownloader::State::Idle) {
-    const bool failed = downloader_.state() == FfmpegDownloader::State::Failed;
-    ImGui::TextColored(failed ? ImVec4(0.95f, 0.5f, 0.35f, 1.0f) : ImVec4(0.5f, 0.85f, 0.5f, 1.0f),
-                       "%s", downloader_.message().c_str());
-    // A fresh download only counts once the locator has confirmed it runs.
-    if (!failed && !downloader_.resultPath().empty() && ffmpeg && !ffmpeg->found) {
-      *ffmpeg = LocateFfmpeg(rec.ffmpegPath);
-    }
-  }
-
-  ImGui::SetNextItemWidth(-1.0f);
-  if (ImGui::InputTextWithHint("##ffmpegpath",
-                               T("Eigener Pfad zu ffmpeg.exe (optional)",
-                                 "Custom path to ffmpeg.exe (optional)"),
-                               ffmpegPathBuffer_, sizeof(ffmpegPathBuffer_))) {
-    rec.ffmpegPath = ffmpegPathBuffer_;
-  }
-
   // ---- stills ----
+  // Outside the disabled block on purpose: screenshots go through Windows' own
+  // imaging stack and have nothing to do with ffmpeg.
   ImGui::Spacing();
   ImGui::SeparatorText(T("Screenshots", "Screenshots"));
   ImGui::TextWrapped(T("Einzelbild in Quellauflösung, ohne Bedienoberfläche. Benötigt kein ffmpeg.",
