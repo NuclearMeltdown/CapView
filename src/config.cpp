@@ -489,6 +489,13 @@ bool Config::Load(std::string* error) {
   record.splitFiles = r["splitFiles"].AsBool(false);
   record.splitSizeMb = Clamp(r["splitSizeMb"].AsInt(4000), 100, 100000);
   record.ffmpegPath = r["ffmpegPath"].AsString();
+  record.encoderProbeSignature = r["encoderProbeSignature"].AsString();
+  record.encodersAvailable.clear();
+  const json::Value& enc = r["encodersAvailable"];
+  for (size_t i = 0; i < enc.Size(); ++i) {
+    const int id = enc.At(i).AsInt(-1);
+    if (id >= 0 && id < 10) record.encodersAvailable.push_back(id);
+  }
   record.screenshotFolder = r["screenshotFolder"].AsString();
   record.screenshotFormat = ReadEnum<ScreenshotFormat>(r, "screenshotFormat", 2,
                                                        ScreenshotFormat::Png);
@@ -565,6 +572,10 @@ std::string Config::Serialize() const {
   r["splitFiles"] = record.splitFiles;
   r["splitSizeMb"] = record.splitSizeMb;
   r["ffmpegPath"] = record.ffmpegPath;
+  r["encoderProbeSignature"] = record.encoderProbeSignature;
+  json::Value enc = json::Value::Array();
+  for (int id : record.encodersAvailable) enc.Push(json::Value(id));
+  r["encodersAvailable"] = enc;
   r["screenshotFolder"] = record.screenshotFolder;
   r["screenshotFormat"] = (int)record.screenshotFormat;
   r["jpegQuality"] = record.jpegQuality;

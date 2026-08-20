@@ -100,6 +100,11 @@ class App {
   // Test encodes take seconds and must never run on the UI thread -- doing so
   // froze the window long enough to drop displayed frames.
   void StartEncoderProbe(bool full);
+  // Graphics hardware plus ffmpeg build. A cached encoder test only counts when
+  // this still matches.
+  std::string EncoderSignature() const;
+  void LoadCachedEncoders();
+  void SaveCachedEncoders();
   void CollectEncoderProbe();
 
   void ToggleRecording();

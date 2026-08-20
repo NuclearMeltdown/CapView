@@ -1,6 +1,39 @@
 #include "render/d3d_context.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace cap {
+
+std::string GraphicsAdapterSignature() {
+  ComPtr<IDXGIFactory1> factory;
+  if (FAILED(::CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) return {};
+
+  // Deduplicated and sorted. DXGI happily reports the same card several times --
+  // this machine lists one RTX 4080 four times -- and the count can change when
+  // a monitor is plugged in. A signature that moves for that reason would throw
+  // away a perfectly good encoder test.
+  std::vector<std::string> names;
+  for (UINT i = 0;; ++i) {
+    ComPtr<IDXGIAdapter1> adapter;
+    if (factory->EnumAdapters1(i, &adapter) == DXGI_ERROR_NOT_FOUND) break;
+    DXGI_ADAPTER_DESC1 desc = {};
+    if (FAILED(adapter->GetDesc1(&desc))) continue;
+    // Skip the software renderer: it is always there and says nothing about
+    // what encoders exist.
+    if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
+    names.push_back(ToUtf8(desc.Description));
+  }
+  std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+
+  std::string result;
+  for (const std::string& name : names) {
+    if (!result.empty()) result += " + ";
+    result += name;
+  }
+  return result;
+}
 namespace {
 
 const DXGI_FORMAT kBackBufferFormat = DXGI_FORMAT_B8G8R8A8_UNORM;

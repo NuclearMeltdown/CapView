@@ -10,6 +10,7 @@
 #include "i18n.h"
 #include "imgui.h"
 #include "record/ffmpeg_locator.h"
+#include "render/d3d_context.h"
 #include "record/screenshot.h"
 #include "resource.h"
 #include "ui/theme.h"
@@ -171,9 +172,10 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
   }
   CaptureAppliedState();
   ffmpeg_ = LocateFfmpeg(config_.record.ffmpegPath);
-  // Warm the encoder choice up now: with Auto this is usually one test encode,
-  // and it means pressing F9 later starts recording immediately.
-  StartEncoderProbe(false);
+  // No test on startup. Which encoders work does not change from one run to the
+  // next, so the answer is loaded from the config; testing is something the user
+  // asks for once, or when the machine changed underneath it.
+  LoadCachedEncoders();
 
   running_ = true;
   return true;
@@ -632,6 +634,51 @@ void App::CollectEncoderProbe() {
   probeDone_.store(false, std::memory_order_relaxed);
   if (probeThread_.joinable()) probeThread_.join();
   ffmpeg_ = std::move(probeResult_);
+  SaveCachedEncoders();
+}
+
+std::string App::EncoderSignature() const {
+  // The ffmpeg build belongs in here as well as the hardware: a different build
+  // can be missing an encoder the last one had, and would then be judged by a
+  // result it never produced.
+  return GraphicsAdapterSignature() + " | " + ffmpeg_.version;
+}
+
+void App::LoadCachedEncoders() {
+  if (!ffmpeg_.found) return;
+  RecordSettings& rec = config_.record;
+  if (rec.encodersAvailable.empty() && rec.encoderProbeSignature.empty()) return;
+
+  if (rec.encoderProbeSignature != EncoderSignature()) {
+    CAP_LOG("Encoder-Test verworfen: Hardware oder ffmpeg hat sich geändert");
+    rec.encoderProbeSignature.clear();
+    rec.encodersAvailable.clear();
+    return;
+  }
+
+  ApplyCachedProbe(&ffmpeg_, rec.encodersAvailable);
+  CAP_LOG("Encoder aus der Konfiguration übernommen: %zu verwendbar",
+          rec.encodersAvailable.size());
+}
+
+void App::SaveCachedEncoders() {
+  if (!ffmpeg_.found || !ffmpeg_.tested) return;
+  RecordSettings& rec = config_.record;
+  rec.encodersAvailable.clear();
+  for (const EncoderInfo& e : ffmpeg_.encoders) {
+    if (e.tested && e.available) rec.encodersAvailable.push_back((int)e.id);
+  }
+  rec.encoderProbeSignature = EncoderSignature();
+
+  // A selection that did not survive the test would silently fail at F9, so it
+  // goes back to Auto rather than staying as a trap.
+  const EncoderInfo* chosen = ffmpeg_.Find(rec.encoder);
+  if (rec.encoder != RecordEncoder::Auto && (!chosen || !chosen->available)) {
+    CAP_WARN("Gewählter Encoder ist nicht verfügbar, zurück auf Automatisch");
+    rec.encoder = RecordEncoder::Auto;
+    Toast(T("Der gewählte Encoder funktioniert hier nicht, zurück auf Automatisch.",
+            "The selected encoder does not work here, back to Automatic."));
+  }
 }
 
 void App::ToggleRecording() {
@@ -676,9 +723,11 @@ void App::StartRecording() {
   const EncoderInfo* usable = ffmpeg_.Find(config_.record.encoder);
   if (config_.record.encoder == RecordEncoder::Auto) usable = ffmpeg_.BestAvailable();
   if (!usable || !usable->available) {
-    // Nothing tested yet: kick the probe off in the background rather than
-    // freezing the window here, and let the user press again.
-    StartEncoderProbe(false);
+    // Nothing tested yet: kick a full probe off in the background rather than
+    // freezing the window here, and let the user press again. Full, so the
+    // settings end up with the complete list rather than the first answer that
+    // happened to work.
+    StartEncoderProbe(true);
     Toast(T("Encoder werden geprüft, gleich nochmal.",
             "Testing encoders, try again in a moment."));
     return;

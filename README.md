@@ -113,7 +113,10 @@ it, then on `PATH`. A custom path can be set.
 
 Encoders are established by test-encoding two frames each, not by reading
 `ffmpeg -encoders`: that list says what was compiled in, not what the hardware
-can do.
+can do. The test runs once, on request, and the result is kept in the config —
+so the encoder list offers what this machine can actually do, rather than every
+vendor's hardware encoder. It is discarded and asked for again when the
+graphics adapter or the ffmpeg build changes.
 
 ## Why DirectShow
 
