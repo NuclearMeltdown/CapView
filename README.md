@@ -1,11 +1,22 @@
-# CapView
+<p align="center">
+  <img src="docs/icon.png" width="112" alt="">
+</p>
 
-A low-latency viewer for DirectShow capture cards on Windows. Point it at your
-capture card, and it puts the picture on screen with as little delay as the
-hardware allows — so you can play on the captured signal instead of watching it.
+<h1 align="center">CapView</h1>
+
+<p align="center">
+  A low-latency viewer and recorder for DirectShow capture cards on Windows.
+</p>
+
+![The viewer showing a console at 1080p60, with the statistics overlay reading a frame age of 1.0 ms](docs/viewer.jpg)
+
+Point it at your capture card and it puts the picture on screen with as little
+delay as the hardware allows — so you can play on the captured signal instead of
+watching it.
 
 Measured on a StarTech PEXHDCAP60L: **1080p60 sustained, ~1 ms between a frame
-arriving and being drawn.**
+arriving and being drawn.** That is the number in the corner of the screenshot
+above, and it is what the whole program is arranged around.
 
 Written for people who use a capture card to play, not to stream. OBS is a
 studio; this is a window.
@@ -29,6 +40,8 @@ and colour space are picked separately, like OBS. Combinations the driver does
 not advertise but does support (the classic "1080p60 shows up as 1080p30" case)
 can be forced.
 
+![The source tab, with the capture device, its embedded audio, and separate pickers for colour format, resolution and frame rate](docs/settings-source.jpg)
+
 **Picture** — nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear
 scaling, adaptive sharpening, bob deinterlacing, aspect override, integer
 scaling. Crop edges are dragged on the picture itself rather than typed in.
@@ -49,6 +62,8 @@ editing. Mixed-only and separate-only are both a setting away.
 via ffmpeg. Records the picture at source resolution; window size is irrelevant.
 The capture audio is the master clock, so the result is constant frame rate and
 stays in sync (measured: 1 ms drift over 15 seconds).
+
+![The recording tab, with container, bitrate, output folder, and an encoder list naming the five that passed the test on this machine](docs/settings-recording.jpg)
 
 **Screenshots** — PNG or JPEG at source resolution, without the interface,
 written through Windows' own imaging stack. No ffmpeg needed.
