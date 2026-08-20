@@ -673,7 +673,7 @@ void App::SaveCachedEncoders() {
   // A selection that did not survive the test would silently fail at F9, so it
   // goes back to Auto rather than staying as a trap.
   const EncoderInfo* chosen = ffmpeg_.Find(rec.encoder);
-  if (rec.encoder != RecordEncoder::Auto && (!chosen || !chosen->available)) {
+  if (!IsAutoEncoder(rec.encoder) && (!chosen || !chosen->available)) {
     CAP_WARN("Gewählter Encoder ist nicht verfügbar, zurück auf Automatisch");
     rec.encoder = RecordEncoder::Auto;
     Toast(T("Der gewählte Encoder funktioniert hier nicht, zurück auf Automatisch.",
@@ -720,8 +720,7 @@ void App::StartRecording() {
             "Still testing encoders, try again in a moment."));
     return;
   }
-  const EncoderInfo* usable = ffmpeg_.Find(config_.record.encoder);
-  if (config_.record.encoder == RecordEncoder::Auto) usable = ffmpeg_.BestAvailable();
+  const EncoderInfo* usable = ffmpeg_.Resolve(config_.record.encoder);
   if (!usable || !usable->available) {
     // Nothing tested yet: kick a full probe off in the background rather than
     // freezing the window here, and let the user press again. Full, so the

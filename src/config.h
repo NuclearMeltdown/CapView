@@ -52,9 +52,21 @@ enum class ScreenshotFormat { Png, Jpeg };
 // test encode, preferring hardware. The AV1 entries need recent hardware
 // (NVIDIA RTX 40, Intel Arc, AMD RDNA 3); on anything older the probe simply
 // marks them unavailable.
+// AutoEfficient is appended rather than inserted: these values are written to
+// the config file as plain numbers, and renumbering them would silently change
+// what an existing configuration means.
 enum class RecordEncoder {
-  Auto, X264, Nvenc, QuickSync, Amf, X265, NvencHevc, Av1Nvenc, Av1QuickSync, Av1Amf
+  Auto, X264, Nvenc, QuickSync, Amf, X265, NvencHevc, Av1Nvenc, Av1QuickSync, Av1Amf,
+  AutoEfficient
 };
+const int kRecordEncoderCount = 11;
+
+// Both automatic modes pick an encoder for you; the difference is what they
+// optimise for. Neither refers to a specific encoder, so anything that looks one
+// up by id has to check this first.
+inline bool IsAutoEncoder(RecordEncoder e) {
+  return e == RecordEncoder::Auto || e == RecordEncoder::AutoEfficient;
+}
 
 // Only the software encoder gets a speed knob -- for the hardware encoders the
 // vendor defaults are better than anything guessed here.

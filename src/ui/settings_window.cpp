@@ -1178,8 +1178,7 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   // cannot run, and then wonder why.
   const bool tested = ffmpeg && ffmpeg->tested;
   const EncoderInfo* chosen = ffmpeg ? ffmpeg->Find(rec.encoder) : nullptr;
-  const bool chosenOk =
-      rec.encoder == RecordEncoder::Auto || (chosen && chosen->available);
+  const bool chosenOk = IsAutoEncoder(rec.encoder) || (chosen && chosen->available);
 
   const char* preview = !tested ? T("noch nicht geprüft", "not tested yet")
                                 : RecordEncoderName((int)rec.encoder);
@@ -1187,10 +1186,12 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   ImGui::BeginDisabled(!tested);
   ImGui::SetNextItemWidth(-260.0f);
   if (ImGui::BeginCombo(T("Encoder", "Encoder"), preview)) {
-    if (ImGui::Selectable(RecordEncoderName((int)RecordEncoder::Auto),
-                          rec.encoder == RecordEncoder::Auto)) {
-      rec.encoder = RecordEncoder::Auto;
+    for (RecordEncoder mode : {RecordEncoder::Auto, RecordEncoder::AutoEfficient}) {
+      if (ImGui::Selectable(RecordEncoderName((int)mode), rec.encoder == mode)) {
+        rec.encoder = mode;
+      }
     }
+    ImGui::Separator();
     for (const EncoderInfo& e : ffmpeg->encoders) {
       if (!e.available) continue;
       const bool selected = (rec.encoder == e.id);
@@ -1203,6 +1204,24 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   ImGui::SameLine();
   HelpMarker(T("Automatisch: der verträglichste, der hier läuft — H.264 vor H.265 vor AV1, Hardware vor CPU.",
                "Automatic: the most compatible one that works here — H.264 before H.265 before AV1, hardware before CPU."));
+
+  // What the two automatic modes actually do, in the terms that matter: where
+  // the file will play, and how big it is. Naming the codecs alone would only
+  // help people who already know the answer.
+  if (tested && IsAutoEncoder(rec.encoder)) {
+    const EncoderInfo* picked = ffmpeg->Resolve(rec.encoder);
+    ImGui::TextDisabled(
+        rec.encoder == RecordEncoder::Auto
+            ? T("H.264 zuerst: läuft auf allem, auch auf älteren Fernsehern und Handys.",
+                "H.264 first: plays on anything, including older TVs and phones.")
+            : T("AV1 und H.265 zuerst: bei gleicher Qualität deutlich kleinere Dateien, "
+                "aber ältere Geräte können sie nicht abspielen.",
+                "AV1 and H.265 first: much smaller files at the same quality, but older "
+                "devices cannot play them."));
+    if (picked) {
+      ImGui::TextDisabled(T("Hier heißt das: %s", "Here that means: %s"), picked->label.c_str());
+    }
+  }
 
   if (!tested) {
     ImGui::TextWrapped(
@@ -1253,7 +1272,7 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   }
 
   const EncoderInfo* selected =
-      ffmpeg ? (rec.encoder == RecordEncoder::Auto ? nullptr : ffmpeg->Find(rec.encoder)) : nullptr;
+      ffmpeg ? (IsAutoEncoder(rec.encoder) ? nullptr : ffmpeg->Find(rec.encoder)) : nullptr;
   const bool softwareSelected = rec.encoder == RecordEncoder::X264 ||
                                 rec.encoder == RecordEncoder::X265 ||
                                 (selected && !selected->hardware);

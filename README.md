@@ -118,6 +118,17 @@ so the encoder list offers what this machine can actually do, rather than every
 vendor's hardware encoder. It is discarded and asked for again when the
 graphics adapter or the ffmpeg build changes.
 
+There are two automatic modes, because the two things you might want from an
+encoder are in direct conflict:
+
+| Mode | Order | For |
+|---|---|---|
+| Plays anywhere | H.264, H.265, AV1 | Files that open on any phone, TV or editor |
+| Smaller files | AV1, H.265, H.264 | Same quality at a fraction of the size |
+
+Hardware comes before the CPU encoders in both. Neither scores anything: each
+walks its order and takes the first entry that passed the test.
+
 ## Why DirectShow
 
 Every capture card that ships a Media Foundation driver also exposes a

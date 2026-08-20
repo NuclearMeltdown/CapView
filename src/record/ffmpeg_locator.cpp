@@ -33,6 +33,14 @@ const Candidate kCandidates[] = {
     {RecordEncoder::X265, "libx265", "H.265 (CPU, x265)", false},
 };
 
+// The other way round: quality per bit first. Nothing here is a judgement about
+// which file is better -- only about which of the two costs you care about.
+const RecordEncoder kEfficiencyOrder[] = {
+    RecordEncoder::Av1Nvenc,  RecordEncoder::Av1QuickSync, RecordEncoder::Av1Amf,
+    RecordEncoder::NvencHevc, RecordEncoder::Nvenc,        RecordEncoder::QuickSync,
+    RecordEncoder::Amf,       RecordEncoder::X265,         RecordEncoder::X264,
+};
+
 bool FileExists(const std::wstring& path) {
   const DWORD attrs = ::GetFileAttributesW(path.c_str());
   return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
@@ -220,7 +228,7 @@ bool TestOne(const std::string& exe, EncoderInfo* e) {
 const EncoderInfo* EnsureUsableEncoder(FfmpegInfo* info, RecordEncoder wanted) {
   if (!info || !info->found) return nullptr;
 
-  if (wanted != RecordEncoder::Auto) {
+  if (!IsAutoEncoder(wanted)) {
     for (EncoderInfo& e : info->encoders) {
       if (e.id != wanted) continue;
       return TestOne(info->path, &e) ? &e : nullptr;
@@ -231,6 +239,14 @@ const EncoderInfo* EnsureUsableEncoder(FfmpegInfo* info, RecordEncoder wanted) {
   // Preference order, stopping at the first that works. On a machine with a
   // usable GPU that is a single test, so pressing record does not sit there
   // running nine encodes first.
+  if (wanted == RecordEncoder::AutoEfficient) {
+    for (RecordEncoder id : kEfficiencyOrder) {
+      for (EncoderInfo& e : info->encoders) {
+        if (e.id == id && TestOne(info->path, &e)) return &e;
+      }
+    }
+    return nullptr;
+  }
   for (EncoderInfo& e : info->encoders) {
     if (TestOne(info->path, &e)) return &e;
   }
@@ -262,16 +278,31 @@ const EncoderInfo* FfmpegInfo::Find(RecordEncoder id) const {
   return nullptr;
 }
 
-const EncoderInfo* FfmpegInfo::BestAvailable() const {
-  // kCandidates is already in preference order, and encoders keeps that order.
+const EncoderInfo* FfmpegInfo::BestAvailable(bool preferEfficiency) const {
+  if (preferEfficiency) {
+    for (RecordEncoder id : kEfficiencyOrder) {
+      for (const EncoderInfo& e : encoders) {
+        if (e.id == id && e.available) return &e;
+      }
+    }
+    return nullptr;
+  }
+  // kCandidates is already in compatibility order, and encoders keeps that order.
   for (const EncoderInfo& e : encoders) {
     if (e.available) return &e;
   }
   return nullptr;
 }
 
+const EncoderInfo* FfmpegInfo::Resolve(RecordEncoder wanted) const {
+  if (IsAutoEncoder(wanted)) {
+    return BestAvailable(wanted == RecordEncoder::AutoEfficient);
+  }
+  return Find(wanted);
+}
+
 bool FfmpegInfo::AnyAvailable() const {
-  return BestAvailable() != nullptr;
+  return BestAvailable(false) != nullptr;
 }
 
 }  // namespace cap

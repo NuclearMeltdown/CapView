@@ -168,9 +168,7 @@ bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, i
     return fail(T("Kein Bild zum Aufnehmen.", "No picture to record."));
   }
 
-  const EncoderInfo* encoder = settings.encoder == RecordEncoder::Auto
-                                   ? ffmpeg.BestAvailable()
-                                   : ffmpeg.Find(settings.encoder);
+  const EncoderInfo* encoder = ffmpeg.Resolve(settings.encoder);
   if (!encoder || !encoder->available) {
     return fail(T("Kein verwendbarer Encoder. Encoder-Test in den Einstellungen ausführen.",
                   "No usable encoder. Run the encoder test in the settings."));
