@@ -360,7 +360,10 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
   // ---- crossbar ----
   ImGui::Spacing();
   ImGui::SeparatorText(T("Eingang der Karte", "Card input"));
-  if (caps.crossbarInputs.empty()) {
+  if (cfg().active().capture.video.empty()) {
+    // Nothing has been probed yet, so there is nothing true to say about inputs.
+    ImGui::TextDisabled(T("Zuerst ein Videogerät wählen.", "Select a video device first."));
+  } else if (caps.crossbarInputs.empty()) {
     ImGui::TextDisabled(T("Diese Karte hat keine umschaltbaren Eingänge.",
                           "This card has no switchable inputs."));
   } else {
