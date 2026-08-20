@@ -495,11 +495,6 @@ void App::SyncConfigChanges() {
       // Keep the dialog open on the failing setting instead of closing over it.
       if (!settings_.isOpen()) OpenSettings(error);
       Toast(error);
-    } else {
-      // The banner exists to explain why the dialog opened by itself. Once the
-      // card is running, the reason is gone -- leaving it up until the dialog is
-      // closed and reopened reads like the selection did not take.
-      settings_.ClearReason();
     }
     CaptureAppliedState();
     UpdatePowerRequest();
@@ -1106,6 +1101,12 @@ void App::DrawUi() {
   DrawContextMenu();
 
   // ---- settings ----
+  // The banner explains why the dialog opened by itself. Once the card is
+  // actually running the reason is gone, whichever route got it there --
+  // picking a device, F5, or the automatic retry. Leaving it up until the
+  // dialog is closed and reopened reads like the selection did not take.
+  if (captureState_ == CaptureState::Running) settings_.ClearReason();
+
   switch (renderer_.detectedRange()) {
     case VideoRenderer::RangeVerdict::Limited:
       detectedRangeText_ = T("begrenzt (16-235)", "limited (16-235)");
