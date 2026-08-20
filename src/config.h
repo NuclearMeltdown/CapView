@@ -185,6 +185,13 @@ struct RecordSettings {
   // Path to ffmpeg.exe. Empty means: look next to CapView, then on PATH.
   std::string ffmpegPath;
 
+  // Result of the encoder test, kept so the list is filled on the next start
+  // instead of making everyone test again. The signature is the graphics
+  // hardware plus the ffmpeg build it was measured with; when either changes
+  // the result is thrown away, because it is no longer about this machine.
+  std::string encoderProbeSignature;
+  std::vector<int> encodersAvailable;  // RecordEncoder values that worked
+
   // Stills. Empty folder = Pictures\CapView. Screenshots go somewhere separate
   // from the recordings on purpose: a folder holding both a handful of videos
   // and four hundred stills is a folder nobody can find anything in.

@@ -167,6 +167,17 @@ FfmpegInfo LocateFfmpeg(const std::string& configuredPath) {
   return info;
 }
 
+void ApplyCachedProbe(FfmpegInfo* info, const std::vector<int>& available) {
+  if (!info) return;
+  if (info->encoders.empty()) info->encoders = KnownEncoders();
+  for (EncoderInfo& e : info->encoders) {
+    e.tested = true;
+    e.available = std::find(available.begin(), available.end(), (int)e.id) != available.end();
+    e.error.clear();
+  }
+  info->tested = true;
+}
+
 std::vector<EncoderInfo> KnownEncoders() {
   std::vector<EncoderInfo> out;
   for (const Candidate& c : kCandidates) {

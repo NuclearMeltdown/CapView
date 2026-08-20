@@ -1173,21 +1173,55 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   ImGui::Spacing();
   ImGui::SeparatorText(T("Encoder", "Encoder"));
 
-  int encoder = (int)rec.encoder;
+  // Only what survived the test is offered. Listing every hardware encoder on a
+  // machine that has one vendor's card invites people to pick something that
+  // cannot run, and then wonder why.
+  const bool tested = ffmpeg && ffmpeg->tested;
+  const EncoderInfo* chosen = ffmpeg ? ffmpeg->Find(rec.encoder) : nullptr;
+  const bool chosenOk =
+      rec.encoder == RecordEncoder::Auto || (chosen && chosen->available);
+
+  const char* preview = !tested ? T("noch nicht geprüft", "not tested yet")
+                                : RecordEncoderName((int)rec.encoder);
+
+  ImGui::BeginDisabled(!tested);
   ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Encoder", "Encoder"), &encoder, 10, RecordEncoderName)) {
-    rec.encoder = (RecordEncoder)encoder;
+  if (ImGui::BeginCombo(T("Encoder", "Encoder"), preview)) {
+    if (ImGui::Selectable(RecordEncoderName((int)RecordEncoder::Auto),
+                          rec.encoder == RecordEncoder::Auto)) {
+      rec.encoder = RecordEncoder::Auto;
+    }
+    for (const EncoderInfo& e : ffmpeg->encoders) {
+      if (!e.available) continue;
+      const bool selected = (rec.encoder == e.id);
+      if (ImGui::Selectable(e.label.c_str(), selected)) rec.encoder = e.id;
+      if (selected) ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
   }
+  ImGui::EndDisabled();
   ImGui::SameLine();
-  HelpMarker(T("Automatisch: bester Encoder, der den Test besteht, Hardware zuerst.",
-               "Automatic: best encoder that passes the test, hardware first."));
+  HelpMarker(T("Automatisch nimmt den besten verfügbaren, Hardware zuerst.",
+               "Automatic takes the best available one, hardware first."));
+
+  if (!tested) {
+    ImGui::TextWrapped(
+        T("Welche Encoder gehen, hängt an der Grafikkarte. Einmal prüfen — das Ergebnis "
+          "bleibt gespeichert und wird nur bei einem Hardwarewechsel neu gebraucht.",
+          "Which encoders work depends on the graphics card. Test once — the result is "
+          "kept and is only needed again after a hardware change."));
+  } else if (!chosenOk) {
+    ImGui::TextColored(ImVec4(0.95f, 0.6f, 0.35f, 1.0f), "%s",
+                       T("Der gespeicherte Encoder ist hier nicht verfügbar.",
+                         "The saved encoder is not available here."));
+  }
 
   const bool busy = downloader_.busy();
   ImGui::BeginDisabled(!ffmpeg || !ffmpeg->found || busy || probeBusy_);
-  if (ImGui::Button(probeBusy_ ? T("Wird geprüft ...", "Testing ...")
-                               : T("Encoder testen", "Test encoders"))) {
-    probeRequested_ = true;
-  }
+  const char* testLabel = probeBusy_ ? T("Wird geprüft ...", "Testing ...")
+                          : tested   ? T("Erneut testen", "Test again")
+                                     : T("Encoder testen", "Test encoders");
+  if (ImGui::Button(testLabel)) probeRequested_ = true;
   ImGui::EndDisabled();
   ImGui::SameLine();
   HelpMarker(T("Kodiert je zwei Testbilder. Die Encoder-Liste des Builds nennt nur, was "
@@ -1195,16 +1229,26 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
                "Encodes two test frames each. The build's encoder list only names what was "
                "compiled in, not what the hardware can do."));
 
-  if (ffmpeg && ffmpeg->found) {
+  // Two wrapped lines rather than ten. A list of every candidate ran off the
+  // bottom of the dialog, which made the result of pressing Test nearly
+  // invisible -- and the result is the entire point of pressing it.
+  if (ffmpeg && ffmpeg->found && tested) {
+    std::string works, fails;
     for (const EncoderInfo& e : ffmpeg->encoders) {
       if (!e.tested) continue;
-      ImGui::TextColored(e.available ? ImVec4(0.5f, 0.85f, 0.5f, 1.0f)
-                                     : ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
-                         "%s %s", e.available ? "+" : "-", e.label.c_str());
-      if (!e.available && !e.error.empty()) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(%s)", e.error.c_str());
-      }
+      std::string& target = e.available ? works : fails;
+      if (!target.empty()) target += ", ";
+      target += e.label;
+    }
+    if (!works.empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.85f, 0.5f, 1.0f));
+      ImGui::TextWrapped("%s%s", T("Verwendbar: ", "Usable: "), works.c_str());
+      ImGui::PopStyleColor();
+    }
+    if (!fails.empty()) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+      ImGui::TextWrapped("%s%s", T("Geht hier nicht: ", "Not available here: "), fails.c_str());
+      ImGui::PopStyleColor();
     }
   }
 

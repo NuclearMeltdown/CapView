@@ -13,6 +13,11 @@
 
 namespace cap {
 
+// Names of the installed graphics adapters, joined. Used to notice that the
+// machine's hardware changed since the encoder test was cached -- a saved
+// result from someone's old card is worse than no result at all.
+std::string GraphicsAdapterSignature();
+
 class D3DContext {
  public:
   D3DContext() = default;

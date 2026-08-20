@@ -57,6 +57,12 @@ const EncoderInfo* EnsureUsableEncoder(FfmpegInfo* info, RecordEncoder wanted);
 // The full candidate list with labels, regardless of availability.
 std::vector<EncoderInfo> KnownEncoders();
 
+// Fills in the results of an earlier test instead of running one. `available`
+// holds RecordEncoder values. Everything not in it counts as tested and
+// unavailable, which is the point: the list then shows what this machine can
+// actually do.
+void ApplyCachedProbe(FfmpegInfo* info, const std::vector<int>& available);
+
 // Runs ffmpeg with the given arguments and captures stdout+stderr.
 // Returns false when the process could not be started at all.
 bool RunFfmpeg(const std::string& exe, const std::wstring& args, std::string* output,
