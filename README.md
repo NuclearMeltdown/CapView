@@ -39,9 +39,11 @@ WASAPI with a configurable buffer, optional exclusive mode, and an A/V offset.
 Drift between the two clocks is corrected continuously. Level meters on both
 inputs, so you can see there is signal before you record ten minutes of silence.
 
-**Microphone** — an optional second input that goes into the recording as its
-own track, never mixed in and never played back. Its own gain, on top of
-whatever Windows is doing.
+**Microphone** — an optional second input that goes into the recording and
+nowhere else; it is never played back, which would only be an echo. Its own
+gain, on top of whatever Windows is doing. By default the file gets three
+tracks: a mix that plays in anything, plus game and microphone separately for
+editing. Mixed-only and separate-only are both a setting away.
 
 **Recording** — H.264, H.265 or AV1 through NVENC, QuickSync, AMF or x264/x265,
 via ffmpeg. Records the picture at source resolution; window size is irrelevant.

@@ -1,7 +1,6 @@
 #include "ui/settings_window.h"
 
 #include <shellapi.h>
-#include <shobjidl.h>
 
 #include <algorithm>
 #include <cmath>
@@ -9,6 +8,7 @@
 
 #include "i18n.h"
 #include "record/screenshot.h"
+#include "ui/file_dialog.h"
 #include "imgui.h"
 
 namespace cap {
@@ -120,72 +120,6 @@ BOOL CALLBACK MonitorProc(HMONITOR monitor, HDC, LPRECT, LPARAM data) {
   return TRUE;
 }
 
-// The Explorer folder picker. IFileOpenDialog with FOS_PICKFOLDERS is the
-// modern one -- SHBrowseForFolder still works but looks a decade old and has no
-// address bar to paste a path into.
-std::wstring PickFolder(HWND owner, const std::wstring& start) {
-  ComPtr<IFileOpenDialog> dialog;
-  if (FAILED(::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(&dialog)))) {
-    return {};
-  }
-
-  DWORD options = 0;
-  dialog->GetOptions(&options);
-  dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-
-  if (!start.empty()) {
-    ComPtr<IShellItem> item;
-    if (SUCCEEDED(::SHCreateItemFromParsingName(start.c_str(), nullptr, IID_PPV_ARGS(&item)))) {
-      dialog->SetFolder(item.Get());
-    }
-  }
-
-  if (FAILED(dialog->Show(owner))) return {};  // also the cancel path
-
-  ComPtr<IShellItem> result;
-  if (FAILED(dialog->GetResult(&result))) return {};
-  PWSTR path = nullptr;
-  if (FAILED(result->GetDisplayName(SIGDN_FILESYSPATH, &path)) || !path) return {};
-  std::wstring folder = path;
-  ::CoTaskMemFree(path);
-  return folder;
-}
-
-// Same dialog as PickFolder, for a single executable.
-std::wstring PickExecutable(HWND owner, const std::wstring& start) {
-  ComPtr<IFileOpenDialog> dialog;
-  if (FAILED(::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(&dialog)))) {
-    return {};
-  }
-
-  const COMDLG_FILTERSPEC filters[] = {{L"ffmpeg.exe", L"ffmpeg.exe"},
-                                       {L"*.exe", L"*.exe"}};
-  dialog->SetFileTypes(2, filters);
-
-  DWORD options = 0;
-  dialog->GetOptions(&options);
-  dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST);
-
-  if (!start.empty()) {
-    ComPtr<IShellItem> item;
-    if (SUCCEEDED(::SHCreateItemFromParsingName(start.c_str(), nullptr, IID_PPV_ARGS(&item)))) {
-      dialog->SetFolder(item.Get());
-    }
-  }
-
-  if (FAILED(dialog->Show(owner))) return {};
-
-  ComPtr<IShellItem> result;
-  if (FAILED(dialog->GetResult(&result))) return {};
-  PWSTR path = nullptr;
-  if (FAILED(result->GetDisplayName(SIGDN_FILESYSPATH, &path)) || !path) return {};
-  std::wstring file = path;
-  ::CoTaskMemFree(path);
-  return file;
-}
-
 }  // namespace
 
 std::vector<MonitorInfoEntry> EnumerateMonitors() {
@@ -279,9 +213,40 @@ void SettingsWindow::EnsureValidFormat(const DeviceProbeResult& caps) {
 
 // ----------------------------------------------------------------------- draw
 
+void SettingsWindow::PollFileDialog(FfmpegInfo* ffmpeg) {
+  std::vector<std::wstring> picked;
+  int tag = kPickNone;
+  if (!picker_.TakeResult(&picked, &tag)) return;
+  if (picked.empty()) return;  // cancelled
+
+  RecordSettings& rec = cfg().record;
+  switch (tag) {
+    case kPickRecordFolder:
+      rec.outputFolder = ToUtf8(picked.front());
+      std::snprintf(folderBuffer_, sizeof(folderBuffer_), "%s", rec.outputFolder.c_str());
+      break;
+    case kPickShotFolder:
+      rec.screenshotFolder = ToUtf8(picked.front());
+      std::snprintf(shotFolderBuffer_, sizeof(shotFolderBuffer_), "%s",
+                    rec.screenshotFolder.c_str());
+      break;
+    case kPickFfmpeg:
+      rec.ffmpegPath = ToUtf8(picked.front());
+      std::snprintf(ffmpegPathBuffer_, sizeof(ffmpegPathBuffer_), "%s", rec.ffmpegPath.c_str());
+      if (ffmpeg) *ffmpeg = LocateFfmpeg(rec.ffmpegPath);
+      break;
+    case kPickRemux:
+      if (ffmpeg && ffmpeg->found) remuxer_.Start(ToWide(ffmpeg->path), picked);
+      break;
+    default:
+      break;
+  }
+}
+
 SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
                                             FfmpegInfo* ffmpeg) {
   if (!open_ || !live_) return Result::None;
+  PollFileDialog(ffmpeg);
   if (!listsValid_) RefreshDeviceLists();
 
   Result result = Result::None;
@@ -863,6 +828,16 @@ void SettingsWindow::DrawAudioTab() {
   HelpMarker(T("Zusätzlich zur Windows-Einstellung, wirkt nur auf die Aufnahme.",
                "On top of the Windows setting, affects the recording only."));
 
+  int trackMode = (int)audio.micTrackMode;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Spuren", "Tracks"), &trackMode, 3, MicTrackModeName)) {
+    audio.micTrackMode = (MicTrackMode)trackMode;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Gemischt spielt überall ab. Getrennt lässt sich im Schnitt noch auseinander "
+               "nehmen.",
+               "Mixed plays anywhere. Separate can still be pulled apart in an editor."));
+
   ImGui::SetNextItemWidth(-260.0f);
   LevelMeter(T("Mikrofonpegel", "Microphone level"), micPeak_, micRunning_);
   if (audio.micEnabled && !micRunning_) {
@@ -1007,7 +982,7 @@ void SettingsWindow::DrawDisplayTab() {
 
 // --------------------------------------------------------------- record tab
 
-void SettingsWindow::FolderRow(const char* id, char* buffer, size_t bufferSize,
+void SettingsWindow::FolderRow(const char* id, int pickTag, char* buffer, size_t bufferSize,
                               std::string* value, const std::wstring& defaultFolder) {
   const ImGuiStyle& style = ImGui::GetStyle();
   const float browse = ImGui::CalcTextSize(T("Durchsuchen", "Browse")).x + style.FramePadding.x * 2;
@@ -1021,15 +996,14 @@ void SettingsWindow::FolderRow(const char* id, char* buffer, size_t bufferSize,
   }
 
   ImGui::SameLine();
+  ImGui::BeginDisabled(picker_.busy());
   if (ImGui::Button((std::string(T("Durchsuchen", "Browse")) + "##" + id).c_str())) {
-    const std::wstring start = value->empty() ? defaultFolder : ToWide(*value);
-    const std::wstring picked =
-        PickFolder((HWND)ImGui::GetMainViewport()->PlatformHandleRaw, start);
-    if (!picked.empty()) {
-      *value = ToUtf8(picked);
-      std::snprintf(buffer, bufferSize, "%s", value->c_str());
-    }
+    FileDialogRequest request;
+    request.mode = FileDialogRequest::Mode::Folder;
+    request.startPath = value->empty() ? defaultFolder : ToWide(*value);
+    picker_.Start(request, (HWND)ImGui::GetMainViewport()->PlatformHandleRaw, pickTag);
   }
+  ImGui::EndDisabled();
 
   ImGui::SameLine();
   // An empty string is what "default" means in the config, so resetting clears
@@ -1104,17 +1078,17 @@ void SettingsWindow::DrawFfmpegBlock(FfmpegInfo* ffmpeg) {
     if (ffmpeg) *ffmpeg = LocateFfmpeg(rec.ffmpegPath);
   }
   ImGui::SameLine();
+  ImGui::BeginDisabled(picker_.busy());
   if (ImGui::Button(T("Durchsuchen##ffmpeg", "Browse##ffmpeg"))) {
-    const std::wstring start =
-        rec.ffmpegPath.empty() ? ExeDirectory() : ToWide(rec.ffmpegPath);
-    const std::wstring picked =
-        PickExecutable((HWND)ImGui::GetMainViewport()->PlatformHandleRaw, start);
-    if (!picked.empty()) {
-      rec.ffmpegPath = ToUtf8(picked);
-      std::snprintf(ffmpegPathBuffer_, sizeof(ffmpegPathBuffer_), "%s", rec.ffmpegPath.c_str());
-      if (ffmpeg) *ffmpeg = LocateFfmpeg(rec.ffmpegPath);
-    }
+    FileDialogRequest request;
+    request.mode = FileDialogRequest::Mode::OpenFile;
+    request.title = ToWide(T("ffmpeg.exe auswählen", "Select ffmpeg.exe"));
+    request.startPath = rec.ffmpegPath.empty() ? ExeDirectory() : ToWide(rec.ffmpegPath);
+    request.filters = {{L"ffmpeg.exe", L"ffmpeg.exe"},
+                       {ToWide(T("Programme", "Programs")), L"*.exe"}};
+    picker_.Start(request, (HWND)ImGui::GetMainViewport()->PlatformHandleRaw, kPickFfmpeg);
   }
+  ImGui::EndDisabled();
 }
 
 void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
@@ -1181,8 +1155,8 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
                  : T("0 = Bildrate der Quelle. Niedriger verwirft Bilder, Auflösung bleibt.",
                      "0 = source frame rate. Lower drops frames, resolution unchanged."));
 
-  FolderRow("recfolder", folderBuffer_, sizeof(folderBuffer_), &rec.outputFolder,
-            DefaultRecordFolder());
+  FolderRow("recfolder", kPickRecordFolder, folderBuffer_, sizeof(folderBuffer_),
+            &rec.outputFolder, DefaultRecordFolder());
 
   ImGui::Checkbox(T("Bei Größe aufteilen", "Split at size"), &rec.splitFiles);
   ImGui::SameLine();
@@ -1280,8 +1254,8 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   ImGui::SliderInt(T("JPEG-Qualität", "JPEG quality"), &rec.jpegQuality, 1, 100, "%d %%");
   ImGui::EndDisabled();
 
-  FolderRow("shotfolder", shotFolderBuffer_, sizeof(shotFolderBuffer_), &rec.screenshotFolder,
-            DefaultScreenshotFolder());
+  FolderRow("shotfolder", kPickShotFolder, shotFolderBuffer_, sizeof(shotFolderBuffer_),
+            &rec.screenshotFolder, DefaultScreenshotFolder());
 }
 
 // ----------------------------------------------------------------- tools tab
@@ -1298,13 +1272,16 @@ void SettingsWindow::DrawToolsTab(FfmpegInfo* ffmpeg) {
   ImGui::Spacing();
 
   const bool remuxBusy = remuxer_.busy();
-  ImGui::BeginDisabled(remuxBusy || !ffmpeg || !ffmpeg->found);
+  ImGui::BeginDisabled(remuxBusy || picker_.busy() || !ffmpeg || !ffmpeg->found);
   if (ImGui::Button(T("Dateien wählen ...", "Choose files ..."))) {
-    HWND owner = (HWND)ImGui::GetMainViewport()->PlatformHandleRaw;
-    const std::wstring start =
+    FileDialogRequest request;
+    request.mode = FileDialogRequest::Mode::OpenFiles;
+    request.title = ToWide(T("Aufnahmen auswählen", "Select recordings"));
+    request.startPath =
         rec.outputFolder.empty() ? DefaultRecordFolder() : ToWide(rec.outputFolder);
-    const std::vector<std::wstring> files = AskForRecordings(owner, start);
-    if (!files.empty()) remuxer_.Start(ToWide(ffmpeg->path), files);
+    request.filters = {{ToWide(T("Aufnahmen", "Recordings")), L"*.mkv;*.mp4;*.mov;*.avi;*.ts"},
+                       {ToWide(T("Alle Dateien", "All files")), L"*.*"}};
+    picker_.Start(request, (HWND)ImGui::GetMainViewport()->PlatformHandleRaw, kPickRemux);
   }
   ImGui::EndDisabled();
 

@@ -73,8 +73,4 @@ class Remuxer {
   std::vector<Item> items_;
 };
 
-// Opens the multi select file dialog for recordings. Returns an empty list when
-// the user cancels. `startFolder` may be empty.
-std::vector<std::wstring> AskForRecordings(HWND owner, const std::wstring& startFolder);
-
 }  // namespace cap

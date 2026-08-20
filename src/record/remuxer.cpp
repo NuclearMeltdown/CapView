@@ -1,7 +1,5 @@
 #include "record/remuxer.h"
 
-#include <commdlg.h>
-
 #include <algorithm>
 
 #include "i18n.h"
@@ -191,47 +189,6 @@ void Remuxer::Run(std::wstring ffmpegPath) {
                       good, count));
     state_.store(good > 0 ? State::Done : State::Failed, std::memory_order_relaxed);
   }
-}
-
-// ------------------------------------------------------------- file dialog
-
-std::vector<std::wstring> AskForRecordings(HWND owner, const std::wstring& startFolder) {
-  // Room for a long multi selection: the dialog packs the folder and every file
-  // name into this one buffer.
-  std::vector<wchar_t> buffer(64 * 1024, L'\0');
-
-  const std::wstring filter =
-      ToWide(T("Aufnahmen", "Recordings")) + L"\0*.mkv;*.mp4;*.mov;*.avi;*.ts\0" +
-      ToWide(T("Alle Dateien", "All files")) + L"\0*.*\0\0";
-
-  OPENFILENAMEW ofn = {};
-  ofn.lStructSize = sizeof(ofn);
-  ofn.hwndOwner = owner;
-  ofn.lpstrFilter = filter.c_str();
-  ofn.lpstrFile = buffer.data();
-  ofn.nMaxFile = (DWORD)buffer.size();
-  ofn.lpstrInitialDir = startFolder.empty() ? nullptr : startFolder.c_str();
-  ofn.Flags = OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
-              OFN_NOCHANGEDIR;
-
-  if (!::GetOpenFileNameW(&ofn)) return {};
-
-  // One file gives a plain path. Several give the folder, a null, then the bare
-  // names, each null terminated, ending in a double null.
-  std::vector<std::wstring> parts;
-  const wchar_t* p = buffer.data();
-  while (*p) {
-    parts.emplace_back(p);
-    p += parts.back().size() + 1;
-  }
-  if (parts.empty()) return {};
-  if (parts.size() == 1) return parts;
-
-  std::wstring folder = parts[0];
-  if (!folder.empty() && folder.back() != L'\\') folder += L'\\';
-  std::vector<std::wstring> files;
-  for (size_t i = 1; i < parts.size(); ++i) files.push_back(folder + parts[i]);
-  return files;
 }
 
 }  // namespace cap

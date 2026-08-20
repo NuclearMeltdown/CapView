@@ -61,12 +61,15 @@ class Recorder {
     bool active() const { return sampleRate > 0 && pull != nullptr; }
   };
 
+  // Which tracks end up in the file when both sources are in use.
+  MicTrackMode micTrackMode_ = MicTrackMode::Both;
+
   // `main` is the sound you hear, and its sample count is the master clock; a
   // rate of 0 there hands the clock to the wall instead. `mic` is optional and
   // becomes a second track -- never mixed in, so it stays separable later.
   bool Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, int width, int height,
              double sourceFps, const AudioSource& main, const AudioSource& mic,
-             std::string* error);
+             MicTrackMode micTrackMode, std::string* error);
   void Stop();
 
   bool recording() const { return running_.load(std::memory_order_relaxed); }

@@ -32,6 +32,12 @@ enum class AudioSource { Embedded, Manual, None };
 
 enum class OsdCorner { TopLeft, TopRight, BottomLeft, BottomRight };
 
+// How the microphone ends up in the file. "Both" costs one more AAC track --
+// about a megabyte a minute against a recording of well over a hundred -- and
+// means the file plays correctly in anything while still being separable in an
+// editor.
+enum class MicTrackMode { Both, Mixed, Separate };
+
 // How much of the statistics panel is shown. The full panel is a wall of text
 // to read while playing, so the useful numbers come first and the rest is opt in.
 enum class StatsDetail { Compact, Normal, Full };
@@ -65,6 +71,7 @@ const char* ColorRangeName(int index);
 const char* ColorMatrixName(int index);
 const char* OsdCornerName(int index);
 const char* StatsDetailName(int index);
+const char* MicTrackModeName(int index);
 const char* RecordContainerName(int index);
 const char* ScreenshotFormatName(int index);
 const char* RecordEncoderName(int index);
@@ -158,6 +165,7 @@ struct AudioSettings {
   bool micEnabled = false;
   DeviceRef micDevice;   // empty = system default recording device
   float micGain = 1.0f;  // linear, 0..4 (up to +12 dB), independent of Windows
+  MicTrackMode micTrackMode = MicTrackMode::Both;
 };
 
 // Recording is deliberately thin: it writes what the viewer shows, at the
