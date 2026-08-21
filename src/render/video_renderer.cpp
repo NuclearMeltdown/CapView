@@ -355,9 +355,6 @@ bool VideoRenderer::EnsureIntermediate(int width, int height) {
 // the picture has settled before anyone reaches for the settings.
 static const int kRangeSampleEvery = 3;
 static const int kRangeFramesWanted = 40;
-// Give up and fall back to the format based rule after this many frames without
-// ever seeing anything dark. A permanently bright source cannot be judged.
-static const int kRangeFramesGiveUp = 600;
 // Luma values per analysed frame. Sparse on purpose: this runs on the render
 // thread and must not show up in the frame time.
 static const int kRangeSamplesPerFrame = 8192;
@@ -416,10 +413,25 @@ void VideoRenderer::AnalyzeLevels(const FrameView& frame) {
   const int analysed = rangeFramesSeen_ / kRangeSampleEvery;
   if (analysed < kRangeFramesWanted || rangeSamples_ == 0) return;
 
-  // Without any dark pixels there is nothing to tell the two apart: limited
-  // range piles its blacks up at exactly 16, full range goes below it. Keep
-  // watching rather than guessing from a bright menu screen.
-  if (rangeMin_ > 40 && rangeFramesSeen_ < kRangeFramesGiveUp) return;
+  // Two ways the sample can be worthless. Without any dark pixels there is
+  // nothing to tell the two apart: limited range piles its blacks up at exactly
+  // 16, full range goes below it. And a picture with no contrast at all -- a
+  // console asleep, a card between signals -- is entirely black, which reads as
+  // 100 % below 16 and would otherwise be written down as a confident verdict of
+  // full range on no evidence at all.
+  //
+  // In both cases the evidence is discarded and the measurement starts over, so
+  // that whatever appears later is judged on its own. Until something decides,
+  // Draw falls back to the rule of thumb for the pixel format.
+  if (rangeMin_ > 40 || (rangeMax_ - rangeMin_) < 64) {
+    rangeFramesSeen_ = 0;
+    rangeSamples_ = 0;
+    rangeBelow16_ = 0;
+    rangeAbove235_ = 0;
+    rangeMin_ = 255;
+    rangeMax_ = 0;
+    return;
+  }
 
   const double below = (double)rangeBelow16_ / (double)rangeSamples_;
   // The black end decides. Values above 235 are not proof of anything: limited

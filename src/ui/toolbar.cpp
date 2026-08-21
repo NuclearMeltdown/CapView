@@ -127,6 +127,13 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
                                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
                                      ImGuiWindowFlags_NoSavedSettings |
                                      ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                     // Without NoNavInputs this window takes
+                                     // keyboard navigation focus, which makes
+                                     // ImGui claim the keyboard, which makes the
+                                     // application drop every hotkey. The bar is
+                                     // driven with the mouse; it has no business
+                                     // holding the keyboard.
+                                     ImGuiWindowFlags_NoNavInputs |
                                      ImGuiWindowFlags_NoNavFocus);
   ImGui::PopStyleVar(2);
   if (!open) {
