@@ -52,6 +52,11 @@ class VideoRenderer {
   // Where the picture ended up inside the window, in client pixels.
   const RECT& videoRect() const { return videoRect_; }
 
+  // Pixels reserved at the top of the window for the toolbar. The picture is
+  // fitted below them rather than drawn underneath, so the bar never covers
+  // what you are playing.
+  void SetTopInset(int pixels) { topInset_ = pixels < 0 ? 0 : pixels; }
+
   const VideoFormatInfo& sourceFormat() const { return source_; }
 
   // True when the current source is interlaced according to its media type.
@@ -137,6 +142,7 @@ class VideoRenderer {
   bool UploadRgb32(const FrameView& frame);
 
   void ComputeDestRect(const ImageSettings& image);
+  void ComputeDestRectIn(const ImageSettings& image, int winW, int winH);
 
   D3DContext* ctx_ = nullptr;
 
@@ -170,6 +176,7 @@ class VideoRenderer {
   int croppedWidth_ = 0;
   int croppedHeight_ = 0;
   RECT videoRect_ = {};
+  int topInset_ = 0;
 
   // Scratch row buffer for RGB24, which has no matching DXGI format.
   std::vector<uint8_t> expandBuffer_;

@@ -36,6 +36,7 @@ add_executable(CapView WIN32
   src/render/d3d_context.cpp
   src/render/video_renderer.cpp
   src/ui/file_dialog.cpp
+  src/ui/toolbar.cpp
   src/ui/theme.cpp
   src/ui/settings_window.cpp
   src/ui/overlay.cpp
