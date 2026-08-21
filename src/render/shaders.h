@@ -35,7 +35,7 @@ Texture2D<float4> tex2 : register(t2);
 
 cbuffer ConvertCB : register(b0) {
   int   gFormatKind;      // see FormatKind in video_renderer.h
-  int   gDeinterlaceMode; // 0 off, 1 bob, 2 bob linear
+  int   gDeinterlaceMode; // 0 off, 1 bob, 2 bob linear, 3 motion adaptive, 4 edge directed
   int   gFieldIndex;      // 0 = first field, 1 = second field
   int   gBottomUp;
 
@@ -115,6 +115,38 @@ float3 FetchRgbAt(int2 p) {
   return (rgb - gYOffset) * gYScale;
 }
 
+float Luma(float3 c) {
+  return dot(c, float3(0.299, 0.587, 0.114));
+}
+
+// Interpolates a missing line by looking for the direction in which the line
+// above and the line below agree, instead of straight down the column. On a
+// diagonal edge the vertical average produces a staircase; following the edge
+// does not.
+float3 EdgeDirected(int x, int rowAbove, int rowBelow) {
+  float3 a0 = FetchRgbAt(int2(x, rowAbove));
+  float3 b0 = FetchRgbAt(int2(x, rowBelow));
+  float3 best = (a0 + b0) * 0.5;
+  float bestCost = abs(Luma(a0) - Luma(b0));
+
+  [unroll]
+  for (int d = 1; d <= 3; ++d) {
+    // Slanting costs a little, so a genuinely vertical edge is not talked out
+    // of being vertical by a marginally better diagonal match.
+    float penalty = float(d) * 0.006;
+    float3 aR = FetchRgbAt(int2(x + d, rowAbove));
+    float3 bL = FetchRgbAt(int2(x - d, rowBelow));
+    float costR = abs(Luma(aR) - Luma(bL)) + penalty;
+    if (costR < bestCost) { bestCost = costR; best = (aR + bL) * 0.5; }
+
+    float3 aL = FetchRgbAt(int2(x - d, rowAbove));
+    float3 bR = FetchRgbAt(int2(x + d, rowBelow));
+    float costL = abs(Luma(aL) - Luma(bR)) + penalty;
+    if (costL < bestCost) { bestCost = costL; best = (aL + bR) * 0.5; }
+  }
+  return best;
+}
+
 float4 main(VSOut i) : SV_Target {
   int2 op = int2(i.pos.xy);
   int srcX = op.x + gCropLeft;
@@ -122,17 +154,18 @@ float4 main(VSOut i) : SV_Target {
   // Rows of the cropped area, in full-frame coordinates.
   int rowTop = gCropTop;
   int rowBottom = gCropTop + gOutHeight - 1;
+  int row = gCropTop + op.y;
 
   float3 rgb;
   if (gDeinterlaceMode == 0) {
-    rgb = FetchRgbAt(int2(srcX, gCropTop + op.y));
-  } else {
+    rgb = FetchRgbAt(int2(srcX, row));
+  } else if (gDeinterlaceMode <= 2) {
     // Reconstruct a full frame out of the selected field. `t` is the
     // continuous index of that field's own rows.
-    float t = (float(gCropTop + op.y) - float(gFieldIndex)) * 0.5;
+    float t = (float(row) - float(gFieldIndex)) * 0.5;
     if (gDeinterlaceMode == 1) {
-      int row = int(round(t)) * 2 + gFieldIndex;
-      rgb = FetchRgbAt(int2(srcX, clamp(row, rowTop, rowBottom)));
+      int r = int(round(t)) * 2 + gFieldIndex;
+      rgb = FetchRgbAt(int2(srcX, clamp(r, rowTop, rowBottom)));
     } else {
       float fl = floor(t);
       float frac = t - fl;
@@ -141,6 +174,38 @@ float4 main(VSOut i) : SV_Target {
       float3 a = FetchRgbAt(int2(srcX, clamp(row0, rowTop, rowBottom)));
       float3 b = FetchRgbAt(int2(srcX, clamp(row1, rowTop, rowBottom)));
       rgb = lerp(a, b, frac);
+    }
+  } else {
+    // Modes 3 and 4 keep the frame's own geometry rather than stretching one
+    // field over it. A row belonging to the field being shown is used exactly as
+    // captured; the rows between them come from the other field, half a field
+    // time away, and are only trustworthy where nothing moved.
+    if ((row & 1) == gFieldIndex) {
+      rgb = FetchRgbAt(int2(srcX, row));
+    } else {
+      int rowAbove = clamp(row - 1, rowTop, rowBottom);
+      int rowBelow = clamp(row + 1, rowTop, rowBottom);
+      float3 above = FetchRgbAt(int2(srcX, rowAbove));
+      float3 below = FetchRgbAt(int2(srcX, rowBelow));
+
+      if (gDeinterlaceMode == 4) {
+        rgb = EdgeDirected(srcX, rowAbove, rowBelow);
+      } else {
+        float3 woven = FetchRgbAt(int2(srcX, row));
+        float lw = Luma(woven);
+        float la = Luma(above);
+        float lb = Luma(below);
+
+        // Combing is the woven line sitting outside the range its two
+        // neighbours span: bright, dark, bright. The product of the two
+        // differences is positive exactly then, and near zero on a smooth
+        // gradient. Vertical detail that is genuinely in the picture raises the
+        // bar, so a static but finely striped image is not mistaken for motion.
+        float comb = (lw - la) * (lw - lb);
+        float detail = abs(la - lb);
+        float motion = saturate((comb - 0.0015 - detail * 0.35) * 90.0);
+        rgb = lerp(woven, (above + below) * 0.5, motion);
+      }
     }
   }
   return float4(saturate(rgb), 1.0);

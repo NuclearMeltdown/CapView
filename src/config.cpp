@@ -37,9 +37,11 @@ const char* ScaleFilterName(int i) {
 }
 
 const char* DeinterlaceName(int i) {
-  static const char* de[3] = {"Aus (Weave)", "Bob", "Bob (interpoliert)"};
-  static const char* en[3] = {"Off (weave)", "Bob", "Bob (interpolated)"};
-  i = Pick(i, 3);
+  static const char* de[kDeinterlaceCount] = {"Aus (Weave)", "Bob", "Bob (interpoliert)",
+                                              "Bewegungsadaptiv", "Kantenorientiert"};
+  static const char* en[kDeinterlaceCount] = {"Off (weave)", "Bob", "Bob (interpolated)",
+                                              "Motion adaptive", "Edge directed"};
+  i = Pick(i, kDeinterlaceCount);
   return T(de[i], en[i]);
 }
 
@@ -149,17 +151,25 @@ const char* ScaleFilterHelp(int i) {
 }
 
 const char* DeinterlaceHelp(int i) {
-  static const char* de[3] = {
+  static const char* de[kDeinterlaceCount] = {
       "Halbbilder bleiben verwoben. Bei Bewegung Kammartefakte.",
       "Volle Bildrate, keine Kammartefakte, keine Latenz.",
       "Wie Bob, fehlende Zeilen interpoliert. Weicher, weniger Zeilenflimmern.",
+      "Ruhige Bildteile behalten die volle Zeilenzahl, bewegte werden interpoliert. "
+      "Keine Latenz.",
+      "Fehlende Zeilen entlang der Kantenrichtung interpoliert. Glatte Diagonalen, "
+      "keine Latenz.",
   };
-  static const char* en[3] = {
+  static const char* en[kDeinterlaceCount] = {
       "Fields stay woven. Combing artefacts on motion.",
       "Full frame rate, no combing, no added latency.",
       "Like bob with interpolated lines. Softer, less line flicker.",
+      "Still parts of the picture keep every line, moving parts are interpolated. "
+      "No added latency.",
+      "Missing lines interpolated along the direction of edges. Smooth diagonals, "
+      "no added latency.",
   };
-  i = Pick(i, 3);
+  i = Pick(i, kDeinterlaceCount);
   return T(de[i], en[i]);
 }
 
@@ -326,7 +336,8 @@ Profile ReadProfile(const json::Value& v) {
   const json::Value& i = v["image"];
   p.image.filter = ReadEnum<ScaleFilter>(i, "filter", 5, ScaleFilter::Bilinear);
   p.image.sharpen = (float)Clamp(i["sharpen"].AsNumber(0.0), 0.0, 1.0);
-  p.image.deinterlace = ReadEnum<Deinterlace>(i, "deinterlace", 3, Deinterlace::Bob);
+  p.image.deinterlace =
+      ReadEnum<Deinterlace>(i, "deinterlace", kDeinterlaceCount, Deinterlace::Bob);
   p.image.deinterlaceAuto = i["deinterlaceAuto"].AsBool(true);
   p.image.aspect = ReadEnum<AspectMode>(i, "aspect", 5, AspectMode::Source);
   p.image.cropLeft = Clamp(i["cropLeft"].AsInt(0), 0, 4096);

@@ -127,13 +127,14 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
   ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, height), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.88f);
 
+  // Only the three the window itself reads may be popped straight after Begin.
+  // ItemSpacing and FramePadding are read by the widgets, so they have to stay
+  // pushed until the contents are done -- popping them here leaves the slider at
+  // the default frame padding, which is nearly the full height of the bar.
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
                       ImVec2(ImGui::GetFontSize() * 0.5f, BarPadding()));
-  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-                      ImVec2(ImGui::GetFontSize() * 0.28f, 0.0f));
-  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 1.0f));
   const bool open = ImGui::Begin("##toolbar", nullptr,
                                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
@@ -147,14 +148,24 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
                                      // holding the keyboard.
                                      ImGuiWindowFlags_NoNavInputs |
                                      ImGuiWindowFlags_NoNavFocus);
-  ImGui::PopStyleVar(5);
+  ImGui::PopStyleVar(3);
   if (!open) {
     ImGui::End();
     return result;
   }
 
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetFontSize() * 0.28f, 0.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 1.0f));
+
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const float side = ButtonSide();
+  // Top of the button row. Anything shorter than a button is centred against
+  // this rather than left to ImGui's line alignment, which puts a slider hard
+  // against the bottom edge of the bar.
+  const float rowTop = ImGui::GetCursorPosY();
+  auto centreInRow = [&](float itemHeight) {
+    ImGui::SetCursorPosY(rowTop + (side - itemHeight) * 0.5f);
+  };
   const float radius = side * 0.5f;
   const ImU32 fg = ImGui::GetColorU32(ImGuiCol_Text);
   const ImU32 dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
@@ -207,7 +218,7 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
   if (state.recording) {
     // The running time sits next to the button rather than in a corner, so the
     // one thing that is time critical is where the eye already is.
-    ImGui::AlignTextToFramePadding();
+    centreInRow(ImGui::GetTextLineHeight());
     ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "%s", Elapsed(state.recordSeconds).c_str());
     ImGui::SameLine();
   }
@@ -269,6 +280,7 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
   }
 
   ImGui::BeginDisabled(state.muted);
+  centreInRow(ImGui::GetFrameHeight());
   ImGui::SetNextItemWidth(side * 4.5f);
   float percent = state.volume * 100.0f;
   if (ImGui::SliderFloat("##vol", &percent, 0.0f, 100.0f, "%.0f %%")) {
@@ -280,6 +292,7 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
   {
     const float x = vp->WorkSize.x - side - ImGui::GetStyle().WindowPadding.x;
     if (x > ImGui::GetCursorPosX()) ImGui::SameLine(x);
+    ImGui::SetCursorPosY(rowTop);
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const bool pressed = ImGui::InvisibleButton("##hide", ImVec2(side, side));
     const bool hovered = ImGui::IsItemHovered();
@@ -303,6 +316,7 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
   dl->AddLine(ImVec2(pos.x, pos.y + size.y - 1.0f), ImVec2(pos.x + size.x, pos.y + size.y - 1.0f),
               Rgb(accentRgb, 0.55f), 1.0f);
 
+  ImGui::PopStyleVar(2);
   ImGui::End();
   return result;
 }
