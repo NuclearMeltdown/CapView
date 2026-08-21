@@ -18,8 +18,7 @@ Measured on a StarTech PEXHDCAP60L: **1080p60 sustained, ~1 ms between a frame
 arriving and being drawn.** That is the number in the corner of the screenshot
 above, and it is what the whole program is arranged around.
 
-Written for people who use a capture card to play, not to stream. OBS is a
-studio; this is a window. If you know AmaRecTV, it is the same idea: the card's
+Written for people who use a capture card to play, not to stream. OBS overkill; this is lightweight. If you know AmaRecTV, it is the same idea: the card's
 picture, as directly as the hardware permits, with recording attached and
 nothing else in the way.
 
