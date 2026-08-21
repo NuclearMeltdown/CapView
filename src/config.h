@@ -20,7 +20,9 @@ enum class Theme { Dark, Light, System };
 
 enum class ScaleFilter { Nearest, Bilinear, Bicubic, Lanczos3, SharpBilinear };
 
-enum class Deinterlace { Off, Bob, BobLinear };
+// Appended rather than reordered: these are written to the config as numbers.
+enum class Deinterlace { Off, Bob, BobLinear, MotionAdaptive, EdgeDirected };
+const int kDeinterlaceCount = 5;
 
 enum class AspectMode { Source, Force16x9, Force4x3, Stretch, Integer };
 
