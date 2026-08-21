@@ -659,7 +659,7 @@ void SettingsWindow::DrawImageTab() {
 
   int deint = (int)img.deinterlace;
   ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Deinterlacing", "Deinterlacing"), &deint, 3, DeinterlaceName,
+  if (ComboEnum(T("Deinterlacing", "Deinterlacing"), &deint, kDeinterlaceCount, DeinterlaceName,
                 DeinterlaceHelp)) {
     img.deinterlace = (Deinterlace)deint;
   }
