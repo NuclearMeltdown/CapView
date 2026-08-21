@@ -9,9 +9,16 @@ namespace cap {
 namespace {
 
 // One button is a square of this many text-line heights, so the bar scales with
-// the interface font instead of being pinned to a pixel size.
+// the interface font instead of being pinned to a pixel size. Kept close to the
+// text height: this is a convenience strip over a picture, and every pixel it
+// takes is a pixel the picture does not get.
 float ButtonSide() {
-  return ImGui::GetFontSize() * 1.9f;
+  return ImGui::GetFontSize() * 1.25f;
+}
+
+// Vertical breathing room above and below the buttons.
+float BarPadding() {
+  return ImGui::GetFontSize() * 0.2f;
 }
 
 ImU32 Rgb(unsigned rgb, float alpha) {
@@ -108,7 +115,7 @@ std::string Elapsed(double seconds) {
 }  // namespace
 
 float ToolbarHeight() {
-  return ButtonSide() + ImGui::GetStyle().WindowPadding.y * 2.0f;
+  return ButtonSide() + BarPadding() * 2.0f;
 }
 
 ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
@@ -122,6 +129,11 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
 
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+                      ImVec2(ImGui::GetFontSize() * 0.5f, BarPadding()));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                      ImVec2(ImGui::GetFontSize() * 0.28f, 0.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 1.0f));
   const bool open = ImGui::Begin("##toolbar", nullptr,
                                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
@@ -135,7 +147,7 @@ ToolbarResult DrawToolbar(const ToolbarState& state, unsigned accentRgb) {
                                      // holding the keyboard.
                                      ImGuiWindowFlags_NoNavInputs |
                                      ImGuiWindowFlags_NoNavFocus);
-  ImGui::PopStyleVar(2);
+  ImGui::PopStyleVar(5);
   if (!open) {
     ImGui::End();
     return result;
