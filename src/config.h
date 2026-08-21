@@ -230,6 +230,9 @@ struct AppSettings {
   bool hideCursorFullscreen = true;
   bool preventSleep = true;
   bool showStats = false;
+  // The button strip along the top. On by default: everything it offers is also
+  // on a key, but a key you have to know about first.
+  bool showToolbar = true;
   StatsDetail statsDetail = StatsDetail::Compact;
   bool logToFile = false;
 

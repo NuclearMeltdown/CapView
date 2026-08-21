@@ -714,8 +714,14 @@ bool VideoRenderer::GrabStill(std::vector<uint8_t>* pixels, int* width, int* hei
 }
 
 void VideoRenderer::ComputeDestRect(const ImageSettings& image) {
-  const int winW = ctx_->width();
-  const int winH = ctx_->height();
+  // Fit into the window minus the reserved strip, then push the result down by
+  // it. Every branch below can then go on thinking it owns the whole window.
+  ComputeDestRectIn(image, ctx_->width(), ctx_->height() - topInset_);
+  videoRect_.top += topInset_;
+  videoRect_.bottom += topInset_;
+}
+
+void VideoRenderer::ComputeDestRectIn(const ImageSettings& image, int winW, int winH) {
   const int srcW = croppedWidth_;
   const int srcH = croppedHeight_;
 

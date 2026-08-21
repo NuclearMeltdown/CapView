@@ -22,6 +22,7 @@
 #include "render/video_renderer.h"
 #include "ui/overlay.h"
 #include "ui/settings_window.h"
+#include "ui/toolbar.h"
 
 namespace cap {
 
@@ -111,6 +112,8 @@ class App {
   // Grabs the next rendered frame and writes it to disk.
   void RequestScreenshot() { screenshotPending_ = true; }
   void WriteScreenshot();
+  void DrawToolbarStrip();
+  void OpenFolderInExplorer(std::string* configured, const std::wstring& fallback);
   // Starts or stops the microphone to match the settings and what is going on.
   // `aboutToRecord` starts it for a recording that has not begun yet -- the
   // sample rate has to be known before ffmpeg is given its command line.
@@ -218,6 +221,8 @@ class App {
   double lastSerializeCheck_ = 0.0;
 
   bool screenshotPending_ = false;
+  // Whether the bar was drawn this frame; the picture layout follows it.
+  bool toolbarVisible_ = false;
 
   // Dragging the crop edges on the picture instead of typing four numbers.
   struct CropPick {
