@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include <shellapi.h>   // ShellExecuteW
 #include <windowsx.h>  // GET_X_LPARAM
 
 #include <algorithm>
@@ -849,6 +850,47 @@ void App::SyncMicrophone(bool aboutToRecord) {
   mic_.SetGain(a.micGain);
 }
 
+void App::OpenFolderInExplorer(std::string* configured, const std::wstring& fallback) {
+  const std::wstring folder = ResolveOutputFolder(configured, fallback);
+  if (folder.empty()) {
+    Toast(T("Zielordner nicht verfügbar.", "Folder not available."));
+    return;
+  }
+  ::ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void App::DrawToolbarStrip() {
+  ToolbarState state;
+  state.recording = recorder_.recording();
+  state.recordSeconds = state.recording ? recorder_.stats().seconds : 0.0;
+  state.muted = config_.active().audio.mute;
+  state.volume = config_.active().audio.volume;
+  state.canRecord = captureState_ == CaptureState::Running && renderer_.hasFrame();
+
+  const ToolbarResult result = DrawToolbar(state, config_.app.accentColor);
+  if (result.volume >= 0.0f) {
+    config_.active().audio.volume = result.volume;
+    if (config_.active().audio.mute) config_.active().audio.mute = false;
+    audio_.ApplySettings(config_.active().audio);
+    ShowVolumeOsd();
+  }
+
+  switch (result.action) {
+    case ToolbarAction::ToggleRecording: ToggleRecording(); break;
+    case ToolbarAction::Screenshot: RequestScreenshot(); break;
+    case ToolbarAction::Settings: OpenSettings({}); break;
+    case ToolbarAction::OpenRecordFolder:
+      OpenFolderInExplorer(&config_.record.outputFolder, DefaultRecordFolder());
+      break;
+    case ToolbarAction::OpenScreenshotFolder:
+      OpenFolderInExplorer(&config_.record.screenshotFolder, DefaultScreenshotFolder());
+      break;
+    case ToolbarAction::ToggleMute: ToggleMute(); break;
+    case ToolbarAction::Hide: config_.app.showToolbar = false; break;
+    default: break;
+  }
+}
+
 void App::WriteScreenshot() {
   std::vector<uint8_t> pixels;
   int width = 0, height = 0;
@@ -1278,6 +1320,9 @@ void App::RenderFrame() {
   GetBackgroundColor(darkMode_, config_.app.accentColor, clear);
   if (!d3d_.BeginFrame(clear)) return;
 
+  // Decided before drawing, so the picture is laid out around the bar in the
+  // same frame the bar appears in.
+  renderer_.SetTopInset(toolbarVisible_ ? (int)std::lround(ToolbarHeight()) : 0);
   renderer_.Draw(profile.image, fieldIndex_);
 
   // Right after the first pass, so the still is the picture that was just put on
@@ -1330,6 +1375,24 @@ void App::RenderFrame() {
 void App::DrawUi() {
   const Profile& profile = config_.active();
   FrameSink* sink = capture_.sink();
+
+  // ---- toolbar ----
+  // Windowed it is simply there; in fullscreen it follows the pointer, which is
+  // already hidden after a couple of seconds of play.
+  toolbarVisible_ = config_.app.showToolbar && !cropPick_.active &&
+                    (!fullscreen_ || !cursorHidden_);
+  if (toolbarVisible_) {
+    DrawToolbarStrip();
+    // Everything else positions itself against the viewport work area, which is
+    // exactly what it is for: the part of the window not taken by a bar. Moving
+    // it here means the statistics, the toasts, the status card and the settings
+    // dialog all keep clear of the toolbar without knowing it exists. ImGui
+    // resets this at the start of every frame.
+    ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float reserved = ToolbarHeight();
+    vp->WorkPos.y += reserved;
+    vp->WorkSize.y -= reserved;
+  }
 
   // ---- status card ----
   const bool haveSignal = sink && sink->HasRecentFrame(kNoSignalSeconds) && renderer_.hasFrame();
@@ -1484,6 +1547,11 @@ void App::DrawContextMenu() {
 
   bool stats = config_.app.showStats;
   if (ImGui::MenuItem(T("Statistik", "Statistics"), sc(HotkeyAction::Stats), &stats)) config_.app.showStats = stats;
+
+  bool toolbar = config_.app.showToolbar;
+  if (ImGui::MenuItem(T("Werkzeugleiste", "Toolbar"), nullptr, &toolbar)) {
+    config_.app.showToolbar = toolbar;
+  }
 
   // Right here rather than buried in the dialog: wrong levels or a wrong matrix
   // are things you spot by looking at the picture, and both take effect on the

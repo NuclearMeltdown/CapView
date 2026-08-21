@@ -10,67 +10,89 @@
 
 ![The viewer showing a console at 1080p60, with the statistics overlay reading a frame age of 1.0 ms](docs/viewer.jpg)
 
-Point it at your capture card and it puts the picture on screen with as little
-delay as the hardware allows — so you can play on the captured signal instead of
-watching it.
+CapView displays the output of a capture card with as little delay as the
+hardware allows, so the captured signal can be played on directly rather than
+only watched. Measured on a StarTech PEXHDCAP60L: **1080p60 sustained, around
+1 ms between a frame arriving from the card and being drawn.**
 
-Measured on a StarTech PEXHDCAP60L: **1080p60 sustained, ~1 ms between a frame
-arriving and being drawn.** That is the number in the corner of the screenshot
-above, and it is what the whole program is arranged around.
+It is meant for using a capture card to play. Recording, screenshots and a
+microphone track are included; scenes, overlays, compositing and streaming are
+not. For those, use OBS.
 
-Written for people who use a capture card to play, not to stream. OBS overkill; this is lightweight. If you know AmaRecTV, it is the same idea: the card's
-picture, as directly as the hardware permits, with recording attached and
-nothing else in the way.
+It covers the same ground as AmaRecTV, whose last release with a bundled
+recording codec was version 3.10 in 2014.
 
-## Why it is fast
+## Latency
 
-- **The frame is never queued.** The capture filter copies into a triple buffer
-  and returns. A late frame is dropped, not backed up — a queue is just latency
-  with extra steps.
+Four decisions account for the measured figure.
+
+- **No queue in the capture path.** The capture filter copies each frame into a
+  triple buffer and returns immediately. Frames arriving faster than they can be
+  shown are dropped rather than buffered, so delay cannot accumulate.
 - **No graph clock.** The DirectShow graph runs without a reference clock, so
-  nothing is held back waiting for its presentation time.
-- **Flip-model swapchain, one frame of latency, tearing allowed.** VSync off is
-  the single biggest lever there is, and it is the default.
-- **Decoding happens on the GPU.** YUY2, UYVY, YVYU, NV12, planar 4:2:0 and RGB
-  are unpacked in a shader, not on the CPU.
+  frames are not held back until a presentation time.
+- **Flip-model swap chain**, maximum frame latency of one, tearing permitted.
+  VSync is off by default.
+- **Format conversion on the GPU.** YUY2, UYVY, YVYU, NV12, planar 4:2:0 and RGB
+  are unpacked in a pixel shader rather than on the CPU.
 
-## What it does
+## Features
 
-**Source** — any DirectShow video device. Resolution, frame rate, pixel format
-and colour space are picked separately, like OBS. Combinations the driver does
-not advertise but does support (the classic "1080p60 shows up as 1080p30" case)
-can be forced.
+### Source
+
+Any DirectShow video device. Resolution, frame rate, pixel format and colour
+space are selected independently. Combinations a driver does not advertise but
+does accept can be forced, which covers the common case of a card reporting only
+1080p30 for a mode it will in fact deliver at 1080p60.
 
 ![The source tab, with the capture device, its embedded audio, and separate pickers for colour format, resolution and frame rate](docs/settings-source.jpg)
 
-**Picture** — nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear
-scaling, adaptive sharpening, bob deinterlacing, aspect override, integer
-scaling. Crop edges are dragged on the picture itself rather than typed in.
-Colour range and matrix are measured from the picture and can be overridden.
+### Picture
 
-**Audio** — the card's embedded audio or any Windows input, played out over
-WASAPI with a configurable buffer, optional exclusive mode, and an A/V offset.
-Drift between the two clocks is corrected continuously. Level meters on both
-inputs, so you can see there is signal before you record ten minutes of silence.
+Nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear scaling; contrast
+adaptive sharpening; bob deinterlacing; aspect override and integer scaling.
+Crop is set by dragging the edges on the picture.
 
-**Microphone** — an optional second input that goes into the recording and
-nowhere else; it is never played back, which would only be an echo. Its own
-gain, on top of whatever Windows is doing. By default the file gets three
-tracks: a mix that plays in anything, plus game and microphone separately for
-editing. Mixed-only and separate-only are both a setting away.
+Colour range and matrix default to automatic. The range is measured from the
+image rather than inferred from the pixel format, because it is a property of
+the source signal: a console set to full range delivers full range whether the
+card is asked for NV12 or RGB32.
 
-**Recording** — H.264, H.265 or AV1 through NVENC, QuickSync, AMF or x264/x265,
-via ffmpeg. Records the picture at source resolution; window size is irrelevant.
-The capture audio is the master clock, so the result is constant frame rate and
-stays in sync (measured: 1 ms drift over 15 seconds).
+### Audio
+
+The card's embedded audio, or any Windows recording device, played out through
+WASAPI. The buffer target is configurable, exclusive mode is optional, and an
+A/V offset is available. Drift between the capture and playback clocks is
+corrected continuously by adjusting the playback rate by a fraction of a per
+cent. Both inputs have level meters.
+
+An optional microphone is recorded as a separate input with its own gain. It is
+never played back. By default the file receives three audio tracks: a mix, plus
+the capture and microphone separately. Mixed-only and separate-only are also
+available.
+
+### Recording
+
+H.264, H.265 or AV1 through NVENC, QuickSync, AMF, x264 or x265, encoded by
+ffmpeg. The recording is made from the picture at source resolution, after crop
+and deinterlacing and before window scaling, so window size does not affect the
+result.
+
+The capture audio serves as the master clock, and the video timeline is derived
+from the number of audio samples written. The output is therefore constant frame
+rate and does not drift: measured at 1 ms over 15 seconds.
 
 ![The recording tab, with container, bitrate, output folder, and an encoder list naming the five that passed the test on this machine](docs/settings-recording.jpg)
 
-**Screenshots** — PNG or JPEG at source resolution, without the interface,
-written through Windows' own imaging stack. No ffmpeg needed.
+### Screenshots
 
-**Profiles** — device, input, format and every picture and audio setting in one
-bundle. Set one up per console, switch with Ctrl+1…9.
+PNG or JPEG at source resolution, taken before the interface is drawn. Written
+through Windows Imaging Component, so no ffmpeg is required.
+
+### Profiles
+
+A profile holds the device, input, capture format and all picture and audio
+settings. One per source, selected with Ctrl+1 to Ctrl+9.
 
 ## Shortcuts
 
@@ -88,83 +110,84 @@ bundle. Set one up per console, switch with Ctrl+1…9.
 | Ctrl+1 … Ctrl+9 | Switch profile |
 | Right click | Menu |
 
-Statistics come in three levels: frame rates and frame age, plus format and
-audio, plus everything.
-
-Everything except Esc, the profile digits and Alt+F4 can be rebound under
+All of these except Esc, the profile digits and Alt+F4 can be reassigned under
 *Settings → Keys*.
+
+The statistics overlay has three levels of detail: frame rates and frame age;
+those plus capture format, colour handling and audio buffer; and everything,
+including device names and dropped frame counts.
 
 ## Building
 
-Needs Visual Studio 2022 (Desktop C++) and CMake. No other dependencies —
-Dear ImGui is vendored in `third_party/`.
+Requires Visual Studio 2022 with the Desktop C++ workload, and CMake. There are
+no external dependencies; Dear ImGui is vendored in `third_party/`.
 
 ```bash
 build.bat
 ```
 
-The result is a single self-contained `CapView.exe` in the repository root,
-about 1.6 MB, statically linked against the CRT. Everything else the build
-produced is deleted afterwards, so what is left is the program and nothing
-else. Settings live in `CapView.json` next to it; nothing is written to the
-registry.
+The result is `CapView.exe` in the repository root, around 1.6 MB, linked
+against the static CRT. The build tree is removed afterwards, leaving only the
+executable. Settings are stored in `CapView.json` beside it; nothing is written
+to the registry.
 
-`build.bat keep` leaves the build tree in place for incremental rebuilds, and
-`build.bat debug` builds a debug configuration.
+`build.bat keep` retains the build tree for incremental rebuilds, and
+`build.bat debug` produces a debug configuration.
 
-Or take a build from [Releases](../../releases).
+Prebuilt executables are attached to each [release](../../releases).
 
 ## ffmpeg
 
-Recording needs `ffmpeg.exe`; nothing else does. *Settings → Recording* has a
-button that fetches a static build, verifies its SHA-256 and keeps only the
-executable. On the command line:
+Recording requires `ffmpeg.exe`. Nothing else does. *Settings → Recording*
+provides a button that downloads a static build, verifies its published SHA-256
+and extracts only the executable. The same operation is available from the
+command line:
 
 ```bash
 CapView.exe --fetch-ffmpeg
 ```
 
-CapView looks in `ffmpeg\bin` and `ffmpeg` next to the executable, then beside
-it, then on `PATH`. A custom path can be set.
+CapView looks for ffmpeg in `ffmpeg\bin` and `ffmpeg` next to the executable,
+then beside the executable itself, then on `PATH`. A specific path can be
+configured.
 
-Encoders are established by test-encoding two frames each, not by reading
-`ffmpeg -encoders`: that list says what was compiled in, not what the hardware
-can do. The test runs once, on request, and the result is kept in the config —
-so the encoder list offers what this machine can actually do, rather than every
-vendor's hardware encoder. It is discarded and asked for again when the
-graphics adapter or the ffmpeg build changes.
+Available encoders are determined by test-encoding two frames with each
+candidate, rather than by reading `ffmpeg -encoders`, which lists what the build
+was compiled with rather than what the hardware supports. The test runs once, on
+request; the result is stored in the configuration and reused on subsequent
+starts. It is discarded when the graphics adapter or the ffmpeg build changes.
 
-There are two automatic modes, because the two things you might want from an
-encoder are in direct conflict:
+Two automatic modes are offered, because compatibility and file size pull in
+opposite directions:
 
-| Mode | Order | For |
+| Mode | Order | Suited to |
 |---|---|---|
-| Plays anywhere | H.264, H.265, AV1 | Files that open on any phone, TV or editor |
-| Smaller files | AV1, H.265, H.264 | Same quality at a fraction of the size |
+| Plays anywhere | H.264, H.265, AV1 | Files that open on any phone, television or editor |
+| Smaller files | AV1, H.265, H.264 | The same quality at a fraction of the size |
 
-Hardware comes before the CPU encoders in both. Neither scores anything: each
-walks its order and takes the first entry that passed the test.
+Hardware encoders precede the CPU encoders in both orders. Each mode takes the
+first entry of its order that passed the test.
 
 ## Why DirectShow
 
-Every capture card that ships a Media Foundation driver also exposes a
-DirectShow interface, because both sit on the same Kernel Streaming layer.
-The reverse is not true — older and semi-professional cards are DirectShow only.
-On the development machine DirectShow finds five video devices where Media
-Foundation finds three.
+Capture cards that ship a Media Foundation driver also expose a DirectShow
+interface, since both sit on the same Kernel Streaming layer. The reverse does
+not hold: older and semi-professional cards are frequently DirectShow only. On
+the development machine, DirectShow enumerates five video devices where Media
+Foundation enumerates three.
 
-A card hands its capture pin to one process at a time. If OBS has it, CapView
+A card grants its capture pin to one process at a time. If OBS holds it, CapView
 cannot open it, and the other way round.
 
-HDR is deliberately not implemented. The colour description is already parsed,
-including the PQ and HLG transfer functions, but nothing downstream acts on it.
+HDR is not implemented. The colour description is parsed, including the PQ and
+HLG transfer functions, but nothing downstream acts on it.
 
 ## Licence
 
-CapView is [MIT](LICENSE) licensed. Dear ImGui is MIT as well.
+CapView is [MIT](LICENSE) licensed. Dear ImGui is MIT licensed as well.
 
-ffmpeg is a separate program, downloaded from upstream and run as a child
-process. The usual Windows builds contain x264 and x265 and are therefore GPL;
-calling a program is not linking to it, so none of that reaches CapView. If you
-redistribute CapView bundled with an ffmpeg build, the GPL applies to what you
-are shipping.
+ffmpeg is a separate program, downloaded from upstream and executed as a child
+process. The usual Windows builds contain x264 and x265 and are therefore GPL
+licensed; invoking a program is not linking against it, so those terms do not
+extend to CapView. Redistributing CapView together with an ffmpeg build is a
+different matter, and the GPL then applies to what is being distributed.
