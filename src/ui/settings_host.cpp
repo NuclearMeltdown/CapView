@@ -6,6 +6,7 @@
 #include "backends/imgui_impl_win32.h"
 #include "imgui.h"
 #include "ui/theme.h"
+#include "i18n.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam,
                                                              LPARAM lParam);
@@ -99,7 +100,8 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   hwnd_ = ::CreateWindowExW(0, kClassName, L"CapView", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
                             CW_USEDEFAULT, w, h, owner, nullptr, instance, this);
   if (!hwnd_) {
-    if (error) *error = "Einstellungsfenster konnte nicht erstellt werden";
+    if (error) *error = T("Einstellungsfenster konnte nicht erstellt werden",
+                             "The settings window could not be created");
     return false;
   }
 
@@ -109,7 +111,8 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   if (FAILED(CAP_HR(device_.As(&dxgiDevice))) ||
       FAILED(CAP_HR(dxgiDevice->GetAdapter(&adapter))) ||
       FAILED(CAP_HR(adapter->GetParent(IID_PPV_ARGS(&factory))))) {
-    if (error) *error = "DXGI-Factory für das Einstellungsfenster fehlt";
+    if (error) *error = T("DXGI-Factory für das Einstellungsfenster fehlt",
+                             "The settings window has no DXGI factory");
     Destroy();
     return false;
   }
@@ -123,7 +126,8 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
   if (FAILED(CAP_HR(factory->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr, nullptr,
                                                     &swapchain_)))) {
-    if (error) *error = "Swapchain für das Einstellungsfenster fehlgeschlagen";
+    if (error) *error = T("Swapchain für das Einstellungsfenster fehlgeschlagen",
+                             "The settings window swapchain failed");
     Destroy();
     return false;
   }
@@ -140,7 +144,8 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   const bool ok = ImGui_ImplWin32_Init(hwnd_) && ImGui_ImplDX11_Init(device_.Get(), ctx_.Get());
   ImGui::SetCurrentContext(previous);
   if (!ok) {
-    if (error) *error = "ImGui für das Einstellungsfenster fehlgeschlagen";
+    if (error) *error = T("ImGui für das Einstellungsfenster fehlgeschlagen",
+                             "ImGui failed for the settings window");
     Destroy();
     return false;
   }

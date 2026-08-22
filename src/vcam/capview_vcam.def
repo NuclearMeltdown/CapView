@@ -1,0 +1,10 @@
+; Without this the four entry points are compiled but not exported, and
+; regsvr32 fails with "the module was loaded but the entry-point
+; DllRegisterServer was not found". STDAPI carries no __declspec(dllexport).
+LIBRARY capview_vcam
+
+EXPORTS
+    DllGetClassObject   PRIVATE
+    DllCanUnloadNow     PRIVATE
+    DllRegisterServer   PRIVATE
+    DllUnregisterServer PRIVATE

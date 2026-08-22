@@ -1,5 +1,7 @@
 #include "ui/settings_window.h"
 
+#include "vcam/virtual_camera.h"
+
 #include <shellapi.h>
 
 #include <algorithm>
@@ -170,6 +172,21 @@ bool SettingsWindow::takeCropDetectRequest() {
   const bool requested = cropDetectRequested_;
   cropDetectRequested_ = false;
   return requested;
+}
+
+int SettingsWindow::takeVirtualCameraRequest() {
+  const int request = virtualCameraRequest_;
+  virtualCameraRequest_ = 0;
+  return request;
+}
+
+void SettingsWindow::SetVirtualCameraState(bool running, bool consumed, int width, int height,
+                                           int fps) {
+  vcamRunning_ = running;
+  vcamConsumed_ = consumed;
+  vcamWidth_ = width;
+  vcamHeight_ = height;
+  vcamFps_ = fps;
 }
 
 void SettingsWindow::Close() {
@@ -1653,8 +1670,92 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
 
 // ----------------------------------------------------------------- tools tab
 
+void SettingsWindow::DrawVirtualCameraBlock() {
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Virtuelle Kamera", "Virtual camera"));
+
+  // The registration is a registry read; caching it keeps this off the disk on
+  // every frame, and the two buttons below refresh it when they change it.
+  const double now = ImGui::GetTime();
+  if (now - vcamStatusChecked_ > 2.0) {
+    vcamStatus_ = (int)VirtualCamera::Status();
+    vcamStatusChecked_ = now;
+  }
+  const auto status = (VirtualCamera::Install)vcamStatus_;
+
+  if (status == VirtualCamera::Install::Unsupported) {
+    ImGui::TextWrapped(T("Virtuelle Kameras gibt es erst ab Windows 11. Davor bietet Windows "
+                         "keine Schnittstelle dafür an, die moderne Programme auch sehen.",
+                         "Virtual cameras need Windows 11. Before that Windows offers no "
+                         "interface for one that modern programs can actually see."));
+    return;
+  }
+
+  ImGui::TextWrapped(T("Gibt das Bild als Webcam an andere Programme weiter -- Discord, OBS, "
+                       "Teams, den Browser. Die Kamera heißt \"CapView\" und existiert nur, "
+                       "solange CapView läuft.",
+                       "Offers the picture to other programs as a webcam -- Discord, OBS, "
+                       "Teams, the browser. The camera is called \"CapView\" and exists only "
+                       "while CapView is running."));
+  ImGui::Spacing();
+
+  if (status != VirtualCamera::Install::Installed) {
+    ImGui::TextWrapped(
+        status == VirtualCamera::Install::Stale
+            ? T("Die Kameraquelle ist registriert, zeigt aber ins Leere -- vermutlich wurde "
+                "CapView verschoben. Einmal neu installieren setzt das gerade.",
+                "The camera source is registered but points nowhere -- CapView was probably "
+                "moved. Installing once more puts that right.")
+            : T("Einmalig zu installieren. Windows lädt die Kameraquelle in einen "
+                "Systemdienst, deshalb muss sie systemweit registriert werden und Windows "
+                "fragt nach Administratorrechten. Das Benutzen danach braucht keine.",
+                "To be installed once. Windows loads the camera source into a system "
+                "service, so it has to be registered machine-wide and Windows will ask for "
+                "administrator rights. Using it afterwards needs none."));
+    ImGui::Spacing();
+    if (ImGui::Button(T("Kamera installieren", "Install camera"), ImVec2(200.0f, 0.0f))) {
+      virtualCameraRequest_ = 1;
+      vcamStatusChecked_ = 0.0;
+    }
+    return;
+  }
+
+  bool on = cfg().app.virtualCamera;
+  if (ImGui::Checkbox(T("Virtuelle Kamera einschalten", "Turn the virtual camera on"), &on)) {
+    cfg().app.virtualCamera = on;
+  }
+
+  if (vcamRunning_) {
+    if (vcamConsumed_ && vcamWidth_ > 0) {
+      ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                         T("Ein Programm liest gerade mit -- %d x %d, %d Bilder/s.",
+                           "Something is reading it -- %d x %d at %d fps."),
+                         vcamWidth_, vcamHeight_, vcamFps_);
+    } else {
+      ImGui::TextDisabled("%s", T("Läuft, bisher liest niemand mit.",
+                                  "Running; nothing is reading it yet."));
+    }
+  }
+
+  ImGui::Spacing();
+  ImGui::TextDisabled("%s", T("Das Bild wird seitenrichtig eingepasst, schwarze Balken "
+                              "füllen den Rest.",
+                              "The picture keeps its shape; black bars fill the rest."));
+
+  ImGui::Spacing();
+  if (ImGui::Button(T("Kamera deinstallieren", "Uninstall camera"), ImVec2(200.0f, 0.0f))) {
+    virtualCameraRequest_ = 2;
+    vcamStatusChecked_ = 0.0;
+  }
+  ImGui::SameLine();
+  ImGui::TextDisabled("%s", T("(fragt wieder nach Administratorrechten)",
+                              "(asks for administrator rights again)"));
+}
+
 void SettingsWindow::DrawToolsTab(FfmpegInfo* ffmpeg) {
   RecordSettings& rec = cfg().record;
+  DrawVirtualCameraBlock();
+
   ImGui::Spacing();
   ImGui::SeparatorText(T("Nach MP4 umpacken", "Rewrap to MP4"));
 

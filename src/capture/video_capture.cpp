@@ -14,18 +14,20 @@ bool CreateGraph(ComPtr<IGraphBuilder>* graph, ComPtr<ICaptureGraphBuilder2>* bu
   HRESULT hr = ::CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER,
                                   IID_PPV_ARGS(graph->GetAddressOf()));
   if (FAILED(hr)) {
-    if (error) *error = "Filtergraph konnte nicht erstellt werden: " + HrToString(hr);
+    if (error) *error = T("Filtergraph konnte nicht erstellt werden: ",
+                             "The filter graph could not be created: ") + HrToString(hr);
     return false;
   }
   hr = ::CoCreateInstance(CLSID_CaptureGraphBuilder2, nullptr, CLSCTX_INPROC_SERVER,
                           IID_PPV_ARGS(builder->GetAddressOf()));
   if (FAILED(hr)) {
-    if (error) *error = "Capture Graph Builder konnte nicht erstellt werden: " + HrToString(hr);
+    if (error) *error = T("Capture Graph Builder konnte nicht erstellt werden: ",
+                             "The capture graph builder could not be created: ") + HrToString(hr);
     return false;
   }
   hr = (*builder)->SetFiltergraph(graph->Get());
   if (FAILED(hr)) {
-    if (error) *error = "SetFiltergraph fehlgeschlagen: " + HrToString(hr);
+    if (error) *error = T("SetFiltergraph fehlgeschlagen: ", "SetFiltergraph failed: ") + HrToString(hr);
     return false;
   }
   return true;
@@ -106,7 +108,7 @@ VideoCapture::~VideoCapture() {
 DeviceProbeResult VideoCapture::Probe(const DeviceRef& device) {
   DeviceProbeResult out;
   if (device.empty()) {
-    out.error = "Kein Videogerät ausgewählt";
+    out.error = T("Kein Videogerät ausgewählt", "No video device selected");
     return out;
   }
 
@@ -116,20 +118,23 @@ DeviceProbeResult VideoCapture::Probe(const DeviceRef& device) {
 
   ComPtr<IBaseFilter> filter = CreateVideoFilter(device, &out.device);
   if (!filter) {
-    out.error = "Gerät '" + (device.name.empty() ? device.id : device.name) +
-                "' wurde nicht gefunden. Ist die Karte angeschlossen?";
+    out.error = T("Gerät '", "Device '") + (device.name.empty() ? device.id : device.name) +
+                T("' wurde nicht gefunden. Ist die Karte angeschlossen?",
+                  "' was not found. Is the card plugged in?");
     return out;
   }
 
   HRESULT hr = graph->AddFilter(filter.Get(), L"Capture");
   if (FAILED(hr)) {
-    out.error = "Capture-Filter konnte nicht in den Graph eingefügt werden: " + HrToString(hr);
+    out.error = T("Capture-Filter konnte nicht in den Graph eingefügt werden: ",
+                  "The capture filter could not be added to the graph: ") + HrToString(hr);
     return out;
   }
 
   ComPtr<IPin> pin = FindCapturePin(builder.Get(), filter.Get());
   if (!pin) {
-    out.error = "Das Gerät hat keinen brauchbaren Capture-Pin";
+    out.error = T("Das Gerät hat keinen brauchbaren Capture-Pin",
+                  "The device offers no usable capture pin");
     return out;
   }
 

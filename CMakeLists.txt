@@ -40,7 +40,7 @@ add_executable(CapView WIN32
   src/ui/toolbar.cpp
   src/ui/theme.cpp
   src/update/updater.cpp
-  src/ui/settings_host.cpp
+  src/vcam/virtual_camera.cpp
   src/ui/settings_host.cpp
   src/ui/settings_window.cpp
   src/ui/overlay.cpp
@@ -75,6 +75,7 @@ target_link_libraries(CapView PRIVATE
   strmiids ole32 oleaut32 uuid
   winmm avrt dwmapi shlwapi shcore winhttp bcrypt windowscodecs
   user32 gdi32 advapi32 comdlg32 propsys
+  mfplat mfuuid mfsensorgroup
 )
 
 if(MSVC)
@@ -85,6 +86,34 @@ if(MSVC)
   set_property(TARGET CapView PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   target_link_options(CapView PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
 endif()
+
+# The virtual camera's media source. A DLL of its own because Windows loads it
+# into the Frame Server service, not into CapView -- see src/vcam/vcam_shared.h.
+# It is registered under HKLM, so installing it needs administrator rights while
+# using the camera afterwards does not.
+add_library(capview_vcam SHARED
+  src/vcam/vcam_dll.cpp
+  src/vcam/vcam_source.cpp
+  src/vcam/capview_vcam.def
+)
+target_include_directories(capview_vcam PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(capview_vcam PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(capview_vcam PRIVATE
+  mfplat mfuuid mf ole32 oleaut32 uuid advapi32 ksuser strmiids)
+if(MSVC)
+  target_compile_options(capview_vcam PRIVATE /W3 /permissive- /Zc:__cplusplus /utf-8 /MP)
+  set_property(TARGET capview_vcam PROPERTY MSVC_RUNTIME_LIBRARY
+               "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+set_target_properties(capview_vcam PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME "capview_vcam"
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+)
 
 # Diagnostic console tool: prints the devices, formats and inputs CapView sees.
 add_executable(capview_probe

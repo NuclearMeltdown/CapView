@@ -212,7 +212,7 @@ bool TestOne(const std::string& exe, EncoderInfo* e) {
   DWORD exitCode = 0;
   if (!RunFfmpeg(exe, args, &output, &exitCode, 20000)) {
     e->available = false;
-    e->error = "ffmpeg konnte nicht gestartet werden";
+    e->error = T("ffmpeg konnte nicht gestartet werden", "ffmpeg could not be started");
   } else {
     e->available = (exitCode == 0);
     e->error = e->available ? std::string() : FirstLine(Trim(output));

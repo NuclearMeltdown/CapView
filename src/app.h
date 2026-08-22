@@ -24,6 +24,7 @@
 #include "ui/overlay.h"
 #include "ui/settings_host.h"
 #include "update/updater.h"
+#include "vcam/virtual_camera.h"
 #include "ui/settings_window.h"
 #include "ui/toolbar.h"
 
@@ -171,6 +172,11 @@ class App {
   void StopRecording();
   // Hands the readback frame to the recorder, if one is running.
   void FeedRecorder();
+  // One place decides whether the GPU has to hand pictures back, and one place
+  // hands them out -- the recorder and the camera both want the same frame, and
+  // fetching it twice would give each of them every second one.
+  void FeedFrameConsumers();
+  void UpdateVirtualCamera();
 
   void Toast(const std::string& text);
   void UpdatePowerRequest();
@@ -273,6 +279,7 @@ class App {
   DevicePropertyPages devicePages_;
   SettingsHost settingsHost_;
   Updater updater_;
+  VirtualCamera virtualCamera_;
   bool updatePromptQueued_ = false;   // waiting to be opened
   bool updatePromptRaised_ = false;   // already shown once this session
   bool devicePagesWereBusy_ = false;

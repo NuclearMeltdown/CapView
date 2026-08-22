@@ -227,6 +227,45 @@ through Windows Imaging Component, so no ffmpeg is required.
 A profile holds the device, input, capture format and all picture and audio
 settings. One per source, selected with Ctrl+1 to Ctrl+9.
 
+### Virtual camera
+
+The picture can be offered to other programs as a webcam — Discord, OBS, Teams,
+a browser — under the name *CapView*. It is switched on in *Settings → Tools*
+and exists only while CapView is running.
+
+It is built on Media Foundation rather than DirectShow, and that is not a
+preference. A DirectShow virtual camera is invisible to anything capturing
+through Media Foundation, which by now means the Windows Camera app, Teams and
+the browsers; the reverse is not true, because Windows bridges frame-server
+cameras into DirectShow enumeration. The cost of that choice is that this needs
+**Windows 11** (build 22000), where `MFCreateVirtualCamera` first appeared.
+There is no equivalent before it.
+
+Installing is a separate, one-time step with a UAC prompt, and there is a button
+next to it to undo it. The reason is structural rather than fussy: Windows loads
+the camera's media source into the Frame Server *service*, not into CapView, so
+it has to be registered machine-wide — a per-user registration would not be
+visible to the account that has to load it. Using the camera afterwards needs no
+rights at all.
+
+Because the two halves live in different sessions, the pictures travel through a
+named section in the global object namespace. Creating one needs a privilege an
+ordinary account does not have and a service does, so the media source creates
+it and CapView opens it — which also means the section only exists while
+something is actually reading the camera, and CapView does no work at all until
+then. Each picture is published under a sequence number that is odd while it is
+being written, so a reader can tell a torn copy from a whole one without either
+side ever waiting for the other.
+
+The camera offers 1920×1080, 1280×720 and 640×480 in NV12 at 30 fps, and the
+consumer picks. Whatever it picks is what CapView renders into, with the picture
+keeping its shape and black bars filling the rest — a 4:3 console in a 16:9
+camera is pillarboxed rather than stretched.
+
+Note that this makes a release two files: `CapView.exe` and `capview_vcam.dll`
+have to sit in the same folder. The update check downloads only the executable,
+so a build that changes the media source needs the DLL replaced by hand.
+
 ### Updates
 
 *Settings → Updates* compares this build against the newest release on GitHub,
