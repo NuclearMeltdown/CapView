@@ -1152,6 +1152,83 @@ bool App::DrawSettingsWindowed() {
   return true;
 }
 
+void App::DrawUpdatePrompt() {
+  // The startup check runs on its own thread, so the result turns up a second or
+  // two in. Raised once per session and never again, whatever the user does with
+  // it -- a notice that keeps coming back is an advertisement.
+  if (!updatePromptRaised_ && config_.app.checkUpdatesOnStart &&
+      updater_.status().state == UpdateStatus::State::Available) {
+    updatePromptRaised_ = true;
+    updatePromptQueued_ = true;
+  }
+
+  const char* id = T("Update verfügbar###capview_update", "Update available###capview_update");
+  if (updatePromptQueued_) {
+    ImGui::OpenPopup(id);
+    updatePromptQueued_ = false;
+  }
+
+  const ImGuiViewport* viewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+                                 viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
+                          ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+  if (!ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+
+  const UpdateStatus st = updater_.status();
+  ImGui::Text(T("CapView %s ist verfügbar.", "CapView %s is available."),
+              st.latestVersion.c_str());
+  ImGui::TextDisabled(T("Installiert ist %s.", "This build is %s."), Updater::currentVersion());
+  ImGui::Spacing();
+
+  switch (st.state) {
+    case UpdateStatus::State::Downloading:
+      ImGui::TextDisabled("%s", T("wird geladen ...", "downloading ..."));
+      break;
+    case UpdateStatus::State::Ready:
+      ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f), "%s",
+                         T("Eingesetzt. Ein Neustart übernimmt sie.",
+                           "Installed. A restart picks it up."));
+      break;
+    case UpdateStatus::State::Failed:
+      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s", st.error.c_str());
+      break;
+    default:
+      break;
+  }
+
+  ImGui::Spacing();
+  const float buttonWidth = 130.0f * uiScale_;
+
+  if (st.state == UpdateStatus::State::Ready) {
+    if (ImGui::Button(T("Jetzt neu starten", "Restart now"), ImVec2(buttonWidth, 0))) {
+      if (updater_.RestartIntoNewBuild()) {
+        running_ = false;
+      } else {
+        Toast(T("Neustart fehlgeschlagen.", "Restart failed."));
+      }
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Später", "Later"), ImVec2(buttonWidth, 0))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return;
+  }
+
+  ImGui::BeginDisabled(updater_.busy());
+  if (ImGui::Button(T("Installieren", "Install"), ImVec2(buttonWidth, 0))) {
+    updater_.InstallAsync();
+  }
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::Button(T("Später", "Later"), ImVec2(buttonWidth, 0))) ImGui::CloseCurrentPopup();
+  ImGui::SameLine();
+  if (ImGui::Button(T("Was ist neu", "What is new"), ImVec2(buttonWidth, 0))) {
+    OpenSettings({});
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
 void App::OpenDeviceConfig() {
   if (!capture_.running()) {
     Toast(T("Die Karte läuft nicht.", "The card is not running."));
@@ -1888,6 +1965,7 @@ void App::DrawUi() {
     }
   }
   if (settings_.takeProbeRequest()) StartEncoderProbe(true);
+  DrawUpdatePrompt();
   if (settings_.takeRestartRequest()) {
     if (updater_.RestartIntoNewBuild()) {
       // The new build is coming up; this one gets out of its way so the window

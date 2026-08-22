@@ -193,8 +193,9 @@ settings. One per source, selected with Ctrl+1 to Ctrl+9.
 ### Updates
 
 *Settings → Updates* compares this build against the newest release on GitHub,
-either once at startup or on request. Nothing is downloaded until you ask; the
-startup check only asks.
+either once at startup or on request. When the startup check finds something, a
+notice says so over the picture — once per session, whatever you do with it.
+Nothing is downloaded until you ask; the startup check only asks.
 
 Installing replaces `CapView.exe` itself. Windows will not let a running image be
 overwritten but will let it be renamed, so the old build is moved aside, the new
