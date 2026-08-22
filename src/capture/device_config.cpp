@@ -2,6 +2,8 @@
 
 #include <olectl.h>
 
+#include "i18n.h"
+
 #include <vector>
 
 namespace cap {
@@ -40,16 +42,18 @@ bool DevicePropertyPages::Available(IBaseFilter* filter) {
 bool DevicePropertyPages::Open(IBaseFilter* filter, const std::wstring& title,
                                std::string* error) {
   if (running_.load(std::memory_order_relaxed)) {
-    if (error) *error = "Der Konfigurationsdialog ist bereits offen.";
+    if (error) *error = T("Der Konfigurationsdialog ist bereits offen.",
+               "The configuration dialog is already open.");
     return false;
   }
   if (thread_.joinable()) thread_.join();  // reap the previous one
   if (!filter) {
-    if (error) *error = "Die Karte läuft nicht.";
+    if (error) *error = T("Die Karte läuft nicht.", "The card is not running.");
     return false;
   }
   if (!Available(filter)) {
-    if (error) *error = "Diese Karte bringt keinen eigenen Konfigurationsdialog mit.";
+    if (error) *error = T("Diese Karte bringt keinen eigenen Konfigurationsdialog mit.",
+               "This card brings no configuration dialog of its own.");
     return false;
   }
 

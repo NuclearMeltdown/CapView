@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <vector>
 
+#include "i18n.h"
 #include "json.h"
 
 namespace cap {
@@ -33,12 +34,12 @@ struct Handles {
 // GitHub refuses requests without a user agent, and the API wants to be told
 // which version of itself to speak.
 bool Fetch(const std::wstring& host, const std::wstring& path, bool api,
-           std::string* out, std::string* error) {
+           std::string* out, UpdateError* error, int* httpStatus) {
   Handles h;
   h.session = ::WinHttpOpen(L"CapView-Updater", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
   if (!h.session) {
-    if (error) *error = "Keine Netzwerkverbindung möglich.";
+    if (error) *error = UpdateError::NoNetwork;
     return false;
   }
   const DWORD timeout = 20000;
@@ -46,20 +47,20 @@ bool Fetch(const std::wstring& host, const std::wstring& path, bool api,
 
   h.connect = ::WinHttpConnect(h.session, host.c_str(), INTERNET_DEFAULT_HTTPS_PORT, 0);
   if (!h.connect) {
-    if (error) *error = "Server nicht erreichbar.";
+    if (error) *error = UpdateError::NoServer;
     return false;
   }
   h.request = ::WinHttpOpenRequest(h.connect, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
                                    WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
   if (!h.request) {
-    if (error) *error = "Anfrage konnte nicht gestellt werden.";
+    if (error) *error = UpdateError::NoRequest;
     return false;
   }
   const wchar_t* headers = api ? L"Accept: application/vnd.github+json\r\n"
                                : L"Accept: application/octet-stream\r\n";
   if (!::WinHttpSendRequest(h.request, headers, (DWORD)-1, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
       !::WinHttpReceiveResponse(h.request, nullptr)) {
-    if (error) *error = "Keine Antwort vom Server.";
+    if (error) *error = UpdateError::NoAnswer;
     return false;
   }
 
@@ -67,7 +68,8 @@ bool Fetch(const std::wstring& host, const std::wstring& path, bool api,
   ::WinHttpQueryHeaders(h.request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                         WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX);
   if (status != 200) {
-    if (error) *error = "Server antwortete mit " + std::to_string((int)status) + ".";
+    if (error) *error = UpdateError::HttpStatus;
+    if (httpStatus) *httpStatus = (int)status;
     return false;
   }
 
@@ -79,7 +81,7 @@ bool Fetch(const std::wstring& host, const std::wstring& path, bool api,
     out->resize(offset + available);
     DWORD read = 0;
     if (!::WinHttpReadData(h.request, out->data() + offset, available, &read)) {
-      if (error) *error = "Übertragung abgebrochen.";
+      if (error) *error = UpdateError::Transfer;
       return false;
     }
     out->resize(offset + read);
@@ -148,6 +150,45 @@ bool SplitUrl(const std::string& url, std::wstring* host, std::wstring* path) {
 
 }  // namespace
 
+std::string UpdateErrorText(const UpdateStatus& status) {
+  switch (status.error) {
+    case UpdateError::NoNetwork:
+      return T("Keine Netzwerkverbindung möglich.", "No network connection available.");
+    case UpdateError::NoServer:
+      return T("Server nicht erreichbar.", "Could not reach the server.");
+    case UpdateError::NoRequest:
+      return T("Anfrage konnte nicht gestellt werden.", "The request could not be made.");
+    case UpdateError::NoAnswer:
+      return T("Keine Antwort vom Server.", "No answer from the server.");
+    case UpdateError::HttpStatus:
+      return std::string(T("Der Server antwortete mit ", "The server answered with ")) +
+             std::to_string(status.httpStatus) + ".";
+    case UpdateError::Transfer:
+      return T("Übertragung abgebrochen.", "The transfer broke off.");
+    case UpdateError::Unreadable:
+      return T("Die Antwort war nicht lesbar.", "The answer could not be read.");
+    case UpdateError::NoAsset:
+      return T("Die neue Version enthält keine CapView.exe zum Herunterladen.",
+               "That release carries no CapView.exe to download.");
+    case UpdateError::NoUrl:
+      return T("Keine Download-Adresse.", "No download address.");
+    case UpdateError::NotAProgram:
+      return T("Die heruntergeladene Datei ist kein Programm.",
+               "What came back is not a program.");
+    case UpdateError::WriteFailed:
+      return T("Konnte nicht in den Programmordner schreiben.",
+               "Could not write to the program folder.");
+    case UpdateError::MoveAsideFailed:
+      return T("Die alte Version ließ sich nicht beiseite legen.",
+               "The old build could not be moved aside.");
+    case UpdateError::InsertFailed:
+      return T("Die neue Version ließ sich nicht einsetzen.",
+               "The new build could not be put in place.");
+    default:
+      return "";
+  }
+}
+
 const char* Updater::currentVersion() { return kAppVersion; }
 
 void Updater::CleanUpPreviousBuild() {
@@ -190,11 +231,12 @@ void Updater::Run(bool install) {
 
   if (!install) {
     s.state = UpdateStatus::State::Checking;
-    s.error.clear();
+    s.error = UpdateError::None;
     SetStatus(s);
 
-    std::string body, error;
-    if (!Fetch(kApiHost, kApiPath, true, &body, &error)) {
+    std::string body;
+    UpdateError error = UpdateError::None;
+    if (!Fetch(kApiHost, kApiPath, true, &body, &error, &s.httpStatus)) {
       s.state = UpdateStatus::State::Failed;
       s.error = error;
       SetStatus(s);
@@ -206,7 +248,7 @@ void Updater::Run(bool install) {
     const json::Value root = json::Parse(body, &parseError);
     if (!root.IsObject()) {
       s.state = UpdateStatus::State::Failed;
-      s.error = "Antwort war nicht lesbar.";
+      s.error = UpdateError::Unreadable;
       SetStatus(s);
       busy_.store(false, std::memory_order_release);
       return;
@@ -231,7 +273,7 @@ void Updater::Run(bool install) {
     s.state = newer ? UpdateStatus::State::Available : UpdateStatus::State::UpToDate;
     if (newer && downloadUrl_.empty()) {
       s.state = UpdateStatus::State::Failed;
-      s.error = "Die neue Version enthält keine CapView.exe zum Herunterladen.";
+      s.error = UpdateError::NoAsset;
     }
     CAP_LOG("Update-Prüfung: installiert %s, neueste %s -> %s", currentVersion(),
             s.latestVersion.c_str(), newer ? "neuer verfügbar" : "aktuell");
@@ -243,20 +285,21 @@ void Updater::Run(bool install) {
   // ---- install ----
   s.state = UpdateStatus::State::Downloading;
   s.percent = 0;
-  s.error.clear();
+  s.error = UpdateError::None;
   SetStatus(s);
 
   std::wstring host, path;
   if (downloadUrl_.empty() || !SplitUrl(downloadUrl_, &host, &path)) {
     s.state = UpdateStatus::State::Failed;
-    s.error = "Keine Download-Adresse.";
+    s.error = UpdateError::NoUrl;
     SetStatus(s);
     busy_.store(false, std::memory_order_release);
     return;
   }
 
-  std::string data, error;
-  if (!Fetch(host, path, false, &data, &error)) {
+  std::string data;
+  UpdateError error = UpdateError::None;
+  if (!Fetch(host, path, false, &data, &error, &s.httpStatus)) {
     s.state = UpdateStatus::State::Failed;
     s.error = error;
     SetStatus(s);
@@ -270,7 +313,7 @@ void Updater::Run(bool install) {
   // remarkably annoying way to find that out later.
   if (data.size() < 256 * 1024 || data[0] != 'M' || data[1] != 'Z') {
     s.state = UpdateStatus::State::Failed;
-    s.error = "Die heruntergeladene Datei ist kein Programm.";
+    s.error = UpdateError::NotAProgram;
     SetStatus(s);
     busy_.store(false, std::memory_order_release);
     return;
@@ -284,7 +327,7 @@ void Updater::Run(bool install) {
                               FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) {
     s.state = UpdateStatus::State::Failed;
-    s.error = "Konnte nicht in den Programmordner schreiben.";
+    s.error = UpdateError::WriteFailed;
     SetStatus(s);
     busy_.store(false, std::memory_order_release);
     return;
@@ -297,7 +340,7 @@ void Updater::Run(bool install) {
   if (!wrote) {
     ::DeleteFileW(fresh.c_str());
     s.state = UpdateStatus::State::Failed;
-    s.error = "Die Datei konnte nicht vollständig geschrieben werden.";
+    s.error = UpdateError::WriteFailed;
     SetStatus(s);
     busy_.store(false, std::memory_order_release);
     return;
@@ -310,7 +353,7 @@ void Updater::Run(bool install) {
   if (!::MoveFileExW(exe.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING)) {
     ::DeleteFileW(fresh.c_str());
     s.state = UpdateStatus::State::Failed;
-    s.error = "Die alte Version ließ sich nicht beiseite legen.";
+    s.error = UpdateError::MoveAsideFailed;
     SetStatus(s);
     busy_.store(false, std::memory_order_release);
     return;
@@ -319,7 +362,7 @@ void Updater::Run(bool install) {
     ::MoveFileExW(old.c_str(), exe.c_str(), MOVEFILE_REPLACE_EXISTING);
     ::DeleteFileW(fresh.c_str());
     s.state = UpdateStatus::State::Failed;
-    s.error = "Die neue Version ließ sich nicht einsetzen.";
+    s.error = UpdateError::InsertFailed;
     SetStatus(s);
     busy_.store(false, std::memory_order_release);
     return;

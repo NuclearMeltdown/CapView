@@ -17,6 +17,26 @@
 
 namespace cap {
 
+// What went wrong, rather than a sentence saying so. The work happens on a
+// thread of its own and the language can be changed at any time, so the wording
+// is picked where it is shown rather than where it is raised.
+enum class UpdateError {
+  None,
+  NoNetwork,
+  NoServer,
+  NoRequest,
+  NoAnswer,
+  HttpStatus,     // see UpdateStatus::httpStatus
+  Transfer,
+  Unreadable,
+  NoAsset,
+  NoUrl,
+  NotAProgram,
+  WriteFailed,
+  MoveAsideFailed,
+  InsertFailed,
+};
+
 struct UpdateStatus {
   enum class State {
     Idle,         // nothing asked for yet
@@ -31,9 +51,14 @@ struct UpdateStatus {
   State state = State::Idle;
   std::string latestVersion;  // as the tag names it, e.g. "v1.1"
   std::string notes;          // the release text, trimmed to something readable
-  std::string error;
-  int percent = 0;  // download progress
+  UpdateError error = UpdateError::None;
+  int httpStatus = 0;  // only with UpdateError::HttpStatus
+  int percent = 0;     // download progress
 };
+
+// What to put on the screen for a failed status, in the language selected right
+// now -- which is why it is worked out here and not where the failure happened.
+std::string UpdateErrorText(const UpdateStatus& status);
 
 class Updater {
  public:
