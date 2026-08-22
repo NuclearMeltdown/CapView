@@ -466,7 +466,7 @@ void SettingsWindow::DrawUpdatesTab() {
                          T("%s ist eingesetzt", "%s is installed"), st.latestVersion.c_str());
       break;
     case UpdateStatus::State::Failed:
-      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s", st.error.c_str());
+      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s", UpdateErrorText(st).c_str());
       break;
   }
 
@@ -954,11 +954,22 @@ void SettingsWindow::DrawImageTab() {
     HelpMarker(T("Wo nichts in Bewegung ist, wird über vier Bilder gemittelt -- das kostet "
                  "keine Schärfe. Wo etwas in Bewegung ist, wird der Farbträger aus der "
                  "Helligkeit herausgerechnet, und weiter rechts heißt gründlicher und "
-                 "weicher: bei 0,5 gehen rund 60 % weg, ganz rechts über 90 %.",
+                 "weicher: bei 0,5 gehen rund 60 % weg, ganz rechts über 90 %, dann aber "
+                 "auf Kosten des Bildes.\n\n"
+                 "Vier Bilder decken jede Norm ab: PAL wandert 270 Grad je Bild und "
+                 "wiederholt sich nach vier, NTSC 180 Grad und wiederholt sich nach zwei. "
+                 "Die zweite Hälfte braucht dagegen die richtige Trägerfrequenz, und die "
+                 "kommt aus der Videonorm im Reiter Quelle. Steht die falsch, sinkt die "
+                 "Wirkung von rund 70 auf 34 Prozent.",
                  "Where nothing moves, four frames are averaged -- that costs no sharpness. "
                  "Where something moves, the colour subcarrier is worked back out of the "
                  "brightness, and further right is more thorough and softer: around 60 % "
-                 "goes at 0.5, over 90 % at the far right."));
+                 "goes at 0.5 and over 90 % at the far right, but by then at the picture's "
+                 "expense.\n\n"
+                 "Four frames cover every standard: PAL walks 270 degrees per frame and "
+                 "repeats after four, NTSC walks 180 and repeats after two. The second half "
+                 "does need the right carrier frequency, and that comes from the video "
+                 "standard on the Source tab. Set wrong, it drops from about 70 % to 34 %."));
   }
 
   ImGui::Spacing();

@@ -133,6 +133,24 @@ at two, 1.90 at three and **0.78 at four**. Averaging two frames therefore cance
 nothing; averaging four covers exactly one cycle and what is left is the picture.
 This half costs no sharpness at all.
 
+Four covers every standard, not just the one it was measured on. A console
+generates its line timing and its subcarrier from the same clock, so the phase
+walk per frame is a fixed fraction of a turn, and which fraction depends on the
+colour system rather than on the frame rate:
+
+| | Phase per frame | Sequence | Left after 2 frames | after 4 |
+|---|---|---|---|---|
+| PAL B/G/I, 50 Hz | 270° | 4 frames | 0.71 | **0.00** |
+| PAL-60 | 270° (measured) | 4 frames | 0.71 | **0.00** |
+| PAL-M | 90° | 4 frames | 0.71 | **0.00** |
+| NTSC-M | 180° | 2 frames | 0.00 | **0.00** |
+
+So a 50 Hz PAL console behaves exactly like the 60 Hz one this was built
+against — same colour system, same four-frame walk — and NTSC repeats twice as
+fast, which four frames also covers. The only difference 50 Hz makes is that four
+frames span 160 ms instead of 133, so the "nothing is moving here" judgement has
+to hold for a little longer.
+
 Where something is moving there is nothing to average, so the carrier is worked
 back out of the brightness instead. Multiplying the line by the subcarrier and by
 the same carrier a quarter cycle over moves the pattern down to nothing, a short
@@ -148,6 +166,25 @@ The slider sets the width of that average:
 The subcarrier frequency follows from the video standard and the line width, so
 nothing has to be detected for this: 4.433619 MHz for PAL and its relatives,
 3.579545 MHz for NTSC, against BT.601 sampling.
+
+That window is counted in cycles of the carrier rather than in pixels, which
+matters because the two are not the same thing: NTSC's carrier occupies 3.77
+samples of a 720 pixel line where PAL's occupies 3.04. A window fixed at a pixel
+count therefore hands NTSC a fifth fewer cycles to work with. Simulated against
+an amplitude modulated pattern — which is what dot crawl is, since it only
+appears where there is a colour edge — that cost NTSC 61 % removal at the far end
+of the slider where PAL got 69 %, and it invented a quarter more pattern of its
+own doing it. Counted in cycles the two land at 67 % and 72 %. The same scaling
+covers capture widths other than 720.
+
+The standard therefore has to be set correctly for this half to do its job, which
+is a reason to care about the Source tab beyond getting a picture at all. With
+the carrier assumed wrong — PAL's filter against an NTSC signal or the reverse —
+removal falls from about 70 % to 34 % at the middle of the slider.
+
+SECAM is the exception and is not handled: its colour is frequency modulated on
+two carriers that alternate line by line, so there is no single frequency to
+demodulate against. The temporal half still applies.
 
 This is where composite restoration generally stops. The established offline
 filters — TComb, DeDot, LUTDeCrawl, Checkmate — are all temporal and say so

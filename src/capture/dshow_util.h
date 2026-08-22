@@ -238,11 +238,4 @@ std::string VideoStandardSettingName(long setting);
 // measuring the picture agrees with them to within two parts in a thousand.
 double VideoStandardSubcarrierSamples(long standard);
 
-// How many samples of a 720 pixel line one cycle of the colour subcarrier
-// occupies. This is what the dot crawl filter needs to know: the crawl *is* the
-// subcarrier leaking into brightness, so removing it means knowing its
-// frequency. Both numbers follow from the standard and BT.601 sampling, and
-// measuring the picture agrees with them to within two parts in a thousand.
-double VideoStandardSubcarrierSamples(long standard);
-
 }  // namespace cap
