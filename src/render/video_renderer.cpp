@@ -25,12 +25,24 @@ struct ConvertCB {
   int32_t outWidth;
   int32_t outHeight;
   int32_t isYuv;
-  int32_t pad0;
+  int32_t havePrev;
 
   float yOffset;
   float yScale;
   float cScale;
   float pad1;
+
+  // -1 = the fields are half a picture line apart, as a real interlaced signal
+  // has them. 0 or 1 = they are co-sited, and this is the row a pair starts on.
+  int32_t coSitedPhase;
+  int32_t rotation;
+  int32_t lineDouble;
+  int32_t chromaSoft;
+
+  float temporal;
+  int32_t histCount;
+  float dotNotch;
+  float carrierPeriod;
 
   float coef[4];
 };
@@ -45,12 +57,70 @@ struct ScaleCB {
 };
 static_assert(sizeof(ScaleCB) % 16 == 0, "constant buffer must be 16 byte aligned");
 
+// Where a compiled shader is kept between runs. The conversion shader has grown
+// into several hundred lines of branching, and D3DCompile spends seconds on it
+// at optimisation level three -- seconds the user waits through before the
+// window appears, every single time, to arrive at byte-for-byte the same answer.
+//
+// The name carries a hash of the source and the target profile, so editing the
+// shader or changing the profile simply misses the cache rather than loading
+// something stale. A miss costs what it always cost; there is nothing to
+// invalidate by hand.
+std::wstring ShaderCachePath(const char* source, const char* target) {
+  uint64_t hash = 1469598103934665603ull;  // FNV-1a
+  for (const char* p = source; *p; ++p) {
+    hash = (hash ^ (unsigned char)*p) * 1099511628211ull;
+  }
+  for (const char* p = target; *p; ++p) {
+    hash = (hash ^ (unsigned char)*p) * 1099511628211ull;
+  }
+  wchar_t name[64];
+  ::swprintf(name, 64, L"shader-%016llx.cso", (unsigned long long)hash);
+  return ExeDirectory() + name;
+}
+
+ComPtr<ID3DBlob> LoadCachedShader(const std::wstring& path) {
+  HANDLE file = ::CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return nullptr;
+  LARGE_INTEGER size = {};
+  ComPtr<ID3DBlob> blob;
+  if (::GetFileSizeEx(file, &size) && size.QuadPart > 0 && size.QuadPart < (1 << 22) &&
+      SUCCEEDED(::D3DCreateBlob((SIZE_T)size.QuadPart, &blob))) {
+    DWORD read = 0;
+    if (!::ReadFile(file, blob->GetBufferPointer(), (DWORD)size.QuadPart, &read, nullptr) ||
+        read != size.QuadPart) {
+      blob.Reset();
+    }
+  }
+  ::CloseHandle(file);
+  return blob;
+}
+
+void StoreCachedShader(const std::wstring& path, ID3DBlob* code) {
+  HANDLE file = ::CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return;  // read-only folder: compile every time, no harm
+  DWORD written = 0;
+  ::WriteFile(file, code->GetBufferPointer(), (DWORD)code->GetBufferSize(), &written, nullptr);
+  ::CloseHandle(file);
+}
+
 ComPtr<ID3DBlob> CompileShader(const char* source, const char* target, std::string* error) {
+  const std::wstring cachePath = ShaderCachePath(source, target);
+  if (ComPtr<ID3DBlob> cached = LoadCachedShader(cachePath)) return cached;
+
   UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_ENABLE_STRICTNESS;
   ComPtr<ID3DBlob> code;
   ComPtr<ID3DBlob> errors;
+  const DWORD started = ::GetTickCount();
   HRESULT hr = ::D3DCompile(source, strlen(source), nullptr, nullptr, nullptr, "main", target,
                             flags, 0, &code, &errors);
+  if (SUCCEEDED(hr)) {
+    CAP_LOG("Shader %s kompiliert in %lu ms, gespeichert", target,
+            (unsigned long)(::GetTickCount() - started));
+    StoreCachedShader(cachePath, code.Get());
+  }
   if (FAILED(hr)) {
     std::string detail = errors ? std::string((const char*)errors->GetBufferPointer(),
                                               errors->GetBufferSize())
@@ -123,6 +193,14 @@ bool VideoRenderer::CreateShaders(std::string* error) {
   if (FAILED(CAP_HR(dev->CreateVertexShader(vsCode->GetBufferPointer(), vsCode->GetBufferSize(),
                                             nullptr, &vs_)))) {
     if (error) *error = "Vertex-Shader konnte nicht erstellt werden";
+    return false;
+  }
+
+  ComPtr<ID3DBlob> cleanCode = CompileShader(kCleanPS, "ps_4_0", error);
+  if (!cleanCode) return false;
+  if (FAILED(CAP_HR(dev->CreatePixelShader(cleanCode->GetBufferPointer(),
+                                           cleanCode->GetBufferSize(), nullptr, &psClean_)))) {
+    if (error) *error = "Aufbereitungs-Shader konnte nicht erstellt werden";
     return false;
   }
 
@@ -203,8 +281,14 @@ void VideoRenderer::ReleaseSourceTextures() {
   for (int i = 0; i < 3; ++i) {
     planeSrv_[i].Reset();
     plane_[i].Reset();
+    for (int h = 0; h < kHistoryDepth; ++h) {
+      planeHistSrv_[h][i].Reset();
+      planeHist_[h][i].Reset();
+    }
   }
   planeCount_ = 0;
+  historyWrite_ = 0;
+  historyCount_ = 0;
   hasFrame_ = false;
 }
 
@@ -219,16 +303,11 @@ bool VideoRenderer::SetSourceFormat(const VideoFormatInfo& info, std::string* er
   source_ = info;
   if (same) return true;
 
-  // New format means a new measurement. The verdict itself should not change --
-  // the source decides its levels, not the pixel format we asked for -- but the
-  // evidence has to be gathered from the new byte layout.
-  rangeVerdict_ = RangeVerdict::Pending;
-  rangeFramesSeen_ = 0;
-  rangeSamples_ = 0;
-  rangeBelow16_ = 0;
-  rangeAbove235_ = 0;
-  rangeMin_ = 255;
-  rangeMax_ = 0;
+  // New format means a new measurement. The verdicts themselves should not
+  // change -- the source decides its levels and its field structure, not the
+  // pixel format we asked for -- but the evidence has to be gathered from the
+  // new byte layout.
+  ResetAnalysis();
 
   ReleaseSourceTextures();
 
@@ -272,6 +351,21 @@ bool VideoRenderer::CreateSourceTextures(std::string* error) {
                                                     &planeSrv_[index])))) {
       return false;
     }
+
+    // The history copies. Written by the GPU rather than the CPU, so they are
+    // plain default resources; they are allocated whether or not anything reads
+    // them, because switching a filter on mid-stream should not have to
+    // reallocate anything. Three copies of a 480 line frame is under two
+    // megabytes.
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.CPUAccessFlags = 0;
+    for (int h = 0; h < kHistoryDepth; ++h) {
+      if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &planeHist_[h][index])))) return false;
+      if (FAILED(CAP_HR(dev->CreateShaderResourceView(planeHist_[h][index].Get(), nullptr,
+                                                      &planeHistSrv_[h][index])))) {
+        return false;
+      }
+    }
     return true;
   };
 
@@ -312,6 +406,49 @@ bool VideoRenderer::CreateSourceTextures(std::string* error) {
   }
   CAP_LOG("Quelltexturen angelegt: %s %dx%d (%d Ebenen)", source_.subtypeLabel.c_str(), w, h,
           planeCount_);
+  return true;
+}
+
+bool VideoRenderer::EnsureClean(int width, int height) {
+  width = std::max(1, width);
+  height = std::max(1, height);
+  if (cleanTex_ && cleanWidth_ == width && cleanHeight_ == height) return true;
+
+  cleanSrv_.Reset();
+  cleanRtv_.Reset();
+  cleanTex_.Reset();
+  cleanPrevSrv_.Reset();
+  cleanPrevTex_.Reset();
+  cleanWidth_ = 0;
+  cleanHeight_ = 0;
+
+  ID3D11Device* dev = ctx_->device();
+  D3D11_TEXTURE2D_DESC td = {};
+  td.Width = (UINT)width;
+  td.Height = (UINT)height;
+  td.MipLevels = 1;
+  td.ArraySize = 1;
+  td.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+  td.SampleDesc.Count = 1;
+  td.Usage = D3D11_USAGE_DEFAULT;
+  td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+  if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &cleanTex_)))) return false;
+  if (FAILED(CAP_HR(dev->CreateShaderResourceView(cleanTex_.Get(), nullptr, &cleanSrv_)))) {
+    return false;
+  }
+  if (FAILED(CAP_HR(dev->CreateRenderTargetView(cleanTex_.Get(), nullptr, &cleanRtv_)))) {
+    return false;
+  }
+
+  td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+  if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &cleanPrevTex_)))) return false;
+  if (FAILED(CAP_HR(dev->CreateShaderResourceView(cleanPrevTex_.Get(), nullptr,
+                                                  &cleanPrevSrv_)))) {
+    return false;
+  }
+
+  cleanWidth_ = width;
+  cleanHeight_ = height;
   return true;
 }
 
@@ -442,10 +579,342 @@ void VideoRenderer::AnalyzeLevels(const FrameView& frame) {
           rangeMax_, below * 100.0, (unsigned long long)rangeSamples_);
 }
 
+// Two questions, asked of the same samples.
+//
+// First: do the two rows of a pair hold the same picture line? A 240p or 288p
+// console packed into a 480 or 576 line frame arrives that way -- the card takes
+// two consecutive progressive pictures and interleaves them, so row 2k and row
+// 2k+1 are the same line of the picture at two different moments. On everything
+// that is standing still they are identical, which is what this measures, and on
+// anything that moves they comb, which is why such a source still needs
+// deinterlacing. What it does not need is the half line offset a real interlaced
+// signal has: applying that is what makes bob step the whole picture down a line
+// on every second field.
+//
+// The test needs nothing to be moving, which is what makes it worth doing first.
+//
+// Second, only if the answer to the first is no: is there combing? A woven frame
+// of a moving picture has lines that sit outside the range their neighbours
+// span. That does need motion, which is why the verdict is never frozen on
+// "progressive" -- see the header.
+static const int kCombSampleEvery = 3;
+// Sixty frames of source: a second at 60 Hz, two and a half at 25.
+static const int kCombFramesWanted = 20;
+// Fraction of a frame's samples that have to comb for that frame to count.
+// Genuine interlacing scores in the high single digits to well over ten per
+// cent; a still progressive picture scores around a tenth of one. The gap is
+// wide, so the threshold sits well clear of both.
+static const double kCombThreshold = 0.030;
+// And this many frames in the window have to reach it. One is a noise spike;
+// two is something that was moving.
+static const int kCombFramesNeeded = 2;
+// Co-sited fields: the rows within a pair have to differ by at least this factor
+// less than neighbouring pairs do, and there has to be enough vertical detail
+// for the comparison to mean anything in the first place.
+// Measured on a composite SNES: the rows within a pair differ by 1 to 5, the
+// pairs themselves by around 20. Genuinely interlaced and genuinely progressive
+// full resolution pictures both sit near 1, because in either case the two
+// comparisons are looking at the same kind of thing.
+static const double kDoubleRatio = 3.0;
+static const double kDoubleFloor = 4.0;
+
+void VideoRenderer::ResetAnalysis() {
+  rangeVerdict_ = RangeVerdict::Pending;
+  rangeFramesSeen_ = 0;
+  rangeSamples_ = 0;
+  rangeBelow16_ = 0;
+  rangeAbove235_ = 0;
+  rangeMin_ = 255;
+  rangeMax_ = 0;
+
+  interlaceVerdict_ = InterlaceVerdict::Pending;
+  coSitedFields_ = false;
+  coSitedPhase_ = 0;
+  combFramesSeen_ = 0;
+  combSamples_ = 0;
+  combHits_ = 0;
+  combFrameHits_ = 0;
+  combFramesAnalysed_ = 0;
+  pairInner_ = 0;
+  pairOuter_ = 0;
+
+  boundsValid_ = false;
+  accAny_ = false;
+  boundsFramesSeen_ = 0;
+}
+
+bool VideoRenderer::LumaLayout(size_t* offset, size_t* step) const {
+  switch (kind_) {
+    case FormatKind::Yuy2:
+    case FormatKind::Yvyu: *offset = 0; *step = 2; return true;
+    case FormatKind::Uyvy: *offset = 1; *step = 2; return true;
+    case FormatKind::Nv12:
+    case FormatKind::Planar420: *offset = 0; *step = 1; return true;
+    case FormatKind::Rgb:
+      // Green stands in for luma. It carries most of it, and it costs one read
+      // instead of three.
+      *offset = 1;
+      *step = source_.subtypeLabel == "RGB24" ? 3 : 4;
+      return true;
+    default: return false;
+  }
+}
+
+// Anything above this is picture rather than border. Analogue black does not
+// arrive at zero and it is not quiet, so the bar sits a little above where the
+// blacker-than-black of a limited range signal would be.
+static const int kContentLuma = 24;
+// Every ninth frame, not every third, and every second column rather than all of
+// them. This is the only one of the three analyses that never finishes -- the
+// level and interlace verdicts latch and stop -- so it is the only one still
+// costing anything once the picture has settled, and it was costing enough to
+// matter: a full width scan of every third frame lands ten times a second, and
+// measured against the deinterlacer, ten per cent of its field switches were
+// arriving more than ten milliseconds late. That is a stutter you can see.
+//
+// The border is a fixed property of the signal and in no hurry, so the same
+// answer arrives just as reliably from a sixth of the work.
+static const int kBoundsSampleEvery = 9;
+static const int kBoundsFramesWanted = 5;
+static const int kBoundsColumnStep = 2;
+
+void VideoRenderer::AnalyzeContentBounds(const FrameView& frame) {
+  if (++boundsFramesSeen_ % kBoundsSampleEvery != 0) return;
+
+  const int w = source_.width;
+  const int h = source_.height;
+  if (w < 16 || h < 16) return;
+
+  size_t offset = 0, step = 1;
+  if (!LumaLayout(&offset, &step)) return;
+  const size_t pitch = (size_t)w * step;
+  if (pitch * (size_t)h > frame.size) return;
+
+  if ((int)columnHits_.size() != w) columnHits_.assign((size_t)w, 0);
+  std::fill(columnHits_.begin(), columnHits_.end(), 0);
+
+  // A row counts as picture only when a decent stretch of it is above black. One
+  // bright speck of analogue noise in the letterbox must not widen the crop.
+  const int minRun = w / (50 * kBoundsColumnStep) > 2 ? w / (50 * kBoundsColumnStep) : 2;
+  int top = -1, bottom = -1, litRows = 0;
+  for (int y = 0; y < h; y += 2) {
+    const uint8_t* row = frame.data + offset + (size_t)y * pitch;
+    int lit = 0;
+    for (int x = 0; x < w; x += kBoundsColumnStep) {
+      if (row[(size_t)x * step] > kContentLuma) {
+        ++lit;
+        ++columnHits_[(size_t)x];
+      }
+    }
+    if (lit >= minRun) {
+      if (top < 0) top = y;
+      bottom = y;
+      ++litRows;
+    }
+  }
+  if (litRows == 0) return;  // an entirely black frame says nothing
+
+  // Same idea the other way round: a column has to be lit in a fair number of
+  // the rows that carry picture at all.
+  const int minCol = litRows / 20 > 1 ? litRows / 20 : 1;
+  int left = -1, right = -1;
+  for (int x = 0; x < w; ++x) {
+    if (columnHits_[(size_t)x] >= minCol) {
+      if (left < 0) left = x;
+      right = x;
+    }
+  }
+  if (left < 0) return;
+
+  // Stored top-down. The bottom-up layouts are read in buffer order, so the two
+  // vertical edges swap on the way out.
+  if (source_.bottomUp) {
+    const int t = h - 1 - bottom;
+    bottom = h - 1 - top;
+    top = t;
+  }
+  // Both scans step, so each far edge can fall one step short.
+  if (right + kBoundsColumnStep <= w - 1) right += kBoundsColumnStep - 1;
+  // The row scan steps by two, so the bottom edge can be one line short.
+  if (bottom + 1 < h) ++bottom;
+
+  if (!accAny_) {
+    accL_ = left; accT_ = top; accR_ = right; accB_ = bottom;
+    accAny_ = true;
+  } else {
+    if (left < accL_) accL_ = left;
+    if (top < accT_) accT_ = top;
+    if (right > accR_) accR_ = right;
+    if (bottom > accB_) accB_ = bottom;
+  }
+
+  if (boundsFramesSeen_ / kBoundsSampleEvery < kBoundsFramesWanted) return;
+
+  // Logged when it moves, not every window: the border is a fixed property of
+  // the signal, so a line that keeps reappearing means something is wrong.
+  const bool changed = !boundsValid_ || accL_ != boundsL_ || accT_ != boundsT_ ||
+                       accR_ != boundsR_ || accB_ != boundsB_;
+  boundsL_ = accL_; boundsT_ = accT_; boundsR_ = accR_; boundsB_ = accB_;
+  boundsValid_ = true;
+  boundsFramesSeen_ = 0;
+  accAny_ = false;
+  if (changed) {
+    CAP_LOG("Bildinhalt gemessen: x %d..%d, y %d..%d (Rand links %d, rechts %d, oben %d, unten %d)",
+            boundsL_, boundsR_, boundsT_, boundsB_, boundsL_, source_.width - 1 - boundsR_,
+            boundsT_, source_.height - 1 - boundsB_);
+  }
+}
+
+bool VideoRenderer::contentBounds(int* left, int* top, int* right, int* bottom) const {
+  if (!boundsValid_) return false;
+  if (left) *left = boundsL_;
+  if (top) *top = boundsT_;
+  if (right) *right = boundsR_;
+  if (bottom) *bottom = boundsB_;
+  return true;
+}
+
+void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
+  // Both of these are structural, not momentary: once seen there is no reason to
+  // keep asking. Only a plain "progressive" stays open, because that one can be
+  // nothing more than a picture that happened to be standing still.
+  if (interlaceVerdict_ == InterlaceVerdict::Interlaced) return;
+  if (++combFramesSeen_ % kCombSampleEvery != 0) return;
+
+  const int w = source_.width;
+  const int h = source_.height;
+  if (w < 16 || h < 16) return;
+
+  // Only the luma plane is looked at: chroma is subsampled vertically on half
+  // these formats, which would blur the very thing being measured away.
+  size_t offset = 0, step = 1;
+  if (!LumaLayout(&offset, &step)) return;
+  const size_t pitch = (size_t)w * step;
+  if (pitch * (size_t)h > frame.size) return;
+
+  // Every other row, so each sample straddles one line of each field, and a
+  // column every few pixels -- 64 across the width is plenty and keeps this off
+  // the profile entirely.
+  const int stepX = w / 64 > 0 ? w / 64 : 1;
+  uint64_t hits = 0;
+  uint64_t samples = 0;
+  uint64_t inner = 0;
+  uint64_t outer = 0;
+  // y is odd throughout, so rowA/rowM are the two rows of one pair and rowM/rowB
+  // straddle the boundary to the next -- which is what makes both tests fall out
+  // of the same three reads.
+  for (int y = 1; y + 1 < h; y += 2) {
+    const uint8_t* rowA = frame.data + offset + (size_t)(y - 1) * pitch;
+    const uint8_t* rowM = rowA + pitch;
+    const uint8_t* rowB = rowM + pitch;
+    for (int x = 0; x < w; x += stepX) {
+      const size_t at = (size_t)x * step;
+      const int la = rowA[at];
+      const int lm = rowM[at];
+      const int lb = rowB[at];
+
+      inner += (uint64_t)(la > lm ? la - lm : lm - la);
+      outer += (uint64_t)(lm > lb ? lm - lb : lb - lm);
+
+      // Positive exactly when the middle line lies outside the range the other
+      // two span, and near zero on a smooth gradient. Vertical detail that is
+      // genuinely in the picture raises the bar, so a finely striped but static
+      // image is not read as combing.
+      const int comb = (lm - la) * (lm - lb);
+      const int detail = la > lb ? la - lb : lb - la;
+      if (comb > 900 + detail * 12) ++hits;
+      ++samples;
+    }
+  }
+  if (samples == 0) return;
+  // Judged per frame. Combing lives where something moved, so it is concentrated
+  // in the few frames that had movement in them; spreading those hits across a
+  // window full of still ones is how a real interlaced source gets called
+  // progressive.
+  if ((double)hits / (double)samples > kCombThreshold) ++combFrameHits_;
+  ++combFramesAnalysed_;
+
+  combHits_ += hits;
+  combSamples_ += samples;
+  pairInner_ += inner;
+  pairOuter_ += outer;
+
+  if (combFramesAnalysed_ < kCombFramesWanted || combSamples_ == 0) return;
+
+  const double n = (double)combSamples_;
+  const double dInner = (double)pairInner_ / n;
+  const double dOuter = (double)pairOuter_ / n;
+  // Either phase counts: which of the two rows of a pair comes first is a
+  // property of where the capture happens to have started, not of the signal.
+  const double lo = dInner < dOuter ? dInner : dOuter;
+  const double hi = dInner < dOuter ? dOuter : dInner;
+
+  if (hi >= kDoubleFloor && lo * kDoubleRatio < hi) {
+    coSitedFields_ = true;
+    // Measured in buffer order, used in picture order. Those differ for the
+    // bottom-up layouts, but only by a mirror, and mirroring an even number of
+    // rows maps a pair starting on an even row to a pair starting on an even
+    // row. Capture heights are even, so the phase carries over unchanged.
+    coSitedPhase_ = dInner < dOuter ? 0 : 1;
+    interlaceVerdict_ = InterlaceVerdict::Interlaced;
+    CAP_LOG("Interlacing erkannt: ja, Halbbilder deckungsgleich, 240p/288p-Quelle "
+            "(%.2f gegen %.2f pro Zeilenpaar, Phase %d)",
+            lo, hi, coSitedPhase_);
+    return;
+  }
+
+  if (combFrameHits_ >= kCombFramesNeeded) {
+    interlaceVerdict_ = InterlaceVerdict::Interlaced;
+    CAP_LOG("Interlacing erkannt: ja (%d von %d Bildern mit Kammartefakten)", combFrameHits_,
+            combFramesAnalysed_);
+    return;
+  }
+
+  // Nothing found this time. Say so once, then start a fresh window and keep
+  // watching: a picture that was standing still proves nothing, and the next
+  // window is only a second or two away.
+  if (interlaceVerdict_ == InterlaceVerdict::Pending) {
+    interlaceVerdict_ = InterlaceVerdict::Progressive;
+    CAP_LOG("Interlacing erkannt: nein (%d von %d Bildern mit Kammartefakten, "
+            "%.2f/%.2f pro Zeilenpaar)",
+            combFrameHits_, combFramesAnalysed_, lo, hi);
+  }
+  combFramesSeen_ = 0;
+  combFrameHits_ = 0;
+  combFramesAnalysed_ = 0;
+  combSamples_ = 0;
+  combHits_ = 0;
+  pairInner_ = 0;
+  pairOuter_ = 0;
+}
+
 bool VideoRenderer::UploadFrame(const FrameView& frame) {
   if (!frame.valid() || planeCount_ == 0) return false;
 
   AnalyzeLevels(frame);
+  AnalyzeInterlace(frame);
+  AnalyzeContentBounds(frame);
+
+  // Before anything is written over: the frame currently in the planes moves
+  // into the ring. One copy, whatever the depth. Skipped entirely unless
+  // something that reads the history is on, so nobody pays for a filter they
+  // have not switched on.
+  if (historyWanted_ && hasFrame_) {
+    ID3D11DeviceContext* dc = ctx_->context();
+    // The cleaned picture currently in cleanTex_ belongs to the frame that is
+    // about to be replaced, so this is the moment it becomes the previous one.
+    if (cleanTex_ && cleanPrevTex_) dc->CopyResource(cleanPrevTex_.Get(), cleanTex_.Get());
+    for (int i = 0; i < planeCount_; ++i) {
+      if (plane_[i] && planeHist_[historyWrite_][i]) {
+        dc->CopyResource(planeHist_[historyWrite_][i].Get(), plane_[i].Get());
+      }
+    }
+    historyWrite_ = (historyWrite_ + 1) % kHistoryDepth;
+    if (historyCount_ < kHistoryDepth) ++historyCount_;
+  } else if (!historyWanted_) {
+    historyWrite_ = 0;
+    historyCount_ = 0;
+  }
 
   bool ok = false;
   switch (kind_) {
@@ -734,8 +1203,8 @@ void VideoRenderer::ComputeDestRect(const ImageSettings& image) {
 }
 
 void VideoRenderer::ComputeDestRectIn(const ImageSettings& image, int winW, int winH) {
-  const int srcW = croppedWidth_;
-  const int srcH = croppedHeight_;
+  const int srcW = outputWidth_;
+  const int srcH = outputHeight_;
 
   if (winW <= 0 || winH <= 0 || srcW <= 0 || srcH <= 0) {
     videoRect_ = RECT{0, 0, 0, 0};
@@ -811,13 +1280,28 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   croppedWidth_ = std::max(1, srcW - cropL - cropR);
   croppedHeight_ = std::max(1, srcH - cropT - cropB);
 
-  if (!EnsureIntermediate(croppedWidth_, croppedHeight_)) return;
+  // What comes out of the first pass. Doubling makes it taller, a quarter turn
+  // swaps the axes, and everything downstream -- aspect, recording, stills --
+  // reads these rather than the cropped size.
+  const int doubledHeight = croppedHeight_ * (image.lineDouble ? 2 : 1);
+  const bool quarterTurn =
+      image.rotation == Rotation::Cw90 || image.rotation == Rotation::Ccw90;
+  outputWidth_ = quarterTurn ? doubledHeight : croppedWidth_;
+  outputHeight_ = quarterTurn ? croppedWidth_ : doubledHeight;
+
+  if (!EnsureClean(srcW, srcH)) return;
+  if (!EnsureIntermediate(outputWidth_, outputHeight_)) return;
 
   ID3D11DeviceContext* dc = ctx_->context();
 
-  const bool interlaced = source_.interlaced;
+  // The media type is believed when it claims interlaced; when it says nothing,
+  // which is the normal case on an analogue input, the measurement decides.
+  const bool interlaced =
+      source_.interlaced || interlaceVerdict_ == InterlaceVerdict::Interlaced;
   Deinterlace deint = image.deinterlace;
   if (image.deinterlaceAuto && !interlaced) deint = Deinterlace::Off;
+  // YADIF is not the only thing that needs yesterday's picture any more.
+  historyWanted_ = DeinterlaceNeedsHistory(deint) || image.temporalDenoise > 0.0f;
 
   const bool isYuv = kind_ != FormatKind::Rgb;
   const bool hd = croppedHeight_ >= 720;
@@ -852,6 +1336,21 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   cb.outWidth = croppedWidth_;
   cb.outHeight = croppedHeight_;
   cb.isYuv = isYuv ? 1 : 0;
+  cb.havePrev = historyCount_ > 0 ? 1 : 0;
+  cb.histCount = historyCount_;
+  cb.rotation = (int32_t)image.rotation;
+  cb.lineDouble = image.lineDouble ? 1 : 0;
+  cb.chromaSoft = Clamp(image.chromaSoft, 0, 8);
+  cb.temporal = image.temporalDenoise < 0.0f   ? 0.0f
+                : image.temporalDenoise > 1.0f ? 1.0f
+                                               : image.temporalDenoise;
+  cb.dotNotch = image.dotNotch < 0.0f   ? 0.0f
+                : image.dotNotch > 1.0f ? 1.0f
+                                        : image.dotNotch;
+  // The subcarrier's period in samples scales with how many samples the card
+  // puts on a line: the same cycle spread over more pixels is more pixels long.
+  cb.carrierPeriod = (float)(carrierSamples_ * (double)srcW / 720.0);
+  cb.coSitedPhase = coSitedFields_ ? coSitedPhase_ : -1;
   if (range == ColorRange::Limited) {
     cb.yOffset = 16.0f / 255.0f;
     cb.yScale = 255.0f / 219.0f;
@@ -879,34 +1378,66 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
     dc->Unmap(cbConvert_.Get(), 0);
   }
 
-  // ---- pass 1: decode into the intermediate ----
-  ID3D11ShaderResourceView* nullSrvs[3] = {nullptr, nullptr, nullptr};
-  dc->PSSetShaderResources(0, 3, nullSrvs);
-
-  ID3D11RenderTargetView* rtvs[] = {intermediateRtv_.Get()};
-  dc->OMSetRenderTargets(1, rtvs, nullptr);
-
-  D3D11_VIEWPORT vp = {};
-  vp.Width = (float)croppedWidth_;
-  vp.Height = (float)croppedHeight_;
-  vp.MaxDepth = 1.0f;
-  dc->RSSetViewports(1, &vp);
-
-  ID3D11ShaderResourceView* srvs[3] = {planeSrv_[0].Get(), planeSrv_[1].Get(), planeSrv_[2].Get()};
-  dc->PSSetShaderResources(0, 3, srvs);
-
+  ID3D11ShaderResourceView* nullSrvs[3 + kHistoryDepth * 3] = {};
   dc->IASetInputLayout(nullptr);
   dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   dc->VSSetShader(vs_.Get(), nullptr, 0);
-  dc->PSSetShader(psConvert_.Get(), nullptr, 0);
   ID3D11Buffer* cbs[] = {cbConvert_.Get()};
   dc->PSSetConstantBuffers(0, 1, cbs);
   dc->RSSetState(raster_.Get());
   const float blendFactor[4] = {0, 0, 0, 0};
   dc->OMSetBlendState(blendOpaque_.Get(), blendFactor, 0xFFFFFFFF);
-  dc->Draw(3, 0);
 
-  // ---- pass 2: scale onto the back buffer ----
+  // ---- pass 1: decode the planes and clean the signal, in source geometry ----
+  //
+  // Deliberately before anything touches the field structure. A cleanup that
+  // runs after a deinterlacer has to work out which source line the pixel in
+  // front of it came from, and for the interpolating modes there is no single
+  // answer -- which is how the same class of artefact kept coming back.
+  {
+    ID3D11RenderTargetView* rtv[] = {cleanRtv_.Get()};
+    dc->OMSetRenderTargets(1, rtv, nullptr);
+
+    D3D11_VIEWPORT vp = {};
+    vp.Width = (float)srcW;
+    vp.Height = (float)srcH;
+    vp.MaxDepth = 1.0f;
+    dc->RSSetViewports(1, &vp);
+
+    // Newest history first, so the shader can treat them as "one frame ago",
+    // "two frames ago", "three frames ago" without knowing where the ring
+    // happens to stand. historyWrite_ points at the slot that will be
+    // overwritten next, which is the oldest one.
+    ID3D11ShaderResourceView* srvs[3 + kHistoryDepth * 3] = {};
+    for (int i = 0; i < 3; ++i) srvs[i] = planeSrv_[i].Get();
+    for (int h = 0; h < kHistoryDepth; ++h) {
+      const int slot = (historyWrite_ - 1 - h + kHistoryDepth * 2) % kHistoryDepth;
+      for (int i = 0; i < 3; ++i) srvs[3 + h * 3 + i] = planeHistSrv_[slot][i].Get();
+    }
+    dc->PSSetShaderResources(0, 3 + kHistoryDepth * 3, srvs);
+    dc->PSSetShader(psClean_.Get(), nullptr, 0);
+    dc->Draw(3, 0);
+    dc->PSSetShaderResources(0, 3 + kHistoryDepth * 3, nullSrvs);
+  }
+
+  // ---- pass 2: fields, cropping, line doubling, rotation ----
+  {
+    ID3D11RenderTargetView* rtv[] = {intermediateRtv_.Get()};
+    dc->OMSetRenderTargets(1, rtv, nullptr);
+
+    D3D11_VIEWPORT vp = {};
+    vp.Width = (float)outputWidth_;
+    vp.Height = (float)outputHeight_;
+    vp.MaxDepth = 1.0f;
+    dc->RSSetViewports(1, &vp);
+
+    ID3D11ShaderResourceView* srvs[2] = {cleanSrv_.Get(), cleanPrevSrv_.Get()};
+    dc->PSSetShaderResources(0, 2, srvs);
+    dc->PSSetShader(psConvert_.Get(), nullptr, 0);
+    dc->Draw(3, 0);
+  }
+
+  // ---- pass 3: scale onto the back buffer ----
   dc->PSSetShaderResources(0, 3, nullSrvs);
 
   // Queue the recording copy here, between the passes: the intermediate holds
@@ -920,8 +1451,8 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   if (dstW <= 0 || dstH <= 0) return;
 
   ScaleCB sc = {};
-  sc.srcSize[0] = (float)croppedWidth_;
-  sc.srcSize[1] = (float)croppedHeight_;
+  sc.srcSize[0] = (float)outputWidth_;
+  sc.srcSize[1] = (float)outputHeight_;
   sc.dstSize[0] = (float)dstW;
   sc.dstSize[1] = (float)dstH;
   sc.filter = (int32_t)image.filter;
@@ -934,6 +1465,8 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   ID3D11RenderTargetView* backbuffer[] = {ctx_->rtv()};
   dc->OMSetRenderTargets(1, backbuffer, nullptr);
 
+  D3D11_VIEWPORT vp = {};
+  vp.MaxDepth = 1.0f;
   vp.TopLeftX = (float)videoRect_.left;
   vp.TopLeftY = (float)videoRect_.top;
   vp.Width = (float)dstW;

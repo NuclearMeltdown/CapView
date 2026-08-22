@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include "backends/imgui_impl_dx11.h"
 #include "backends/imgui_impl_win32.h"
@@ -178,6 +179,11 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
   // asks for once, or when the machine changed underneath it.
   LoadCachedEncoders();
 
+  // A previous update left its predecessor lying next to us; it can go now that
+  // nothing is running from it.
+  Updater::CleanUpPreviousBuild();
+  if (config_.app.checkUpdatesOnStart) updater_.CheckAsync();
+
   running_ = true;
   return true;
 }
@@ -188,6 +194,8 @@ void App::Shutdown() {
   // container, and that has to happen while the app is still alive.
   StopRecording();
   if (probeThread_.joinable()) probeThread_.join();
+  StopSignalWatch();
+  settingsHost_.Destroy();
   StopCapture();
   mic_.Stop();
   audio_.Stop();
@@ -265,7 +273,11 @@ void App::SaveWindowPlacement() {
 
 void App::ApplyWindowFlags() {
   if (!hwnd_) return;
-  ::SetWindowPos(hwnd_, config_.app.alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+  // The driver's dialog is a top-level window of its own with no owner, which is
+  // what keeps it out of our message loop -- and also means nothing lifts it
+  // above a window that insists on staying on top. So while it is up, we do not.
+  const bool top = config_.app.alwaysOnTop && !devicePages_.busy();
+  ::SetWindowPos(hwnd_, top ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
@@ -361,6 +373,7 @@ void App::ApplyTheme() {
   ApplyImGuiTheme(dark, config_.app.accentColor);
   ImGui::GetStyle().ScaleAllSizes(uiScale_);
   ApplyWindowDarkMode(hwnd_, dark);
+  if (settingsHost_.created()) settingsHost_.ApplyTheme(dark, config_.app.accentColor);
 }
 
 // ------------------------------------------------------------------- capture
@@ -397,12 +410,21 @@ bool App::StartCapture(std::string* error) {
   sawFirstFrame_ = false;
   captureStartQpc_ = QpcNow();
 
+  // The dot crawl filter works on the colour subcarrier, so it has to be told
+  // which one this signal carries. The card knows, when it has an analogue
+  // decoder at all; without one the default covers the common case.
+  const DeviceProbeResult& caps = capture_.capabilities();
+  const long standard = caps.availableStandards != 0 ? caps.currentStandard : 0;
+  renderer_.SetCarrierSamples(VideoStandardSubcarrierSamples(standard));
+
   StartAudio();
   UpdatePowerRequest();
+  StartSignalWatch();
   return true;
 }
 
 void App::StopCapture() {
+  StopSignalWatch();
   capture_.Stop();
   renderer_.DropFrame();
   delayLine_.Clear();
@@ -459,6 +481,7 @@ void App::CaptureAppliedState() {
   applied_.video = p.capture.video;
   applied_.format = p.capture.format;
   applied_.crossbarInput = p.capture.crossbarInput;
+  applied_.videoStandard = p.capture.videoStandard;
   applied_.audioSource = p.capture.audioSource;
   applied_.audioIn = p.capture.audio;
   applied_.audioOut = p.audio.output;
@@ -482,7 +505,9 @@ void App::SyncConfigChanges() {
   if (config_.app.theme != applied_.theme || config_.app.accentColor != applied_.accent) {
     ApplyTheme();
   }
-  if (config_.app.alwaysOnTop != applied_.alwaysOnTop) {
+  if (config_.app.alwaysOnTop != applied_.alwaysOnTop ||
+      devicePages_.busy() != devicePagesWereBusy_) {
+    devicePagesWereBusy_ = devicePages_.busy();
     ApplyWindowFlags();
   }
 
@@ -492,8 +517,18 @@ void App::SyncConfigChanges() {
   const bool deviceChanged = !(p.capture.video == applied_.video);
   const bool formatChanged = !p.capture.format.SameFormat(applied_.format) ||
                              std::abs(p.capture.format.fps - applied_.format.fps) > 0.01;
+  // A different standard usually means a different number of lines, so the graph
+  // has to come up again around it. Automatic is the exception: it has nothing
+  // to apply until it has found something, and rebuilds by itself when it does.
+  const bool standardChanged = p.capture.videoStandard != applied_.videoStandard &&
+                               p.capture.videoStandard > 0;
+  if (standardChanged) {
+    CAP_LOG("Videonorm gewechselt: %s -> %s, Graph wird neu aufgebaut",
+            VideoStandardSettingName(applied_.videoStandard).c_str(),
+            VideoStandardSettingName(p.capture.videoStandard).c_str());
+  }
 
-  if (profileChanged || deviceChanged || formatChanged) {
+  if (profileChanged || deviceChanged || formatChanged || standardChanged) {
     std::string error;
     if (!StartCapture(&error)) {
       // Keep the dialog open on the failing setting instead of closing over it.
@@ -507,6 +542,9 @@ void App::SyncConfigChanges() {
 
   if (p.capture.crossbarInput != applied_.crossbarInput) {
     capture_.SetCrossbarInput(p.capture.crossbarInput);
+    // A different input is a different signal on the same format: levels, field
+    // structure and where the picture sits all have to be measured again.
+    renderer_.ResetAnalysis();
   }
 
   const bool audioRouteChanged = p.capture.audioSource != applied_.audioSource ||
@@ -771,8 +809,8 @@ void App::StartRecording() {
     micTrack.pull = [this](float* out, size_t frames) { return mic_.Read(out, frames); };
   }
 
-  const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.croppedWidth(),
-                                  renderer_.croppedHeight(), format.fps, mainTrack, micTrack,
+  const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.outputWidth(),
+                                  renderer_.outputHeight(), format.fps, mainTrack, micTrack,
                                   config_.active().audio.micTrackMode, &error);
 
   if (!ok) {
@@ -932,6 +970,245 @@ void App::WriteScreenshot() {
 // edges can be dragged on the picture instead. While picking, the crop is set
 // to zero so the whole frame is visible -- otherwise you would be cropping an
 // already cropped image and the numbers would compound.
+
+// How long the lock has to be missing before anything is changed, and how long
+// a freshly set standard is given to prove itself. Both err on the generous
+// side: a console being switched between 50 and 60 Hz drops out for a moment on
+// its own, and reacting to that would mean changing the card's setting every
+// time somebody opens a menu.
+static const double kStandardLostSeconds = 1.5;
+static const double kStandardSettleSeconds = 0.6;
+// After a full pass with nothing locking, there is probably no signal at all --
+// the console is off. Stop poking the card and look again in a while.
+static const double kStandardBackoffSeconds = 6.0;
+
+void App::StartSignalWatch() {
+  StopSignalWatch();
+  IBaseFilter* filter = capture_.filter();
+  if (!filter) return;
+
+  // The thread keeps its own reference, so tearing the graph down does not pull
+  // the object out from under it; the worst that happens is that it asks a
+  // filter that is no longer running, and gets told so.
+  ComPtr<IBaseFilter> held = filter;
+  signalWatchRun_.store(true, std::memory_order_relaxed);
+  signalWatch_ = std::thread([this, held]() {
+    // The same apartment the graph lives in, so the pointer is usable as it is.
+    ComScope com(COINIT_MULTITHREADED);
+    while (signalWatchRun_.load(std::memory_order_relaxed)) {
+      signalLocked_.store(VideoStandardLocked(held.Get()), std::memory_order_relaxed);
+      signalSeq_.fetch_add(1, std::memory_order_release);
+      // Split into short naps so shutdown does not have to wait a quarter second.
+      for (int i = 0; i < 25 && signalWatchRun_.load(std::memory_order_relaxed); ++i) {
+        ::Sleep(10);
+      }
+    }
+  });
+}
+
+void App::StopSignalWatch() {
+  signalWatchRun_.store(false, std::memory_order_relaxed);
+  if (signalWatch_.joinable()) signalWatch_.join();
+  signalLocked_.store(-1, std::memory_order_relaxed);
+}
+
+int App::PollSignalLocked() {
+  if (!capture_.running()) return -1;
+  return signalLocked_.load(std::memory_order_relaxed);
+}
+
+void App::UpdateVideoStandard() {
+  const Profile& profile = config_.active();
+  if (profile.capture.videoStandard != -1) return;  // not our job
+  if (captureState_ != CaptureState::Running) return;
+
+  // Two fresh readings since the standard was last changed, so what is being
+  // judged is the standard that is actually set.
+  if (signalSeq_.load(std::memory_order_acquire) - standardSeqAtSet_ < 2) return;
+
+  const int locked = signalLocked_.load(std::memory_order_relaxed);
+  if (locked < 0) return;  // no analogue decoder, or nothing measured yet
+
+  const int64_t now = QpcNow();
+
+  if (locked == 1) {
+    // Settled. Whatever is set is right, and the search starts from scratch if
+    // it is ever needed again.
+    standardLostQpc_ = 0;
+    standardSweeps_ = 0;
+    if (standardCandidate_ >= 0) {
+      // A candidate just proved itself. The line count may have changed with
+      // it, so the graph has to be rebuilt around the new format.
+      standardCandidate_ = -1;
+      const long settled = capture_.currentStandard();
+      CAP_LOG("Videonorm automatisch gefunden: %s",
+              VideoStandardName(VideoStandardIndexOf(settled)));
+      std::string error;
+      if (StartCapture(&error)) {
+        Toast(Format(T("Videonorm: %s", "Video standard: %s"),
+                     VideoStandardName(VideoStandardIndexOf(settled))));
+      } else {
+        Toast(error);
+      }
+    }
+    return;
+  }
+
+  // No lock.
+  if (standardLostQpc_ == 0) {
+    standardLostQpc_ = now;
+    return;
+  }
+  if (QpcToSeconds(now - standardLostQpc_) < kStandardLostSeconds) return;
+  if (now < standardNextTryQpc_) return;
+
+  const std::vector<long> candidates =
+      AutoStandardCandidates(capture_.capabilities().availableStandards);
+  if (candidates.empty()) return;
+
+  if (standardSweeps_ >= 1 && standardCandidate_ < 0) {
+    // Backing off after a fruitless pass.
+    standardSweeps_ = 0;
+    standardNextTryQpc_ = now + SecondsToQpc(kStandardBackoffSeconds);
+    return;
+  }
+
+  standardCandidate_ = (standardCandidate_ + 1) % (int)candidates.size();
+  if (standardCandidate_ == 0) ++standardSweeps_;
+
+  const long next = candidates[(size_t)standardCandidate_];
+  capture_.SetStandard(next);
+  standardSeqAtSet_ = signalSeq_.load(std::memory_order_acquire);
+  // Setting it is not the same as it working. Give the decoder a moment, then
+  // this function will look at the lock again and either keep it or move on.
+  standardNextTryQpc_ = now + SecondsToQpc(kStandardSettleSeconds);
+}
+
+bool App::DrawSettingsWindowed() {
+  const bool wanted = config_.app.settingsSeparateWindow;
+
+  // Nothing to do, and nothing built: the common case, and it costs one branch.
+  if (!wanted && !settingsHost_.created()) return false;
+
+  if (wanted && !settingsHost_.created()) {
+    std::string error;
+    // The font atlas is shared rather than rebuilt -- same glyphs, and one copy
+    // on the GPU is enough for both windows.
+    if (!settingsHost_.Create(instance_, hwnd_, d3d_.device(), d3d_.context(),
+                              ImGui::GetIO().Fonts, uiScale_, &error)) {
+      CAP_WARN("%s", error.c_str());
+      config_.app.settingsSeparateWindow = false;
+      Toast(error);
+      return false;
+    }
+    settingsHost_.ApplyTheme(darkMode_, config_.app.accentColor);
+    // While its window is being dragged, Windows keeps the loop to itself. The
+    // timer inside that loop is what still lets the picture run.
+    settingsHost_.SetFrameCallback([this]() {
+      if (inModalFrame_) return;
+      inModalFrame_ = true;
+      Tick();
+      RenderFrame();
+      inModalFrame_ = false;
+    });
+  }
+
+  if (!wanted) {
+    // Switched off again: put the panel back inside the picture.
+    settingsHost_.Destroy();
+    return false;
+  }
+
+  // Closing the window is closing the settings, the same as the button is.
+  if (settingsHost_.takeCloseRequest()) settings_.Close();
+
+  if (settings_.isOpen() != settingsHost_.visible()) {
+    if (settings_.isOpen()) {
+      settingsHost_.Show(ToWide(T("CapView – Einstellungen", "CapView – Settings")));
+    } else {
+      settingsHost_.Hide();
+    }
+  }
+
+  if (!settingsHost_.BeginFrame(darkMode_, config_.app.accentColor)) return settings_.isOpen();
+
+  settings_.SetFillsWindow(true);
+  const SettingsWindow::Result result =
+      settings_.Draw(capture_.running() ? &capture_.capabilities() : nullptr, &ffmpeg_);
+  settingsHost_.EndFrame();
+
+  // The host left the device pointing at its own back buffer; the main window is
+  // still in the middle of its frame and needs it back.
+  ID3D11RenderTargetView* backbuffer[] = {d3d_.rtv()};
+  d3d_.context()->OMSetRenderTargets(1, backbuffer, nullptr);
+  D3D11_VIEWPORT vp = {};
+  vp.Width = (float)d3d_.width();
+  vp.Height = (float)d3d_.height();
+  vp.MaxDepth = 1.0f;
+  d3d_.context()->RSSetViewports(1, &vp);
+
+  // Closing is closing, whether it was the footer button or the window's own.
+  if (result == SettingsWindow::Result::Close) settings_.Close();
+  return true;
+}
+
+void App::OpenDeviceConfig() {
+  if (!capture_.running()) {
+    Toast(T("Die Karte läuft nicht.", "The card is not running."));
+    return;
+  }
+  const std::wstring title = ToWide(config_.active().capture.video.name);
+  std::string error;
+  if (!devicePages_.Open(capture_.filter(), title, &error)) {
+    Toast(error.empty() ? T("Der Konfigurationsdialog ließ sich nicht öffnen.",
+                            "The configuration dialog could not be opened.")
+                        : error);
+  }
+}
+
+void App::DetectCrop() {
+  int left = 0, top = 0, right = 0, bottom = 0;
+  if (!renderer_.contentBounds(&left, &top, &right, &bottom)) {
+    Toast(T("Noch nichts gemessen. Einen Moment warten.",
+            "Nothing measured yet. Give it a moment."));
+    return;
+  }
+  const VideoFormatInfo format = renderer_.sourceFormat();
+  if (!format.valid()) return;
+
+  ImageSettings& img = config_.active().image;
+  const int cl = left;
+  const int ct = top;
+  const int cr = format.width - 1 - right;
+  const int cb = format.height - 1 - bottom;
+  // A border of a pixel or two is measurement noise on an analogue input, not a
+  // border, and cropping it would only cost resolution.
+  const int floorPx = 3;
+  img.cropLeft = cl >= floorPx ? cl : 0;
+  img.cropTop = ct >= floorPx ? ct : 0;
+  img.cropRight = cr >= floorPx ? cr : 0;
+  img.cropBottom = cb >= floorPx ? cb : 0;
+
+  if (img.cropLeft || img.cropRight || img.cropTop || img.cropBottom) {
+    char text[160];
+    std::snprintf(text, sizeof(text),
+                  T("Rand erkannt: links %d, rechts %d, oben %d, unten %d",
+                    "Border found: left %d, right %d, top %d, bottom %d"),
+                  img.cropLeft, img.cropRight, img.cropTop, img.cropBottom);
+    Toast(text);
+  } else {
+    Toast(T("Kein schwarzer Rand gefunden.", "No black border found."));
+  }
+}
+
+bool App::SourceLooksInterlaced(const Profile& profile) const {
+  if (!profile.image.deinterlaceAuto) return true;
+  // The media type is believed when it claims interlaced -- a card that bothers
+  // to say so is right. It is not believed when it stays quiet, which is the
+  // usual case on an analogue input and is why the picture is measured as well.
+  if (renderer_.sourceFormat().interlaced) return true;
+  return renderer_.detectedInterlace() == VideoRenderer::InterlaceVerdict::Interlaced;
+}
 
 void App::BeginCropPick() {
   if (cropPick_.active) return;
@@ -1195,8 +1472,13 @@ int App::Run() {
     // Wait for the next captured frame, a pending second field, or input.
     DWORD timeout = settings_.isOpen() ? 8 : 100;
     if (secondFieldPending_) {
+      // Rounded up, not truncated. Truncating asks to be woken a fraction of a
+      // millisecond before the field is due, at which point the loop finds it is
+      // not due yet, redraws the same field for nothing and then spins on a zero
+      // timeout until it is. Waiting the extra millisecond costs a millisecond
+      // and saves all of that.
       const double waitMs = QpcToSeconds(secondFieldQpc_ - QpcNow()) * 1000.0;
-      timeout = (DWORD)Clamp((int)waitMs, 0, (int)timeout);
+      timeout = (DWORD)Clamp((int)std::ceil(waitMs), 0, (int)timeout);
     }
     HANDLE waits[1] = {nullptr};
     DWORD waitCount = 0;
@@ -1213,6 +1495,7 @@ int App::Run() {
 void App::Tick() {
   UpdatePowerRequest();
   CollectEncoderProbe();
+  UpdateVideoStandard();
 
   if (captureState_ == CaptureState::Running) {
     std::string message;
@@ -1297,15 +1580,67 @@ void App::RenderFrame() {
   // ---- bob deinterlacing: second field of the previous frame ----
   const VideoFormatInfo format = renderer_.sourceFormat();
   const bool deinterlacing =
-      profile.image.deinterlace != Deinterlace::Off &&
-      (!profile.image.deinterlaceAuto || format.interlaced);
-  const int firstField = format.fieldOneFirst ? 0 : 1;
+      profile.image.deinterlace != Deinterlace::Off && SourceLooksInterlaced(profile);
+
+  // Which field is the earlier one. The media type is asked first and is usually
+  // silent on an analogue card, in which case top-field-first is the convention
+  // for standard definition -- but a wrong guess here does not soften the
+  // picture, it makes it jump: the two fields are shown in the wrong order, so
+  // every frame steps back half a frame and then forward again. Hence the
+  // override in the settings, which is the only reliable fix when the card says
+  // nothing.
+  int firstField = format.fieldOneFirst ? 0 : 1;
+  if (profile.image.fieldOrder == FieldOrder::TopFirst) firstField = 0;
+  else if (profile.image.fieldOrder == FieldOrder::BottomFirst) firstField = 1;
 
   if (haveNewFrame) {
     fieldIndex_ = firstField;
+    if (deinterlacing) ++fieldsShown_[0];
     if (deinterlacing) {
-      const double frameSeconds = format.fps > 1.0 ? 1.0 / format.fps : 1.0 / 60.0;
-      secondFieldQpc_ = now + SecondsToQpc(frameSeconds * 0.5);
+      // The announced rate and the delivered rate are not always the same
+      // number. This card announces 50 fps and hands over 25 woven frames a
+      // second -- half the rate, twice the content per frame. Splitting the
+      // announced interval would put the second field on screen 10 ms in and
+      // then leave it there for 30, which judders harder than not deinterlacing
+      // at all, so the measured arrival rate wins whenever there is one.
+      double frameSeconds = format.fps > 1.0 ? 1.0 / format.fps : 1.0 / 60.0;
+      const double measured = sink ? sink->stats().sourceFps : 0.0;
+      if (measured > 1.0) frameSeconds = 1.0 / measured;
+
+      // Counted from when the frame arrived, not from when we got round to
+      // drawing it. Those are not the same instant: the log has shown the
+      // displayed frame to be twenty milliseconds old, and half a frame after
+      // *that* falls past the arrival of the next one -- at which point the
+      // second field is never shown at all. Half the frames then get both
+      // fields and half get one, which is exactly what a juddering picture is.
+      const int64_t arrival = sink && sink->lastArrivalQpc() != 0 ? sink->lastArrivalQpc() : now;
+      const int64_t period = SecondsToQpc(frameSeconds);
+
+      // The card delivers when the driver gets round to it -- the graph runs
+      // without a reference clock on purpose -- and measured here the arrivals
+      // wander by ten milliseconds either way. Half a frame after each raw
+      // arrival therefore lands anywhere, and bob ends up showing one field for
+      // five milliseconds and the next for twenty-eight. The average is exactly
+      // right and the picture stutters anyway.
+      //
+      // So the next arrival is predicted from a phase that is nudged towards the
+      // arrivals rather than following each one, and the second field is put
+      // halfway between the frame we have and the frame we expect. A late frame
+      // then shortens both of its fields equally instead of crushing one of them.
+      if (framePhaseQpc_ == 0 || std::llabs(arrival - framePhaseQpc_) > period) {
+        framePhaseQpc_ = arrival;  // first frame, or the stream jumped
+      } else {
+        framePhaseQpc_ += (arrival - framePhaseQpc_) / 8;
+      }
+      const int64_t expectedNext = framePhaseQpc_ + period;
+      framePhaseQpc_ = expectedNext;
+
+      int64_t gap = (expectedNext - arrival) / 2;
+      const int64_t minGap = period / 4;
+      const int64_t maxGap = period * 3 / 4;
+      if (gap < minGap) gap = minGap;
+      if (gap > maxGap) gap = maxGap;
+      secondFieldQpc_ = arrival + gap;
       secondFieldPending_ = true;
     } else {
       secondFieldPending_ = false;
@@ -1313,6 +1648,7 @@ void App::RenderFrame() {
   } else if (secondFieldPending_ && now >= secondFieldQpc_) {
     fieldIndex_ = 1 - firstField;
     secondFieldPending_ = false;
+    ++fieldsShown_[1];
   }
 
   // ---- draw ----
@@ -1361,9 +1697,11 @@ void App::RenderFrame() {
         const SinkStats sinkStats = sink ? sink->stats() : SinkStats{};
         const AudioStats audioStats = audio_.stats();
         CAP_LOG("Status: Quelle %.2f fps, Ausgabe %.1f fps, %llu angezeigt, %llu verworfen, "
-                "Bildalter %.1f ms | Ton %.1f/%.0f ms, %llu leer, %llu übergelaufen",
+                "Bildalter %.1f ms | Halbbilder %llu/%llu | Ton %.1f/%.0f ms, %llu leer, "
+                "%llu übergelaufen",
                 sinkStats.sourceFps, presentFps_, (unsigned long long)sinkStats.displayed,
                 (unsigned long long)sinkStats.dropped, sinkStats.lastArrivalAgeMs,
+                (unsigned long long)fieldsShown_[0], (unsigned long long)fieldsShown_[1],
                 audioStats.bufferMs, audioStats.targetMs,
                 (unsigned long long)audioStats.underruns,
                 (unsigned long long)audioStats.overruns);
@@ -1432,8 +1770,11 @@ void App::DrawUi() {
     stats.frameAgeMs = lastFrameAgeMs_;
     stats.vsync = config_.app.vsync;
     stats.tearing = d3d_.tearingSupported();
-    stats.deinterlacing = profile.image.deinterlace != Deinterlace::Off &&
-                          (!profile.image.deinterlaceAuto || stats.format.interlaced);
+    stats.deinterlacing =
+        profile.image.deinterlace != Deinterlace::Off && SourceLooksInterlaced(profile);
+    stats.deinterlaceLabel = renderer_.sourceCoSitedFields()
+                                 ? T("deckungsgleich (240p/288p)", "aligned (240p/288p)")
+                                 : DeinterlaceName((int)profile.image.deinterlace);
     const RECT& r = renderer_.videoRect();
     stats.displayWidth = (int)(r.right - r.left);
     stats.displayHeight = (int)(r.bottom - r.top);
@@ -1504,15 +1845,58 @@ void App::DrawUi() {
       break;
   }
   settings_.SetDetectedRange(&detectedRangeText_);
+
+  switch (renderer_.detectedInterlace()) {
+    case VideoRenderer::InterlaceVerdict::Interlaced:
+      detectedInterlaceText_ = renderer_.sourceCoSitedFields()
+                                   ? T("interlaced, 240p/288p-Quelle",
+                                       "interlaced, 240p/288p source")
+                                   : T("interlaced", "interlaced");
+      break;
+    case VideoRenderer::InterlaceVerdict::Progressive:
+      detectedInterlaceText_ = T("progressiv", "progressive");
+      break;
+    default:
+      detectedInterlaceText_ = nullptr;
+      break;
+  }
+  settings_.SetDetectedInterlace(&detectedInterlaceText_);
+  settings_.SetCoSitedFields(renderer_.sourceCoSitedFields());
+  settings_.SetSignalLocked(PollSignalLocked());
+  settings_.SetProbeAllowed(captureState_ != CaptureState::Reconnecting);
+  settings_.SetUpdater(&updater_);
+  // Auto means: analogue when the card has a decoder for it. A card that only
+  // does one of the two therefore needs nobody to say which.
+  {
+    const SignalKind kind = config_.active().capture.signalKind;
+    const bool hasDecoder =
+        capture_.running() && capture_.capabilities().availableStandards != 0;
+    settings_.SetAnalogueSource(kind == SignalKind::Analog ||
+                                (kind == SignalKind::Auto && hasDecoder));
+  }
   settings_.SetSourceFps(renderer_.sourceFormat().fps);
   settings_.SetLevels(audio_.inputPeak(), mic_.peak(), mic_.running());
   if (settings_.takeCropPickRequest()) BeginCropPick();
+  if (settings_.takeDeviceConfigRequest()) OpenDeviceConfig();
+  if (settings_.takeCropDetectRequest()) DetectCrop();
   settings_.setProbeBusy(probing_.load(std::memory_order_relaxed));
-  if (settings_.Draw(capture_.running() ? &capture_.capabilities() : nullptr, &ffmpeg_) ==
-      SettingsWindow::Result::Close) {
-    settings_.Close();
+  if (!DrawSettingsWindowed()) {
+    settings_.SetFillsWindow(false);
+    if (settings_.Draw(capture_.running() ? &capture_.capabilities() : nullptr, &ffmpeg_) ==
+        SettingsWindow::Result::Close) {
+      settings_.Close();
+    }
   }
   if (settings_.takeProbeRequest()) StartEncoderProbe(true);
+  if (settings_.takeRestartRequest()) {
+    if (updater_.RestartIntoNewBuild()) {
+      // The new build is coming up; this one gets out of its way so the window
+      // position and the configuration are written before it reads them.
+      running_ = false;
+    } else {
+      Toast(T("Neustart fehlgeschlagen.", "Restart failed."));
+    }
+  }
 
   // Everything above may have edited the configuration in place, so act on it
   // here in one spot rather than sprinkling apply calls through the UI code.
@@ -1551,6 +1935,49 @@ void App::DrawContextMenu() {
   bool toolbar = config_.app.showToolbar;
   if (ImGui::MenuItem(T("Werkzeugleiste", "Toolbar"), nullptr, &toolbar)) {
     config_.app.showToolbar = toolbar;
+  }
+
+  // Same reasoning as the colour menu below, only more so: whether the standard
+  // is right is something you see instantly, and on a console that switches
+  // between 50 and 60 Hz it is the setting you reach for most.
+  const long availableStandards =
+      capture_.running() ? capture_.capabilities().availableStandards : 0;
+  if (availableStandards != 0 && ImGui::BeginMenu(T("Videonorm", "Video standard"))) {
+    CaptureSettings& cap = config_.active().capture;
+    const long before = cap.videoStandard;
+
+    if (ImGui::MenuItem(T("Automatisch", "Automatic"), nullptr, cap.videoStandard == -1)) {
+      cap.videoStandard = -1;
+    }
+    if (ImGui::MenuItem(T("Nicht ändern", "Leave alone"), nullptr, cap.videoStandard == 0)) {
+      cap.videoStandard = 0;
+    }
+    ImGui::Separator();
+    for (int i = 0; i < VideoStandardCount(); ++i) {
+      const long value = VideoStandardValue(i);
+      if ((availableStandards & value) == 0) continue;
+      if (ImGui::MenuItem(VideoStandardName(i), nullptr, cap.videoStandard == value)) {
+        cap.videoStandard = value;
+      }
+    }
+
+    if (cap.videoStandard != before) {
+      // A different standard usually means a different number of lines, so the
+      // graph has to come up again around the new format. Automatic is the one
+      // case that does not restart here: it has nothing to apply yet and will
+      // rebuild by itself once it has found something that locks.
+      if (cap.videoStandard > 0) {
+        std::string error;
+        if (StartCapture(&error)) {
+          Toast(Format(T("Videonorm: %s", "Video standard: %s"),
+                       VideoStandardSettingName(cap.videoStandard).c_str()));
+        } else {
+          Toast(error);
+        }
+      }
+      SaveConfig();
+    }
+    ImGui::EndMenu();
   }
 
   // Right here rather than buried in the dialog: wrong levels or a wrong matrix
@@ -1714,6 +2141,22 @@ LRESULT App::HandleMessage(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
   if (imguiReady_ && ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) return 1;
 
   switch (msg) {
+    case WM_ENTERSIZEMOVE:
+      // Same as for the settings window: Windows takes the loop away while a
+      // window is being dragged, and only a timer still gets through.
+      ::SetTimer(hwnd, 1, 8, nullptr);
+      return 0;
+    case WM_EXITSIZEMOVE:
+      ::KillTimer(hwnd, 1);
+      return 0;
+    case WM_TIMER:
+      if (wparam == 1 && !inModalFrame_) {
+        inModalFrame_ = true;
+        Tick();
+        RenderFrame();
+        inModalFrame_ = false;
+      }
+      return 0;
     case WM_SIZE:
       minimized_ = (wparam == SIZE_MINIMIZED);
       if (!minimized_) d3d_.Resize();

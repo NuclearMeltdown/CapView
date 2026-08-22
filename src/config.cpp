@@ -37,11 +37,36 @@ const char* ScaleFilterName(int i) {
 }
 
 const char* DeinterlaceName(int i) {
-  static const char* de[kDeinterlaceCount] = {"Aus (Weave)", "Bob", "Bob (interpoliert)",
-                                              "Bewegungsadaptiv", "Kantenorientiert"};
-  static const char* en[kDeinterlaceCount] = {"Off (weave)", "Bob", "Bob (interpolated)",
-                                              "Motion adaptive", "Edge directed"};
+  static const char* de[kDeinterlaceCount] = {"Aus (Weave)",      "Bob",
+                                              "Bob (interpoliert)", "Bewegungsadaptiv",
+                                              "Kantenorientiert",   "YADIF"};
+  static const char* en[kDeinterlaceCount] = {"Off (weave)",       "Bob",
+                                              "Bob (interpolated)", "Motion adaptive",
+                                              "Edge directed",      "YADIF"};
   i = Pick(i, kDeinterlaceCount);
+  return T(de[i], en[i]);
+}
+
+const char* FieldOrderName(int i) {
+  static const char* de[3] = {"Automatisch", "Oberes Halbbild zuerst", "Unteres Halbbild zuerst"};
+  static const char* en[3] = {"Automatic", "Top field first", "Bottom field first"};
+  i = Pick(i, 3);
+  return T(de[i], en[i]);
+}
+
+const char* RotationName(int i) {
+  static const char* de[kRotationCount] = {"Keine", "90 Grad rechts", "180 Grad",
+                                           "90 Grad links"};
+  static const char* en[kRotationCount] = {"None", "90 degrees right", "180 degrees",
+                                           "90 degrees left"};
+  i = Pick(i, kRotationCount);
+  return T(de[i], en[i]);
+}
+
+const char* SignalKindName(int i) {
+  static const char* de[kSignalKindCount] = {"Automatisch", "Analog", "Digital"};
+  static const char* en[kSignalKindCount] = {"Automatic", "Analogue", "Digital"};
+  i = Pick(i, kSignalKindCount);
   return T(de[i], en[i]);
 }
 
@@ -153,21 +178,25 @@ const char* ScaleFilterHelp(int i) {
 const char* DeinterlaceHelp(int i) {
   static const char* de[kDeinterlaceCount] = {
       "Halbbilder bleiben verwoben. Bei Bewegung Kammartefakte.",
-      "Volle Bildrate, keine Kammartefakte, keine Latenz.",
-      "Wie Bob, fehlende Zeilen interpoliert. Weicher, weniger Zeilenflimmern.",
+      "Volle Bildrate, keine Latenz. Zeigt je ein Halbbild doppelt, wodurch die Zeilenpaare im Takt der Halbbilder um eine Zeile wandern -- messbar 1,0 Zeilen. Für 240p/288p-Quellen ideal, für echtes Interlacing die unruhigste Wahl.",
+      "Wie Bob, fehlende Zeilen interpoliert. Steht deutlich ruhiger als Bob, weil die Zeilen an ihrer wahren Position landen.",
       "Ruhige Bildteile behalten die volle Zeilenzahl, bewegte werden interpoliert. "
       "Keine Latenz.",
-      "Fehlende Zeilen entlang der Kantenrichtung interpoliert. Glatte Diagonalen, "
-      "keine Latenz.",
+      "Für Pixelgrafik gedacht: interpoliert entlang der Kantenrichtung, glatte "
+      "Diagonalen, keine Latenz. Auf Composite-Signalen schlechter als die anderen.",
+      "Beste Qualität. Vergleicht mit dem vorherigen Bild, braucht ein Bild Speicher "
+      "und etwas mehr GPU-Last.",
   };
   static const char* en[kDeinterlaceCount] = {
       "Fields stay woven. Combing artefacts on motion.",
-      "Full frame rate, no combing, no added latency.",
-      "Like bob with interpolated lines. Softer, less line flicker.",
+      "Full frame rate, no added latency. Shows one field twice over, so the line pairs move by one line at field rate -- measured at 1.0 lines. Ideal for 240p/288p sources, the least steady choice for genuine interlacing.",
+      "Like bob with interpolated lines. Considerably steadier than bob, because each line lands where it belongs.",
       "Still parts of the picture keep every line, moving parts are interpolated. "
       "No added latency.",
-      "Missing lines interpolated along the direction of edges. Smooth diagonals, "
-      "no added latency.",
+      "Meant for pixel art: interpolates along the direction of edges, smooth diagonals, "
+      "no added latency. Worse than the others on a composite signal.",
+      "Best quality. Compares against the previous frame, so it keeps one frame in "
+      "memory and costs a little more GPU time.",
   };
   i = Pick(i, kDeinterlaceCount);
   return T(de[i], en[i]);
@@ -289,6 +318,8 @@ json::Value WriteProfile(const Profile& p) {
   cap["audioSource"] = (int)p.capture.audioSource;
   cap["audio"] = WriteDevice(p.capture.audio);
   cap["crossbarInput"] = p.capture.crossbarInput;
+  cap["videoStandard"] = (int)p.capture.videoStandard;
+  cap["signalKind"] = (int)p.capture.signalKind;
   cap["format"] = WriteFormat(p.capture.format);
   o["capture"] = cap;
 
@@ -297,6 +328,12 @@ json::Value WriteProfile(const Profile& p) {
   img["sharpen"] = p.image.sharpen;
   img["deinterlace"] = (int)p.image.deinterlace;
   img["deinterlaceAuto"] = p.image.deinterlaceAuto;
+  img["fieldOrder"] = (int)p.image.fieldOrder;
+  img["lineDouble"] = p.image.lineDouble;
+  img["rotation"] = (int)p.image.rotation;
+  img["chromaSoft"] = p.image.chromaSoft;
+  img["temporalDenoise"] = p.image.temporalDenoise;
+  img["dotNotch"] = p.image.dotNotch;
   img["aspect"] = (int)p.image.aspect;
   img["cropLeft"] = p.image.cropLeft;
   img["cropRight"] = p.image.cropRight;
@@ -331,6 +368,8 @@ Profile ReadProfile(const json::Value& v) {
   p.capture.audioSource = ReadEnum<AudioSource>(c, "audioSource", 3, AudioSource::Embedded);
   p.capture.audio = ReadDevice(c["audio"]);
   p.capture.crossbarInput = c["crossbarInput"].AsInt(-1);
+  p.capture.videoStandard = (long)c["videoStandard"].AsInt(0);
+  p.capture.signalKind = ReadEnum<SignalKind>(c, "signalKind", kSignalKindCount, SignalKind::Auto);
   p.capture.format = ReadFormat(c["format"]);
 
   const json::Value& i = v["image"];
@@ -339,6 +378,12 @@ Profile ReadProfile(const json::Value& v) {
   p.image.deinterlace =
       ReadEnum<Deinterlace>(i, "deinterlace", kDeinterlaceCount, Deinterlace::Bob);
   p.image.deinterlaceAuto = i["deinterlaceAuto"].AsBool(true);
+  p.image.fieldOrder = ReadEnum<FieldOrder>(i, "fieldOrder", 3, FieldOrder::Auto);
+  p.image.lineDouble = i["lineDouble"].AsBool(false);
+  p.image.rotation = ReadEnum<Rotation>(i, "rotation", kRotationCount, Rotation::None);
+  p.image.chromaSoft = i["chromaSoft"].AsInt(0);
+  p.image.temporalDenoise = (float)i["temporalDenoise"].AsNumber(0.0);
+  p.image.dotNotch = (float)i["dotNotch"].AsNumber(0.0);
   p.image.aspect = ReadEnum<AspectMode>(i, "aspect", 5, AspectMode::Source);
   p.image.cropLeft = Clamp(i["cropLeft"].AsInt(0), 0, 4096);
   p.image.cropRight = Clamp(i["cropRight"].AsInt(0), 0, 4096);
@@ -487,6 +532,8 @@ bool Config::Load(std::string* error) {
   app.preventSleep = a["preventSleep"].AsBool(true);
   app.showStats = a["showStats"].AsBool(false);
   app.showToolbar = a["showToolbar"].AsBool(true);
+  app.settingsSeparateWindow = a["settingsSeparateWindow"].AsBool(false);
+  app.checkUpdatesOnStart = a["checkUpdatesOnStart"].AsBool(true);
   app.statsDetail = ReadEnum<StatsDetail>(a, "statsDetail", 3, StatsDetail::Compact);
   app.logToFile = a["logToFile"].AsBool(false);
   app.windowX = a["windowX"].AsInt(-1);
@@ -571,6 +618,8 @@ std::string Config::Serialize() const {
   a["preventSleep"] = app.preventSleep;
   a["showStats"] = app.showStats;
   a["showToolbar"] = app.showToolbar;
+  a["settingsSeparateWindow"] = app.settingsSeparateWindow;
+  a["checkUpdatesOnStart"] = app.checkUpdatesOnStart;
   a["statsDetail"] = (int)app.statsDetail;
   a["logToFile"] = app.logToFile;
   a["windowX"] = app.windowX;
