@@ -367,8 +367,18 @@ R"HLSL(    s0 += LumaFrameAt(q, 0);
 // notch it replaces managed 67 % for 18 %. At five samples it reaches 99 %.
 float DotDemodDelta(int x, int row) {
   // The slider is the window: wide and gentle at the left, narrow and thorough
-  // at the right. 25 samples down to 5.
-  int r = (int)floor((25.0 - gDotNotch * 20.0) * 0.5 + 0.5);
+  // at the right. It is counted in cycles of the subcarrier rather than in
+  // samples, because the two are not the same thing across standards: NTSC
+  // carries 3.77 samples per cycle where PAL carries 3.04, so a window fixed at
+  // a pixel count hands NTSC a fifth fewer cycles to detect with. Measured
+  // against an amplitude modulated pattern, that cost it 61 % removed at the far
+  // end of the slider where PAL managed 69 %, and it invented a quarter more
+  // pattern in the process. Counted in cycles they land at 67 % and 72 %.
+  //
+  // The same reasoning covers capture widths other than 720, which is why
+  // gCarrierPeriod is scaled by the source width before it arrives here.
+  float cycles = 8.2 - gDotNotch * 5.9;  // a little over eight, down to just over two
+  int r = (int)floor(cycles * gCarrierPeriod * 0.5 + 0.5);
   r = clamp(r, 2, 12);
 
   const float kTwoPi = 6.28318531;

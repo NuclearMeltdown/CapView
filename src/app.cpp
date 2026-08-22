@@ -1190,7 +1190,7 @@ void App::DrawUpdatePrompt() {
                            "Installed. A restart picks it up."));
       break;
     case UpdateStatus::State::Failed:
-      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s", st.error.c_str());
+      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s", UpdateErrorText(st).c_str());
       break;
     default:
       break;
