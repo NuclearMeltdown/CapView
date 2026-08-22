@@ -14,6 +14,7 @@
 
 #include "audio/audio_engine.h"
 #include "audio/mic_capture.h"
+#include "capture/device_config.h"
 #include "capture/video_capture.h"
 #include "common.h"
 #include "config.h"
@@ -21,6 +22,8 @@
 #include "render/d3d_context.h"
 #include "render/video_renderer.h"
 #include "ui/overlay.h"
+#include "ui/settings_host.h"
+#include "update/updater.h"
 #include "ui/settings_window.h"
 #include "ui/toolbar.h"
 
@@ -123,6 +126,35 @@ class App {
   DeviceRef micApplied_;
   bool micAttempted_ = false;
   bool micFailed_ = false;
+  // Whether the deinterlacer should run at all. Only interesting when
+  // "interlaced sources only" is ticked, and then it is the measurement that
+  // decides, not the media type.
+  bool SourceLooksInterlaced(const Profile& profile) const;
+
+  // Finds the analogue video standard by watching whether the decoder locks.
+  // Runs only when the source is set to automatic.
+  void UpdateVideoStandard();
+  // Whether the decoder has a signal, asked of the driver a few times a second
+  // rather than once a frame. Each call crosses into the driver, and doing that
+  // twice per frame cost over ten milliseconds of every one -- more than the
+  // entire video pipeline, and enough to stop the deinterlacer being shown at
+  // its proper rate.
+  int PollSignalLocked();
+  // Asking the driver for the signal state takes about ten milliseconds -- it is
+  // a round trip into kernel mode -- which is most of a field period and, on the
+  // render thread, a visible hitch in the deinterlacer. So a small thread of its
+  // own does the asking and leaves the answer where the render thread can pick
+  // it up for free.
+  void StartSignalWatch();
+  void StopSignalWatch();
+
+  // Draws the settings into their own window when that is switched on.
+  // Returns true when it took care of them, so the in-picture panel is skipped.
+  bool DrawSettingsWindowed();
+
+  void OpenDeviceConfig();
+  void DetectCrop();
+
   void BeginCropPick();
   void EndCropPick(bool apply);
   void DrawCropPicker();
@@ -196,6 +228,7 @@ class App {
   // be told apart from a harmless one.
   struct AppliedState {
     int activeProfile = -1;
+    long videoStandard = 0;
     DeviceRef video;
     FormatSel format;
     int crossbarInput = -1;
@@ -233,6 +266,38 @@ class App {
   } cropPick_;
   // Filled from the renderer each frame; the settings dialog reads it.
   const char* detectedRangeText_ = nullptr;
+  const char* detectedInterlaceText_ = nullptr;
+  DevicePropertyPages devicePages_;
+  SettingsHost settingsHost_;
+  Updater updater_;
+  bool devicePagesWereBusy_ = false;
+  // Guards the frame drawn from inside a window drag against re-entering itself.
+  bool inModalFrame_ = false;
+  // How often each field actually reached the screen. Equal counts mean the
+  // deinterlacer is being shown at the rate it is designed for; a shortfall on
+  // the second one is the picture juddering.
+  uint64_t fieldsShown_[2] = {0, 0};
+  // Smoothed estimate of when the next frame is due. The card does not deliver
+  // on a metronome, and pacing the fields off each raw arrival hands that
+  // wobble straight to the viewer.
+  int64_t framePhaseQpc_ = 0;
+
+  // Automatic video standard. Only the timestamps live here; what the card can
+  // do is asked of the card each time, because it is the card that knows.
+  int standardCandidate_ = -1;      // index into the candidate list, -1 = not searching
+  int64_t standardLostQpc_ = 0;     // when the lock was first missing
+  int64_t standardNextTryQpc_ = 0;  // not before this
+  int standardSweeps_ = 0;          // completed passes through the list without a lock
+  std::thread signalWatch_;
+  std::atomic<bool> signalWatchRun_{false};
+  std::atomic<int> signalLocked_{-1};
+  // Counts up every time the watcher stores a reading. The automatic search
+  // notes it down when it changes the standard and then ignores anything older:
+  // otherwise it judges the new standard by a measurement taken before it was
+  // set, and settles on whichever one happened to be tried when a stale "locked"
+  // came through.
+  std::atomic<uint32_t> signalSeq_{0};
+  uint32_t standardSeqAtSet_ = 0;
   std::string toastText_;
   double toastStart_ = 0.0;
   double volumeOsdStart_ = -1000.0;

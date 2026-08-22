@@ -26,6 +26,10 @@ struct OverlayStats {
   bool vsync = false;
   bool tearing = false;
   bool deinterlacing = false;
+  // What is actually running. Not simply the setting: on a source whose fields
+  // are co-sited every mode does the same thing, and saying "YADIF" there would
+  // be describing a code path nobody took.
+  std::string deinterlaceLabel;
   int displayWidth = 0;
   int displayHeight = 0;
   const char* filterName = "";

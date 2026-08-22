@@ -1,5 +1,7 @@
 #include "capture/dshow_util.h"
 
+#include "i18n.h"
+
 #include <dvdmedia.h>  // VIDEOINFOHEADER2
 
 #include <algorithm>
@@ -1045,6 +1047,135 @@ bool RouteCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilt
   }
   if (!routed) CAP_WARN("Crossbar: Eingang %d konnte nicht geroutet werden", index);
   return routed;
+}
+
+// ---------------------------------------------------------------------------
+// Analogue video standard
+
+namespace {
+
+struct StandardEntry {
+  long value;
+  const char* name;
+  int lines;
+};
+
+// Ordered so the common ones come first; the index is written to the config, so
+// entries may be appended but not reordered.
+const StandardEntry kStandards[] = {
+    {AnalogVideo_PAL_B, "PAL B", 625},        {AnalogVideo_PAL_G, "PAL G", 625},
+    {AnalogVideo_PAL_I, "PAL I", 625},        {AnalogVideo_PAL_D, "PAL D", 625},
+    {AnalogVideo_PAL_H, "PAL H", 625},        {AnalogVideo_PAL_N, "PAL N", 625},
+    {AnalogVideo_PAL_60, "PAL 60", 525},      {AnalogVideo_PAL_M, "PAL M", 525},
+    {AnalogVideo_NTSC_M, "NTSC M", 525},      {AnalogVideo_NTSC_M_J, "NTSC M (Japan)", 525},
+    {AnalogVideo_NTSC_433, "NTSC 4.43", 525}, {AnalogVideo_SECAM_B, "SECAM B", 625},
+    {AnalogVideo_SECAM_D, "SECAM D", 625},    {AnalogVideo_SECAM_G, "SECAM G", 625},
+    {AnalogVideo_SECAM_H, "SECAM H", 625},    {AnalogVideo_SECAM_K, "SECAM K", 625},
+    {AnalogVideo_SECAM_K1, "SECAM K1", 625},  {AnalogVideo_SECAM_L, "SECAM L", 625},
+    {AnalogVideo_SECAM_L1, "SECAM L1", 625},  {AnalogVideo_PAL_N_COMBO, "PAL N combo", 625},
+};
+const int kStandardCount = (int)(sizeof(kStandards) / sizeof(kStandards[0]));
+
+ComPtr<IAMAnalogVideoDecoder> DecoderOf(IBaseFilter* filter) {
+  ComPtr<IAMAnalogVideoDecoder> dec;
+  if (filter) filter->QueryInterface(IID_PPV_ARGS(&dec));
+  return dec;
+}
+
+}  // namespace
+
+int VideoStandardCount() { return kStandardCount; }
+
+long VideoStandardValue(int index) {
+  if (index < 0 || index >= kStandardCount) return 0;
+  return kStandards[index].value;
+}
+
+const char* VideoStandardName(int index) {
+  if (index < 0 || index >= kStandardCount) return "";
+  return kStandards[index].name;
+}
+
+int VideoStandardIndexOf(long value) {
+  for (int i = 0; i < kStandardCount; ++i) {
+    if (kStandards[i].value == value) return i;
+  }
+  return -1;
+}
+
+int VideoStandardLines(long value) {
+  const int index = VideoStandardIndexOf(value);
+  return index < 0 ? 0 : kStandards[index].lines;
+}
+
+long AvailableVideoStandards(IBaseFilter* filter) {
+  ComPtr<IAMAnalogVideoDecoder> dec = DecoderOf(filter);
+  if (!dec) return 0;
+  long available = 0;
+  if (FAILED(dec->get_AvailableTVFormats(&available))) return 0;
+  return available;
+}
+
+long CurrentVideoStandard(IBaseFilter* filter) {
+  ComPtr<IAMAnalogVideoDecoder> dec = DecoderOf(filter);
+  if (!dec) return 0;
+  long current = 0;
+  if (FAILED(dec->get_TVFormat(&current))) return 0;
+  return current;
+}
+
+bool SetVideoStandard(IBaseFilter* filter, long standard) {
+  ComPtr<IAMAnalogVideoDecoder> dec = DecoderOf(filter);
+  if (!dec || standard == 0) return false;
+  const HRESULT hr = dec->put_TVFormat(standard);
+  if (FAILED(hr)) {
+    CAP_WARN("Videonorm %s konnte nicht gesetzt werden: %s",
+             VideoStandardName(VideoStandardIndexOf(standard)), HrToString(hr).c_str());
+    return false;
+  }
+  CAP_LOG("Videonorm gesetzt: %s", VideoStandardName(VideoStandardIndexOf(standard)));
+  return true;
+}
+
+int VideoStandardLocked(IBaseFilter* filter) {
+  ComPtr<IAMAnalogVideoDecoder> dec = DecoderOf(filter);
+  if (!dec) return -1;
+  long locked = 0;
+  if (FAILED(dec->get_HorizontalLocked(&locked))) return -1;
+  return locked ? 1 : 0;
+}
+
+std::string VideoStandardSettingName(long setting) {
+  if (setting == 0) return T("Nicht ändern", "Leave alone");
+  if (setting == -1) return T("Automatisch", "Automatic");
+  const int index = VideoStandardIndexOf(setting);
+  return index < 0 ? T("Unbekannt", "Unknown") : VideoStandardName(index);
+}
+
+double VideoStandardSubcarrierSamples(long standard) {
+  // 13.5 MHz of sampling over the active line, from BT.601.
+  const double kSampleRate = 13500000.0;
+  // NTSC M and its Japanese variant carry 3.579545 MHz; PAL M is close enough to
+  // count with them. Everything else in practice -- PAL, PAL-60, SECAM, and the
+  // 4.43 MHz NTSC variant -- sits at 4.43361875 MHz.
+  const bool ntsc = standard == AnalogVideo_NTSC_M || standard == AnalogVideo_NTSC_M_J ||
+                    standard == AnalogVideo_PAL_M;
+  const double carrier = ntsc ? 3579545.0 : 4433618.75;
+  return kSampleRate / carrier;
+}
+
+
+std::vector<long> AutoStandardCandidates(long available) {
+  // One per line count and colour system. Trying PAL B and then PAL G would be
+  // asking the same question twice: they differ in the sound carrier, which is
+  // no part of the picture.
+  static const long kOrder[] = {AnalogVideo_PAL_B,   AnalogVideo_PAL_60, AnalogVideo_NTSC_M,
+                                AnalogVideo_NTSC_M_J, AnalogVideo_SECAM_B};
+  std::vector<long> out;
+  for (long value : kOrder) {
+    if (available & value) out.push_back(value);
+  }
+  return out;
 }
 
 }  // namespace cap

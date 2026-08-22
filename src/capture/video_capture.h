@@ -24,6 +24,10 @@ struct DeviceProbeResult {
   VideoDeviceInfo device;
   CapsModel caps;
   std::vector<CrossbarInput> crossbarInputs;
+  // What the analogue decoder offers, and what it is set to. Both zero when the
+  // card has no analogue decoder at all.
+  long availableStandards = 0;
+  long currentStandard = 0;
   // Colour description read off the pin's current media type, so the diagnostics
   // can show whether the driver describes its output or leaves it to guesswork.
   VideoFormatInfo colorInfo;
@@ -67,6 +71,17 @@ class VideoCapture {
 
   // Switches the crossbar input on a running graph, no restart needed.
   bool SetCrossbarInput(int index);
+
+  // The live filter and its capture pin, for the driver's own property pages.
+  // Null while stopped.
+  IBaseFilter* filter() const { return captureFilter_.Get(); }
+  IPin* capturePin() const { return capturePin_.Get(); }
+
+  // 1 locked, 0 not, -1 when the card cannot say. Polled by the automatic
+  // standard selection; cheap enough to ask a few times a second.
+  int signalLocked() const { return VideoStandardLocked(captureFilter_.Get()); }
+  long currentStandard() const { return CurrentVideoStandard(captureFilter_.Get()); }
+  bool SetStandard(long standard) { return SetVideoStandard(captureFilter_.Get(), standard); }
 
  private:
   void Teardown();

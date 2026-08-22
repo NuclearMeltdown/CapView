@@ -154,6 +154,24 @@ bool SettingsWindow::takeCropPickRequest() {
   return requested;
 }
 
+bool SettingsWindow::takeDeviceConfigRequest() {
+  const bool requested = deviceConfigRequested_;
+  deviceConfigRequested_ = false;
+  return requested;
+}
+
+bool SettingsWindow::takeRestartRequest() {
+  const bool requested = restartRequested_;
+  restartRequested_ = false;
+  return requested;
+}
+
+bool SettingsWindow::takeCropDetectRequest() {
+  const bool requested = cropDetectRequested_;
+  cropDetectRequested_ = false;
+  return requested;
+}
+
 void SettingsWindow::Close() {
   open_ = false;
   captureAction_ = -1;
@@ -186,6 +204,7 @@ const DeviceProbeResult& SettingsWindow::CapsFor(const DeviceRef& device,
   }
 
   const std::string key = device.id.empty() ? device.name : device.id;
+  if (!probeAllowed_) return probed_;
   if (probedId_ != key) {
     CAP_LOG("Frage Fähigkeiten von '%s' ab", device.name.c_str());
     probed_ = VideoCapture::Probe(device);
@@ -252,22 +271,38 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
   Result result = Result::None;
 
   const ImGuiViewport* viewport = ImGui::GetMainViewport();
-  if (centerNext_) {
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-                                   viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
-                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    centerNext_ = false;
-  }
-  ImGui::SetNextWindowSize(ImVec2(780.0f, 660.0f), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSizeConstraints(ImVec2(620.0f, 460.0f), ImVec2(FLT_MAX, FLT_MAX));
-
   bool stayOpen = true;
-  // Everything after "###" is the id, everything before it is the label. Without
-  // this the window is a different window in each language: ImGui keys position,
-  // size and the selected tab off the name, so switching language moved the
-  // dialog, resized it and threw you back to the first tab.
-  if (!ImGui::Begin(T("Einstellungen###capview_settings", "Settings###capview_settings"),
-                    &stayOpen, ImGuiWindowFlags_NoCollapse)) {
+  bool opened;
+  if (fillsWindow_) {
+    // The dialog *is* the window here: the host already provides a title bar, a
+    // border and a close button, so the panel inside it gets none of those and
+    // simply covers the whole thing. The footer buttons still work -- the caller
+    // acts on the result either way.
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    opened = ImGui::Begin("###capview_settings_host", nullptr,
+                          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                              ImGuiWindowFlags_NoBringToFrontOnFocus |
+                              ImGuiWindowFlags_NoSavedSettings);
+  } else {
+    if (centerNext_) {
+      ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+                                     viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
+                              ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+      centerNext_ = false;
+    }
+    ImGui::SetNextWindowSize(ImVec2(780.0f, 660.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(620.0f, 460.0f), ImVec2(FLT_MAX, FLT_MAX));
+
+    // Everything after "###" is the id, everything before it is the label.
+    // Without this the window is a different window in each language: ImGui keys
+    // position, size and the selected tab off the name, so switching language
+    // moved the dialog, resized it and threw you back to the first tab.
+    opened = ImGui::Begin(T("Einstellungen###capview_settings", "Settings###capview_settings"),
+                          &stayOpen, ImGuiWindowFlags_NoCollapse);
+  }
+  if (!opened) {
     ImGui::End();
     return Result::None;
   }
@@ -290,6 +325,7 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
   }
 
   const DeviceProbeResult& caps = CapsFor(cfg().active().capture.video, liveCaps);
+  captureRunning_ = liveCaps != nullptr;
   EnsureValidFormat(caps);
 
   // Height to leave free for the button row. Each tab scrolls inside its own
@@ -346,6 +382,12 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
+    if (ImGui::BeginTabItem(T("Updates###updates", "Updates###updates"))) {
+      ImGui::BeginChild("scroll_updates", ImVec2(0, -footer));
+      DrawUpdatesTab();
+      ImGui::EndChild();
+      ImGui::EndTabItem();
+    }
     ImGui::EndTabBar();
   }
 
@@ -370,6 +412,97 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
   return result;
 }
 
+// ---------------------------------------------------------------- updates tab
+
+void SettingsWindow::DrawUpdatesTab() {
+  AppSettings& app = cfg().app;
+  ImGui::Spacing();
+
+  ImGui::SeparatorText(T("Version", "Version"));
+  ImGui::Text("%s", T("Installiert:", "Installed:"));
+  ImGui::SameLine();
+  ImGui::TextDisabled("%s", Updater::currentVersion());
+
+  ImGui::Checkbox(T("Beim Start nach Updates suchen", "Check for updates at startup"),
+                  &app.checkUpdatesOnStart);
+  ImGui::SameLine();
+  HelpMarker(T("Fragt die Releases auf GitHub ab. Heruntergeladen wird nichts, solange du "
+               "es nicht verlangst.",
+               "Asks GitHub for the newest release. Nothing is downloaded until you ask "
+               "for it."));
+
+  if (!updater_) return;
+  const UpdateStatus st = updater_->status();
+  const bool busy = updater_->busy();
+
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Stand", "Status"));
+
+  ImGui::BeginDisabled(busy);
+  if (ImGui::Button(T("Jetzt suchen", "Check now"))) updater_->CheckAsync();
+  ImGui::EndDisabled();
+
+  ImGui::SameLine();
+  switch (st.state) {
+    case UpdateStatus::State::Idle:
+      ImGui::TextDisabled("%s", T("noch nicht gesucht", "not checked yet"));
+      break;
+    case UpdateStatus::State::Checking:
+      ImGui::TextDisabled("%s", T("wird gesucht ...", "checking ..."));
+      break;
+    case UpdateStatus::State::UpToDate:
+      ImGui::TextDisabled(T("aktuell (neueste ist %s)", "up to date (newest is %s)"),
+                          st.latestVersion.c_str());
+      break;
+    case UpdateStatus::State::Available:
+      ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                         T("%s ist verfügbar", "%s is available"), st.latestVersion.c_str());
+      break;
+    case UpdateStatus::State::Downloading:
+      ImGui::TextDisabled("%s", T("wird geladen ...", "downloading ..."));
+      break;
+    case UpdateStatus::State::Ready:
+      ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                         T("%s ist eingesetzt", "%s is installed"), st.latestVersion.c_str());
+      break;
+    case UpdateStatus::State::Failed:
+      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s", st.error.c_str());
+      break;
+  }
+
+  if (st.state == UpdateStatus::State::Available) {
+    ImGui::Spacing();
+    ImGui::BeginDisabled(busy);
+    if (ImGui::Button(T("Herunterladen und installieren", "Download and install"))) {
+      updater_->InstallAsync();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    HelpMarker(T("Ersetzt CapView.exe. Die bisherige Version wird beiseite gelegt und beim "
+                 "nächsten Start entfernt, damit ein misslungenes Update nichts kaputt macht.",
+                 "Replaces CapView.exe. The previous build is moved aside and removed on the "
+                 "next start, so a failed update breaks nothing."));
+  }
+
+  if (st.state == UpdateStatus::State::Ready) {
+    ImGui::Spacing();
+    if (ImGui::Button(T("Jetzt neu starten", "Restart now"))) restartRequested_ = true;
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", T("oder beim nächsten Start", "or on the next start"));
+  }
+
+  if (!st.notes.empty() && (st.state == UpdateStatus::State::Available ||
+                            st.state == UpdateStatus::State::Ready)) {
+    ImGui::Spacing();
+    ImGui::SeparatorText(T("Was neu ist", "What is new"));
+    ImGui::BeginChild("release_notes", ImVec2(0, 220.0f), ImGuiChildFlags_Borders);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(st.notes.c_str());
+    ImGui::PopTextWrapPos();
+    ImGui::EndChild();
+  }
+}
+
 // ---------------------------------------------------------------- source tab
 
 void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
@@ -377,6 +510,24 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
   ImGui::Spacing();
 
   ImGui::SeparatorText(T("Videogerät", "Video device"));
+
+  // A hybrid card carries both halves on one board and cannot say which one has
+  // something plugged into it -- this one exposes no input selector at all, so
+  // there is nothing to read. Saying so is left to the person who plugged the
+  // cable in, and everything that only makes sense for one of the two follows
+  // from it.
+  {
+    int kind = (int)p.capture.signalKind;
+    ImGui::SetNextItemWidth(-260.0f);
+    if (ComboEnum(T("Signalart", "Signal type"), &kind, kSignalKindCount, SignalKindName)) {
+      p.capture.signalKind = (SignalKind)kind;
+    }
+    ImGui::SameLine();
+    HelpMarker(T("Blendet aus, was für die andere Art keinen Sinn ergibt. Automatisch "
+                 "heißt: analog, wenn die Karte einen Analogdecoder hat.",
+                 "Hides what makes no sense for the other kind. Automatic means analogue "
+                 "when the card has an analogue decoder."));
+  }
 
   const char* preview = p.capture.video.name.empty()
                             ? T("— nichts ausgewählt —", "— nothing selected —")
@@ -401,8 +552,75 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
   ImGui::SameLine();
   if (ImGui::Button(T("Aktualisieren", "Refresh"), ImVec2(-1, 0))) InvalidateDeviceLists();
 
+  // The driver's own dialog. Everything in it belongs to the card -- video
+  // standard, decoder settings, whatever the vendor put there -- and none of it
+  // has an equivalent here.
+  ImGui::BeginDisabled(!captureRunning_);
+  if (ImGui::Button(T("Karte konfigurieren ...", "Configure card ..."))) {
+    deviceConfigRequested_ = true;
+  }
+  ImGui::EndDisabled();
+  ImGui::SetItemTooltip(
+      captureRunning_
+          ? T("Eigener Dialog des Treibers. Das Bild läuft dabei weiter.",
+              "The driver's own dialog. The picture keeps running while it is open.")
+          : T("Nur bei laufender Karte.", "Only while the card is running."));
+
   if (!caps.error.empty()) {
     ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s", caps.error.c_str());
+  }
+
+  // ---- analogue video standard ----
+  //
+  // Only shown for cards that have an analogue decoder. On a pure HDMI input
+  // there is no such thing and the list would be a row of dead entries.
+  if (caps.availableStandards != 0 && analogueSource_) {
+    ImGui::Spacing();
+    ImGui::SeparatorText(T("Videonorm", "Video standard"));
+
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##vstandard",
+                          VideoStandardSettingName(p.capture.videoStandard).c_str())) {
+      if (ImGui::Selectable(T("Nicht ändern", "Leave alone"), p.capture.videoStandard == 0)) {
+        p.capture.videoStandard = 0;
+      }
+      if (ImGui::Selectable(T("Automatisch", "Automatic"), p.capture.videoStandard == -1)) {
+        p.capture.videoStandard = -1;
+      }
+      ImGui::Separator();
+      for (int i = 0; i < VideoStandardCount(); ++i) {
+        const long value = VideoStandardValue(i);
+        if ((caps.availableStandards & value) == 0) continue;
+        if (ImGui::Selectable(VideoStandardName(i), p.capture.videoStandard == value)) {
+          p.capture.videoStandard = value;
+        }
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip(
+        T("PAL hat 625 Zeilen bei 50 Hz, PAL-60 hat 525 bei 60. Automatisch probiert "
+          "die Normen durch, bis der Decoder einrastet.",
+          "PAL is 625 lines at 50 Hz, PAL-60 is 525 at 60. Automatic tries them until the "
+          "decoder locks."));
+
+    // What the card is actually set to. On automatic this is the only way to see
+    // what the search settled on, and "it looks right" is not the same as
+    // knowing.
+    if (caps.currentStandard != 0) {
+      const int idx = VideoStandardIndexOf(caps.currentStandard);
+      ImGui::TextDisabled(T("Eingestellt: %s", "In use: %s"),
+                          idx >= 0 ? VideoStandardName(idx) : "?");
+    }
+
+    if (signalLocked_ >= 0) {
+      if (signalLocked_ == 1) {
+        ImGui::TextDisabled(T("Signal: eingerastet", "Signal: locked"));
+      } else {
+        ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s",
+                           T("Signal: kein Lock — falsche Norm oder nichts angeschlossen",
+                             "Signal: no lock — wrong standard, or nothing connected"));
+      }
+    }
   }
 
   // ---- crossbar ----
@@ -649,13 +867,37 @@ void SettingsWindow::DrawImageTab() {
   ImGui::SameLine();
   HelpMarker(AspectHelp(aspect));
 
+  int rotation = (int)img.rotation;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Drehung", "Rotation"), &rotation, kRotationCount, RotationName)) {
+    img.rotation = (Rotation)rotation;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Gilt auch für Aufnahme und Screenshots.",
+               "Applies to recordings and screenshots as well."));
+
+  if (analogueSource_) {
+    ImGui::Checkbox(T("Zeilen verdoppeln", "Double lines"), &img.lineDouble);
+    ImGui::SameLine();
+    HelpMarker(T("Für 240p/288p-Quellen, die halb so hoch ankommen wie sie sollen.",
+                 "For 240p/288p sources that arrive half as tall as they should."));
+  }
+
   ImGui::Spacing();
   ImGui::SeparatorText(T("Halbbilder", "Fields"));
   ImGui::Checkbox(T("Nur bei interlaced Quellen anwenden", "Only apply to interlaced sources"),
                   &img.deinterlaceAuto);
   ImGui::SameLine();
-  HelpMarker(T("Meldet die Karte 480i/1080i nicht korrekt, Haken entfernen.",
-               "If the card misreports 480i/1080i, untick this."));
+  HelpMarker(T("Erkennung aus dem Bild, nicht aus der Formatmeldung der Karte.",
+               "Detected from the picture, not from what the card reports."));
+  // Shown regardless of the checkbox. What the source is remains worth knowing
+  // when the automatic handling is switched off -- that is exactly the situation
+  // in which somebody wants to check whether it was right.
+  if (detectedInterlace_) {
+    ImGui::TextDisabled(T("Gemessen: %s", "Measured: %s"),
+                        *detectedInterlace_ ? *detectedInterlace_
+                                            : T("wird gemessen", "measuring"));
+  }
 
   int deint = (int)img.deinterlace;
   ImGui::SetNextItemWidth(-260.0f);
@@ -665,6 +907,59 @@ void SettingsWindow::DrawImageTab() {
   }
   ImGui::SameLine();
   HelpMarker(DeinterlaceHelp(deint));
+  if (coSitedFields_) {
+    ImGui::TextDisabled(T("Diese Quelle braucht keine Rekonstruktion: alle Modi liefern "
+                          "dasselbe Bild.",
+                          "This source needs no reconstruction: every mode gives the same "
+                          "picture."));
+  }
+
+  int order = (int)img.fieldOrder;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Halbbildreihenfolge", "Field order"), &order, 3, FieldOrderName)) {
+    img.fieldOrder = (FieldOrder)order;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Springt das Bild auf und ab, die andere Reihenfolge wählen.",
+               "If the picture jumps up and down, pick the other order."));
+
+  if (analogueSource_) {
+    ImGui::Spacing();
+    ImGui::SeparatorText(T("Composite-Filter", "Composite filter"));
+    ImGui::TextDisabled(T("Gegen die zwei Störungen, die Composite immer mitbringt.",
+                          "Against the two defects composite always brings with it."));
+
+    ImGui::SetNextItemWidth(-260.0f);
+    ImGui::SliderInt(T("Farbschimmern", "Colour shimmer"), &img.chromaSoft, 0, 8,
+                     img.chromaSoft == 0 ? T("aus", "off") : "%d");
+    ImGui::SameLine();
+    HelpMarker(T("Regenbogenmuster über feinen Strukturen. Weichzeichnet die Farbe "
+                 "seitlich; die Schärfe bleibt, weil Composite ohnehin keine feinen "
+                 "Farbdetails überträgt.",
+                 "Rainbow patterns over fine detail. Blurs colour sideways; sharpness "
+                 "stays, because composite carries no fine colour detail anyway."));
+
+    // One control, not two. They are two halves of one job -- an average over
+    // time where the picture is still, and the carrier worked back out of the
+    // brightness where it is not -- and asking somebody to balance them against
+    // each other only invites the setting where they fight.
+    ImGui::SetNextItemWidth(-260.0f);
+    if (ImGui::SliderFloat(T("Punktkriechen", "Dot crawl"), &img.dotNotch, 0.0f, 1.0f,
+                           img.dotNotch <= 0.0f ? T("aus", "off") : "%.2f")) {
+      // The temporal half costs no sharpness and only acts where nothing moves,
+      // so there is never a reason to run it at half measures.
+      img.temporalDenoise = img.dotNotch > 0.0f ? 1.0f : 0.0f;
+    }
+    ImGui::SameLine();
+    HelpMarker(T("Wo nichts in Bewegung ist, wird über vier Bilder gemittelt -- das kostet "
+                 "keine Schärfe. Wo etwas in Bewegung ist, wird der Farbträger aus der "
+                 "Helligkeit herausgerechnet, und weiter rechts heißt gründlicher und "
+                 "weicher: bei 0,5 gehen rund 60 % weg, ganz rechts über 90 %.",
+                 "Where nothing moves, four frames are averaged -- that costs no sharpness. "
+                 "Where something moves, the colour subcarrier is worked back out of the "
+                 "brightness, and further right is more thorough and softer: around 60 % "
+                 "goes at 0.5, over 90 % at the far right."));
+  }
 
   ImGui::Spacing();
   ImGui::SeparatorText(T("Bildrand abschneiden", "Crop"));
@@ -683,11 +978,25 @@ void SettingsWindow::DrawImageTab() {
   ImGui::SameLine();
   ImGui::SetNextItemWidth(quarter);
   ImGui::DragInt("##cropb", &img.cropBottom, 0.5f, 0, 2048, T("unten %d", "bottom %d"));
-  if (ImGui::Button(T("Im Bild auswählen ...", "Pick on the picture ..."))) {
+  // The crop is measured on the source, before the picture is turned. Dragging
+  // an edge on a rotated image would move a different edge than the one under
+  // the cursor, so that combination is simply not offered.
+  const bool rotated = img.rotation != Rotation::None;
+  ImGui::BeginDisabled(rotated);
+  if (ImGui::Button(T("Konfigurieren ...", "Configure ..."))) {
     cropPickRequested_ = true;
   }
-  ImGui::SetItemTooltip(T("Schließt die Einstellungen und lässt die Ränder im Bild ziehen.",
-                          "Closes the settings and lets you drag the edges on the picture."));
+  ImGui::EndDisabled();
+  ImGui::SetItemTooltip(
+      rotated ? T("Bei gedrehtem Bild nicht verfügbar.", "Not available on a rotated picture.")
+              : T("Schließt die Einstellungen und lässt die Ränder im Bild ziehen.",
+                  "Closes the settings and lets you drag the edges on the picture."));
+  ImGui::SameLine();
+  ImGui::BeginDisabled(!captureRunning_);
+  if (ImGui::Button(T("Erkennen", "Detect"))) cropDetectRequested_ = true;
+  ImGui::EndDisabled();
+  ImGui::SetItemTooltip(T("Misst den schwarzen Rand aus und schneidet ihn weg.",
+                          "Measures the black border and crops it away."));
   ImGui::SameLine();
   if (ImGui::Button(T("Zurücksetzen##crop", "Reset##crop"))) {
     img.cropLeft = img.cropRight = img.cropTop = img.cropBottom = 0;
@@ -859,6 +1168,16 @@ void SettingsWindow::DrawDisplayTab() {
     app.language = (Language)lang;
     SetLanguage(app.language);
   }
+
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Fenster", "Window"));
+  ImGui::Checkbox(T("Einstellungen in eigenem Fenster", "Settings in their own window"),
+                  &app.settingsSeparateWindow);
+  ImGui::SameLine();
+  HelpMarker(T("Ein echtes Fenster statt einer Fläche über dem Bild -- verschiebbar auf "
+               "einen zweiten Monitor oder neben die Vorschau.",
+               "A real window instead of a panel over the picture -- movable to a second "
+               "monitor or beside the preview."));
 
   ImGui::Spacing();
   ImGui::SeparatorText(T("Darstellung", "Appearance"));

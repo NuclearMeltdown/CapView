@@ -133,6 +133,9 @@ DeviceProbeResult VideoCapture::Probe(const DeviceRef& device) {
     return out;
   }
 
+  out.availableStandards = AvailableVideoStandards(filter.Get());
+  out.currentStandard = CurrentVideoStandard(filter.Get());
+
   out.caps.Build(EnumerateCaps(pin.Get()));
 
   // The crossbar is a separate upstream filter that only joins the graph once
@@ -201,6 +204,15 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
 
   capturePin_ = FindCapturePin(builder_.Get(), captureFilter_.Get());
   if (!capturePin_) return fail("Das Gerät hat keinen brauchbaren Capture-Pin");
+
+  // Before the formats are read, not after: the standard decides how many lines
+  // the card will produce, and therefore which formats it advertises at all.
+  capabilities_.availableStandards = AvailableVideoStandards(captureFilter_.Get());
+  if (settings.videoStandard > 0 &&
+      (capabilities_.availableStandards & settings.videoStandard) != 0) {
+    SetVideoStandard(captureFilter_.Get(), settings.videoStandard);
+  }
+  capabilities_.currentStandard = CurrentVideoStandard(captureFilter_.Get());
 
   capabilities_.caps.Build(EnumerateCaps(capturePin_.Get()));
   capabilities_.ok = true;

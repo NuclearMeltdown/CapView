@@ -20,15 +20,40 @@ enum class Theme { Dark, Light, System };
 
 enum class ScaleFilter { Nearest, Bilinear, Bicubic, Lanczos3, SharpBilinear };
 
+// Which field of an interlaced frame is the earlier one. Analogue capture cards
+// routinely describe their format with a plain VIDEOINFOHEADER, which has no
+// field to put this in, so guessing is all that is left -- and guessing wrong
+// makes every deinterlacer play the two fields in the wrong order, which looks
+// like the picture juddering up and down.
+enum class FieldOrder { Auto, TopFirst, BottomFirst };
+
 // Appended rather than reordered: these are written to the config as numbers.
-enum class Deinterlace { Off, Bob, BobLinear, MotionAdaptive, EdgeDirected };
-const int kDeinterlaceCount = 5;
+enum class Deinterlace { Off, Bob, BobLinear, MotionAdaptive, EdgeDirected, Yadif };
+const int kDeinterlaceCount = 6;
+
+// YADIF is the only mode that needs the frame before the current one, which is
+// why it is the only one that costs anything to have switched on.
+inline bool DeinterlaceNeedsHistory(Deinterlace d) { return d == Deinterlace::Yadif; }
+
+// Quarter turns, applied after deinterlacing and before scaling, so what is
+// recorded and screenshotted is rotated too.
+enum class Rotation { None, Cw90, Half, Ccw90 };
+const int kRotationCount = 4;
 
 enum class AspectMode { Source, Force16x9, Force4x3, Stretch, Integer };
 
 enum class ColorRange { Auto, Limited, Full };
 
 enum class ColorMatrix { Auto, BT601, BT709 };
+
+// Which half of a hybrid card is in use. Cards like the PEXHDCAP60L carry a
+// digital input and an analogue decoder on the same board, and the settings that
+// matter differ completely between the two: a video standard, composite
+// artefacts and half-height sources are analogue problems and simply do not
+// arise over DVI. Auto means "analogue if the card has a decoder at all", which
+// is right for every card that only does one of the two.
+enum class SignalKind { Auto, Analog, Digital };
+const int kSignalKindCount = 3;
 
 enum class AudioSource { Embedded, Manual, None };
 
@@ -80,6 +105,9 @@ const char* ThemeName(int index);
 const char* LanguageName(int index);
 const char* ScaleFilterName(int index);
 const char* DeinterlaceName(int index);
+const char* FieldOrderName(int index);
+const char* RotationName(int index);
+const char* SignalKindName(int index);
 const char* AspectName(int index);
 const char* ColorRangeName(int index);
 const char* ColorMatrixName(int index);
@@ -148,6 +176,11 @@ struct CaptureSettings {
   AudioSource audioSource = AudioSource::Embedded;
   DeviceRef audio;         // only used when audioSource == Manual
   int crossbarInput = -1;  // index into the enumerated crossbar inputs, -1 = leave alone
+  // Analogue video standard. 0 leaves whatever the card was set to alone, which
+  // is what it did before this existed; -1 lets CapView find it by watching
+  // whether the decoder locks; anything else is an AnalogVideo_* bitmask.
+  long videoStandard = 0;
+  SignalKind signalKind = SignalKind::Auto;
   FormatSel format;
 };
 
@@ -155,7 +188,30 @@ struct ImageSettings {
   ScaleFilter filter = ScaleFilter::Bilinear;
   float sharpen = 0.0f;  // 0..1, contrast-adaptive sharpening applied after scaling
   Deinterlace deinterlace = Deinterlace::Bob;
-  bool deinterlaceAuto = true;  // only kick in when the media type says interlaced
+  bool deinterlaceAuto = true;  // only kick in when the source looks interlaced
+  FieldOrder fieldOrder = FieldOrder::Auto;
+  // Every source line filled into two. For a 240p or 288p console that the card
+  // hands over at its true line count, which otherwise arrives half as tall as
+  // it should be.
+  bool lineDouble = false;
+  Rotation rotation = Rotation::None;
+
+  // Composite clean-up. Two separate defects, two separate knobs -- see the
+  // shader for why one cannot fix the other.
+  //
+  // chromaSoft blurs the colour horizontally, in source pixels. Composite
+  // carries colour at about a quarter of the bandwidth of brightness, so there
+  // is no fine colour detail in the signal to lose; what goes away is the
+  // rainbow shimmer over dense patterns.
+  int chromaSoft = 0;  // 0 off, up to 8 source pixels either side
+  // temporalDenoise averages with the previous frame wherever nothing moved.
+  // The colour subcarrier flips phase from frame to frame, so that average is
+  // what cancels dot crawl -- and analogue noise goes with it.
+  float temporalDenoise = 0.0f;  // 0..1
+  // The same defect where the temporal filter cannot reach it, which in a
+  // running game is most of the screen. Costs a little horizontal sharpness,
+  // which is why it is a knob of its own rather than part of the one above.
+  float dotNotch = 0.0f;  // 0..1
   AspectMode aspect = AspectMode::Source;
   int cropLeft = 0;
   int cropRight = 0;
@@ -235,6 +291,13 @@ struct AppSettings {
   // The button strip along the top. On by default: everything it offers is also
   // on a key, but a key you have to know about first.
   bool showToolbar = true;
+  // The settings as a window of the operating system's own rather than one
+  // drawn inside the preview, so it can be put on another monitor or beside the
+  // picture instead of on top of it.
+  bool settingsSeparateWindow = false;
+  // Ask GitHub for the newest release once at startup. Only ever asks -- the
+  // download is a separate, explicit action.
+  bool checkUpdatesOnStart = true;
   StatsDetail statsDetail = StatsDetail::Compact;
   bool logToFile = false;
 

@@ -189,4 +189,60 @@ bool RouteCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilt
 
 std::string PhysicalConnectorName(long physicalType);
 
+// ---------------------------------------------------------------------------
+// Analogue video standard
+//
+// The setting behind the video standard list in a capture driver's own dialog.
+// It matters more than it looks: PAL is 625 lines at 50 Hz and PAL-60 is 525 at
+// 60, so a console that can do both needs the card told which one it is sending.
+// Set the wrong one and either nothing locks at all or the picture arrives with
+// the wrong number of lines in it.
+//
+// Values are the AnalogVideo_* bitmask from the DirectShow headers.
+
+// Everything a card might offer, in a fixed order, so an index can be stored.
+int VideoStandardCount();
+long VideoStandardValue(int index);
+const char* VideoStandardName(int index);
+// Index of a bitmask value, or -1 when it is not one we know.
+int VideoStandardIndexOf(long value);
+// 525 or 625, or 0 when unknown. Derived from the standard, not measured.
+int VideoStandardLines(long value);
+
+// What the card says it can do, as a bitmask. Zero when it has no analogue
+// decoder -- a pure HDMI input does not.
+long AvailableVideoStandards(IBaseFilter* filter);
+long CurrentVideoStandard(IBaseFilter* filter);
+bool SetVideoStandard(IBaseFilter* filter, long standard);
+
+// Whether the decoder has locked onto a signal: 1 yes, 0 no, -1 when the card
+// cannot say. This one is genuinely measured -- the decoder loses the lock when
+// it is set to the wrong line count -- which is what makes automatic selection
+// possible at all. Its sibling get_NumberOfLines is not: that merely repeats
+// the standard it was given.
+int VideoStandardLocked(IBaseFilter* filter);
+
+// The order automatic selection tries, filtered to what `available` offers.
+// One variant per line count and colour system: the PAL letters differ only in
+// sound carrier, which is nothing to do with the picture.
+std::vector<long> AutoStandardCandidates(long available);
+
+// Label for a stored setting: 0 "leave alone", -1 "automatic", otherwise the
+// standard's name. Follows the selected language for the first two.
+std::string VideoStandardSettingName(long setting);
+
+// How many samples of a 720 pixel line one cycle of the colour subcarrier
+// occupies. This is what the dot crawl filter needs to know: the crawl *is* the
+// subcarrier leaking into brightness, so removing it means knowing its
+// frequency. Both numbers follow from the standard and BT.601 sampling, and
+// measuring the picture agrees with them to within two parts in a thousand.
+double VideoStandardSubcarrierSamples(long standard);
+
+// How many samples of a 720 pixel line one cycle of the colour subcarrier
+// occupies. This is what the dot crawl filter needs to know: the crawl *is* the
+// subcarrier leaking into brightness, so removing it means knowing its
+// frequency. Both numbers follow from the standard and BT.601 sampling, and
+// measuring the picture agrees with them to within two parts in a thousand.
+double VideoStandardSubcarrierSamples(long standard);
+
 }  // namespace cap

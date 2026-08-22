@@ -92,7 +92,7 @@ void DrawStatsPanel(const OverlayStats& s) {
         Decimal(s.presentFps, 1) + (s.vsync ? T(" fps  VSync an", " fps  VSync on")
                                             : T(" fps  VSync aus", " fps  VSync off")) +
             ((!s.vsync && s.tearing) ? T(", Tearing erlaubt", ", tearing allowed") : ""));
-    if (normal && s.deinterlacing) Row(T("Halbbilder", "Fields"), T("Bob aktiv", "bob active"));
+    if (normal && s.deinterlacing) Row(T("Halbbilder", "Fields"), s.deinterlaceLabel);
 
     if (full) {
       Row(T("Bilder", "Frames"),
