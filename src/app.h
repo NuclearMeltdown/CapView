@@ -151,6 +151,9 @@ class App {
   // Draws the settings into their own window when that is switched on.
   // Returns true when it took care of them, so the in-picture panel is skipped.
   bool DrawSettingsWindowed();
+  // The one-off notice when the check made at startup finds something. Shown in
+  // the picture, because a tab nobody opened is not a notice.
+  void DrawUpdatePrompt();
 
   void OpenDeviceConfig();
   void DetectCrop();
@@ -270,6 +273,8 @@ class App {
   DevicePropertyPages devicePages_;
   SettingsHost settingsHost_;
   Updater updater_;
+  bool updatePromptQueued_ = false;   // waiting to be opened
+  bool updatePromptRaised_ = false;   // already shown once this session
   bool devicePagesWereBusy_ = false;
   // Guards the frame drawn from inside a window drag against re-entering itself.
   bool inModalFrame_ = false;
