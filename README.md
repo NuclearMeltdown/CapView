@@ -45,18 +45,114 @@ space are selected independently. Combinations a driver does not advertise but
 does accept can be forced, which covers the common case of a card reporting only
 1080p30 for a mode it will in fact deliver at 1080p60.
 
+Cards with an analogue decoder also expose their **video standard** — PAL,
+PAL-60, NTSC, SECAM and the rest of the list the driver reports. This matters
+more than it looks on a console that can do both 50 and 60 Hz: PAL is 625 lines
+at 50, PAL-60 is 525 at 60, and setting the wrong one gives either no picture at
+all or one with the wrong number of lines in it. The setting can also be left on
+automatic, which cycles the plausible standards and keeps the first that locks.
+
+That automatic mode has a limit worth stating: the only measurement a card offers
+is whether its decoder has locked, and on this hardware some standards report a
+lock with nothing connected at all. It cannot tell "no signal" from "right
+standard", so the tab shows which one it settled on rather than leaving you to
+guess.
+
+Whatever the driver keeps to itself — input selection, decoder tuning, the
+vendor's own controls — is reachable through **Configure card**, which opens the
+driver's own property pages. The picture keeps running while they are open.
+
 ![The source tab, with the capture device, its embedded audio, and separate pickers for colour format, resolution and frame rate](docs/settings-source.jpg)
 
 ### Picture
 
 Nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear scaling; contrast
-adaptive sharpening; bob deinterlacing; aspect override and integer scaling.
-Crop is set by dragging the edges on the picture.
+adaptive sharpening; aspect override and integer scaling; rotation in quarter
+turns; line doubling for 240p and 288p sources that arrive half as tall as they
+should.
+
+Crop is set by dragging the edges on the picture, or found for you: **Detect**
+measures where the black border ends. A row counts as picture only when a decent
+stretch of it is above black and a column only when it is lit in enough of those
+rows, so one bright speck of analogue noise in the letterbox does not widen the
+result. The measurement is a union across about two seconds, because a fade to
+black is not evidence that the picture got smaller.
+
+Rotation and line doubling are applied before scaling, so they appear in
+recordings and screenshots as well as in the window.
 
 Colour range and matrix default to automatic. The range is measured from the
 image rather than inferred from the pixel format, because it is a property of
 the source signal: a console set to full range delivers full range whether the
 card is asked for NV12 or RGB32.
+
+### Deinterlacing
+
+Whether the source is interlaced is also measured rather than believed. A media
+type is entitled to say so and frequently does not — a plain `VIDEOINFOHEADER`
+has nowhere to put it — so two questions are asked of the picture instead. First,
+do the two rows of a pair hold the same line? A 240p or 288p console packed into
+an interlaced frame arrives that way, and such a source needs its fields
+separated but *not* the half-line offset a real interlaced signal has. Second,
+only if the answer is no: is there combing? That one needs motion, so it is
+judged per frame and never frozen on "progressive" — a still picture proves
+nothing.
+
+Five modes, and they differ in more than sharpness. The figures below are the
+vertical movement between consecutive frames, measured on a 480i console:
+
+| Mode | Vertical movement | |
+|---|---|---|
+| Off (weave) | none | combing on anything that moves |
+| Bob | **1.0 line** | full rate, no latency, no interpolation |
+| Bob interpolated | 0.56 | the alternation between sharp and interpolated lines, not the picture moving |
+| Motion adaptive | **0.005** | weaves what is still, interpolates what is not |
+| Edge directed | 0.69 | follows edges; meant for pixel art, weakest on composite |
+| YADIF | **0.002** | best quality; keeps one frame in memory |
+
+Plain bob doubles each line of the field being shown, and the two fields sit half
+a line apart — a distance nearest-neighbour doubling cannot represent. Either the
+block boundaries move or the content does, and the measured line is the former.
+On a 240p or 288p source, where the fields are not offset at all, this does not
+arise and bob is the sharpest option available.
+
+Field order is asked of the media type first and can be overridden, because
+guessing wrong does not soften the picture, it makes it judder.
+
+### Composite
+
+A composite signal carries colour and brightness on one wire, and the two leak
+into each other. What comes out is dot crawl — the crawling dotted zip along
+colour edges — and rainbow shimmer over fine detail. One slider addresses both,
+in two halves that hand over to each other.
+
+Where nothing is moving, four consecutive frames are averaged. Four, because the
+colour subcarrier walks through a four-frame sequence: measured on a PAL-60
+console, the mean difference between frames runs 1.91 at a lag of one frame, 2.62
+at two, 1.90 at three and **0.78 at four**. Averaging two frames therefore cancels
+nothing; averaging four covers exactly one cycle and what is left is the picture.
+This half costs no sharpness at all.
+
+Where something is moving there is nothing to average, so the carrier is worked
+back out of the brightness instead. Multiplying the line by the subcarrier and by
+the same carrier a quarter cycle over moves the pattern down to nothing, a short
+average recovers how much of it is there, and multiplying back up reconstructs it
+to be subtracted. Picture detail is not tied to the carrier's phase and survives.
+The slider sets the width of that average:
+
+| Window | 25 | 15 | 11 | 9 | 7 | 5 |
+|---|---|---|---|---|---|---|
+| Pattern removed | 42 % | 61 % | 74 % | 81 % | 90 % | 99 % |
+| Horizontal sharpness | −7 % | −11 % | −14 % | −17 % | −25 % | −39 % |
+
+The subcarrier frequency follows from the video standard and the line width, so
+nothing has to be detected for this: 4.433619 MHz for PAL and its relatives,
+3.579545 MHz for NTSC, against BT.601 sampling.
+
+This is where composite restoration generally stops. The established offline
+filters — TComb, DeDot, LUTDeCrawl, Checkmate — are all temporal and say so
+themselves about moving content. Going further needs motion compensation of the
+QTGMC sort, which is not a real-time proposition.
 
 ### Audio
 
@@ -94,6 +190,22 @@ through Windows Imaging Component, so no ffmpeg is required.
 A profile holds the device, input, capture format and all picture and audio
 settings. One per source, selected with Ctrl+1 to Ctrl+9.
 
+### Updates
+
+*Settings → Updates* compares this build against the newest release on GitHub,
+either once at startup or on request. Nothing is downloaded until you ask; the
+startup check only asks.
+
+Installing replaces `CapView.exe` itself. Windows will not let a running image be
+overwritten but will let it be renamed, so the old build is moved aside, the new
+one takes its name, and the next start removes the leftover — no helper process
+that can go missing. The download is checked for being a program at all before
+anything is moved, and if the second rename fails the first is undone, so a
+failed update leaves the program as it was rather than gone.
+
+An installation directory that needs administrator rights to write to will refuse
+the swap and say so.
+
 ## Shortcuts
 
 | Key | Action |
@@ -112,6 +224,10 @@ settings. One per source, selected with Ctrl+1 to Ctrl+9.
 
 All of these except Esc, the profile digits and Alt+F4 can be reassigned under
 *Settings → Keys*.
+
+The settings can be drawn over the picture or given a window of their own, which
+can then be moved to a second monitor or set beside the preview. The switch is
+under *Settings → Display → Window*.
 
 The statistics overlay has three levels of detail: frame rates and frame age;
 those plus capture format, colour handling and audio buffer; and everything,

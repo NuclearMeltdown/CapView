@@ -109,6 +109,12 @@ class FrameSink final : public IBaseFilter, public IAMFilterMiscFlags {
 
   VideoFormatInfo format() const;
   SinkStats stats() const;
+
+  // When the newest frame was handed over by the driver, on the QPC clock.
+  // Zero before the first one. Scheduling anything from the moment we get round
+  // to drawing instead of from this is how a second field ends up due after the
+  // next frame has already arrived.
+  int64_t lastArrivalQpc() const;
   void ResetStats();
 
   // True when a frame arrived within the given window -- used to show the

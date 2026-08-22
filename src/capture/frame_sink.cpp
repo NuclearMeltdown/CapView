@@ -573,6 +573,11 @@ HRESULT FrameSink::OnSample(IMediaSample* sample) {
 
 // ------------------------------------------------------------- reader side
 
+int64_t FrameSink::lastArrivalQpc() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return lastArrivalQpc_;
+}
+
 bool FrameSink::AcquireFrame(FrameView* out) {
   std::lock_guard<std::mutex> lock(mutex_);
   bool isNew = false;

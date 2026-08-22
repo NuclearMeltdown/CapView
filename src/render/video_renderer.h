@@ -57,14 +57,21 @@ class VideoRenderer {
   // what you are playing.
   void SetTopInset(int pixels) { topInset_ = pixels < 0 ? 0 : pixels; }
 
+  // Samples per cycle of the colour subcarrier, for a full width line. Set from
+  // the video standard; the dot crawl filter is built around it.
+  void SetCarrierSamples(double samples) { carrierSamples_ = samples; }
+
   const VideoFormatInfo& sourceFormat() const { return source_; }
 
   // True when the current source is interlaced according to its media type.
   bool sourceInterlaced() const { return source_.interlaced; }
 
   // Effective size after cropping.
-  int croppedWidth() const { return croppedWidth_; }
-  int croppedHeight() const { return croppedHeight_; }
+  // Size of the picture this produces: cropped, line doubled and rotated. This
+  // is what the recorder and the screenshots get, so it is the size that counts
+  // everywhere outside the shader.
+  int outputWidth() const { return outputWidth_; }
+  int outputHeight() const { return outputHeight_; }
 
   // ---- readback for recording ----
   //
@@ -114,6 +121,41 @@ class VideoRenderer {
   enum class RangeVerdict { Pending, Limited, Full };
   RangeVerdict detectedRange() const { return rangeVerdict_; }
 
+  // Whether the source is interlaced, measured the same way and for the same
+  // reason: the media type is the obvious place to ask and routinely does not
+  // answer. A plain VIDEOINFOHEADER has no field to say it in, and cards that do
+  // use VIDEOINFOHEADER2 often leave the interlace flags at zero -- so a 480i
+  // console can arrive described as progressive.
+  //
+  // Unlike the range verdict this one is never frozen on "progressive". Combing
+  // only exists where something moved, and a paused game or a title screen has
+  // nothing moving in it; calling that progressive and sticking to it would
+  // leave the deinterlacer switched off for the rest of the session. So the
+  // measurement runs in windows and keeps running, and only "interlaced" latches
+  // -- once combing has been seen there is no reason to doubt it again.
+  enum class InterlaceVerdict { Pending, Progressive, Interlaced };
+  InterlaceVerdict detectedInterlace() const { return interlaceVerdict_; }
+
+  // True when the two fields hold the *same* lines rather than lines half a
+  // picture line apart -- a 240p or 288p console that the card packed into an
+  // interlaced frame. Such a source is still interlaced in the sense that
+  // matters, because the two fields are half a field apart in time and will comb
+  // on anything that moves. What it does not need is spatial reconstruction:
+  // nothing is missing, so the right answer is to take the field's own line and
+  // use it twice.
+  bool sourceCoSitedFields() const { return coSitedFields_; }
+
+  // Where the picture sits inside the frame, in source pixels, edges inclusive.
+  // False until something has been measured. This is what the automatic crop
+  // reads: a console pillarboxed inside a 720 pixel line, or an overscan band
+  // the card hands over as black, is found here rather than by eye.
+  bool contentBounds(int* left, int* top, int* right, int* bottom) const;
+
+  // Throws every measurement away and starts over. Switching the crossbar puts a
+  // different signal on the same pins without the format changing, and none of
+  // the verdicts survive that.
+  void ResetAnalysis();
+
   // Copies the current picture out once, tightly packed, in
   // kReadbackPixelFormat. Unlike the recording path this waits for the GPU,
   // which costs a millisecond or two -- acceptable for a key press, not for
@@ -147,6 +189,7 @@ class VideoRenderer {
   D3DContext* ctx_ = nullptr;
 
   ComPtr<ID3D11VertexShader> vs_;
+  ComPtr<ID3D11PixelShader> psClean_;
   ComPtr<ID3D11PixelShader> psConvert_;
   ComPtr<ID3D11PixelShader> psScale_;
   ComPtr<ID3D11Buffer> cbConvert_;
@@ -160,6 +203,35 @@ class VideoRenderer {
   ComPtr<ID3D11Texture2D> plane_[3];
   ComPtr<ID3D11ShaderResourceView> planeSrv_[3];
   int planeCount_ = 0;
+
+  // The three preceding frames, as a ring. Filled by copying the current planes
+  // just before they are overwritten, which is cheaper than uploading twice and
+  // keeps the capture path untouched. One copy per frame regardless of depth;
+  // the copies only happen while something that reads them is switched on.
+  //
+  // Three because the composite denoiser needs a four frame window -- see the
+  // measurement in the shader. YADIF only ever looks at the first of them.
+  static const int kHistoryDepth = 3;
+  ComPtr<ID3D11Texture2D> planeHist_[kHistoryDepth][3];
+  ComPtr<ID3D11ShaderResourceView> planeHistSrv_[kHistoryDepth][3];
+  int historyWrite_ = 0;   // ring slot the next copy goes into
+  int historyCount_ = 0;   // slots that hold a picture, up to kHistoryDepth
+  bool historyWanted_ = false;
+
+  // Between the capture planes and the deinterlacer: the picture as the card
+  // sent it, in its own geometry, with the composite artefacts already taken
+  // out. Floating point because limited range material legitimately runs past
+  // both ends once it has been expanded, and rounding that back into eight bits
+  // here would throw away what the expansion just recovered.
+  bool EnsureClean(int width, int height);
+  ComPtr<ID3D11Texture2D> cleanTex_;
+  ComPtr<ID3D11ShaderResourceView> cleanSrv_;
+  ComPtr<ID3D11RenderTargetView> cleanRtv_;
+  // The same, one frame back. YADIF is the only thing that reads it.
+  ComPtr<ID3D11Texture2D> cleanPrevTex_;
+  ComPtr<ID3D11ShaderResourceView> cleanPrevSrv_;
+  int cleanWidth_ = 0;
+  int cleanHeight_ = 0;
 
   // Intermediate render target between the two passes.
   ComPtr<ID3D11Texture2D> intermediate_;
@@ -175,8 +247,11 @@ class VideoRenderer {
 
   int croppedWidth_ = 0;
   int croppedHeight_ = 0;
+  int outputWidth_ = 0;
+  int outputHeight_ = 0;
   RECT videoRect_ = {};
   int topInset_ = 0;
+  double carrierSamples_ = 3.0449;  // PAL, the common case here
 
   // Scratch row buffer for RGB24, which has no matching DXGI format.
   std::vector<uint8_t> expandBuffer_;
@@ -194,6 +269,11 @@ class VideoRenderer {
 
   // Level detection state, reset whenever the source format changes.
   void AnalyzeLevels(const FrameView& frame);
+  void AnalyzeInterlace(const FrameView& frame);
+  void AnalyzeContentBounds(const FrameView& frame);
+  // Byte offset of the first luma sample and the distance to the next one.
+  // False for formats this cannot read.
+  bool LumaLayout(size_t* offset, size_t* step) const;
   RangeVerdict rangeVerdict_ = RangeVerdict::Pending;
   int rangeFramesSeen_ = 0;
   uint64_t rangeSamples_ = 0;
@@ -201,6 +281,33 @@ class VideoRenderer {
   uint64_t rangeAbove235_ = 0;
   int rangeMin_ = 255;
   int rangeMax_ = 0;
+
+  InterlaceVerdict interlaceVerdict_ = InterlaceVerdict::Pending;
+  bool coSitedFields_ = false;
+  // 0 when a pair starts on an even row, 1 when it starts on an odd one.
+  int coSitedPhase_ = 0;
+  int combFramesSeen_ = 0;
+  uint64_t combSamples_ = 0;
+  uint64_t combHits_ = 0;
+  // How many of the frames in the current window combed. Counting frames rather
+  // than averaging over all of them is the difference between noticing a second
+  // of movement in an otherwise still scene and averaging it away.
+  int combFrameHits_ = 0;
+  int combFramesAnalysed_ = 0;
+  // Sums of the difference between the two rows of a pair, and between two
+  // neighbouring pairs. On a line doubled picture the first is nearly zero.
+  uint64_t pairInner_ = 0;
+  uint64_t pairOuter_ = 0;
+
+  // Content bounds. Measured as a union across a window of frames, because a
+  // fade to black is not evidence that the picture got smaller, and published
+  // only once the window is complete so the answer never flickers.
+  bool boundsValid_ = false;
+  int boundsL_ = 0, boundsT_ = 0, boundsR_ = 0, boundsB_ = 0;
+  int accL_ = 0, accT_ = 0, accR_ = 0, accB_ = 0;
+  bool accAny_ = false;
+  int boundsFramesSeen_ = 0;
+  std::vector<int> columnHits_;  // scratch, sized once per format
 };
 
 }  // namespace cap

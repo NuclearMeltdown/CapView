@@ -19,6 +19,7 @@ add_executable(CapView WIN32
   src/config.cpp
   src/hotkeys.cpp
   src/json.cpp
+  src/capture/device_config.cpp
   src/capture/dshow_util.cpp
   src/capture/frame_sink.cpp
   src/capture/video_capture.cpp
@@ -38,6 +39,9 @@ add_executable(CapView WIN32
   src/ui/file_dialog.cpp
   src/ui/toolbar.cpp
   src/ui/theme.cpp
+  src/update/updater.cpp
+  src/ui/settings_host.cpp
+  src/ui/settings_host.cpp
   src/ui/settings_window.cpp
   src/ui/overlay.cpp
 

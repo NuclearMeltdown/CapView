@@ -11,6 +11,7 @@
 
 #include "audio/audio_devices.h"
 #include "capture/video_capture.h"
+#include "update/updater.h"
 #include "common.h"
 #include "config.h"
 #include "record/ffmpeg_download.h"
@@ -47,6 +48,25 @@ class SettingsWindow {
   // selector so "Automatic" is not a black box. Points at a static string owned
   // by the caller, or null while nothing has been measured.
   void SetDetectedRange(const char* const* text) { detectedRange_ = text; }
+  void SetDetectedInterlace(const char* const* text) { detectedInterlace_ = text; }
+  void SetCoSitedFields(bool on) { coSitedFields_ = on; }
+  // False while the app is itself trying to open the card. Probing means
+  // building a second graph on the same device, and doing that while the first
+  // one is being retried puts two of them on one card -- which the driver is
+  // under no obligation to survive.
+  void SetProbeAllowed(bool on) { probeAllowed_ = on; }
+
+  // The updater lives in the app; the dialog only drives it and shows what it
+  // reports.
+  void SetUpdater(Updater* updater) { updater_ = updater; }
+  // Set when the user asked to restart into a freshly installed build.
+  bool takeRestartRequest();
+  // 1 locked, 0 not, -1 unknown. Shown next to the video standard, because that
+  // is the one number that says whether the setting is the right one.
+  void SetSignalLocked(int locked) { signalLocked_ = locked; }
+  // Whether the running source is being treated as analogue. Decides which of
+  // the picture settings are worth showing at all.
+  void SetAnalogueSource(bool on) { analogueSource_ = on; }
 
   // Frame rate the card is currently delivering; caps the recording rate.
   void SetSourceFps(double fps) { sourceFps_ = fps; }
@@ -65,12 +85,20 @@ class SettingsWindow {
   // downloads a build.
   Result Draw(const DeviceProbeResult* liveCaps, FfmpegInfo* ffmpeg);
 
+  // Draws the same contents filling the whole viewport, with no frame of its
+  // own -- for when the dialog *is* the window rather than a panel inside one.
+  void SetFillsWindow(bool on) { fillsWindow_ = on; }
+
   // Set by the dialog when the user asks for a full encoder test; the app runs
   // it in the background and clears the flag.
   bool takeProbeRequest();
   // Set when the user wants to drag the crop on the picture; the app closes the
   // dialog and takes over.
   bool takeCropPickRequest();
+  // Set when the user asks for the capture driver's own settings dialog.
+  bool takeDeviceConfigRequest();
+  // Set when the user wants the black border measured and cropped away.
+  bool takeCropDetectRequest();
 
   // True while the binding editor is waiting for a key press. The app routes
   // key messages here instead of acting on them.
@@ -91,6 +119,7 @@ class SettingsWindow {
   void DrawFfmpegBlock(FfmpegInfo* ffmpeg);
   void DrawToolsTab(FfmpegInfo* ffmpeg);
   void DrawHotkeysTab();
+  void DrawUpdatesTab();
   // Text field plus Browse / Default / Open, shared by both output folders.
   void FolderRow(const char* id, int pickTag, char* buffer, size_t bufferSize,
                  std::string* value, const std::wstring& defaultFolder);
@@ -152,6 +181,17 @@ class SettingsWindow {
   // Index into Hotkeys::items currently being rebound, -1 when idle.
   int captureAction_ = -1;
   const char* const* detectedRange_ = nullptr;
+  const char* const* detectedInterlace_ = nullptr;
+  bool fillsWindow_ = false;
+  bool probeAllowed_ = true;
+  Updater* updater_ = nullptr;
+  bool restartRequested_ = false;
+  bool coSitedFields_ = false;
+  int signalLocked_ = -1;
+  bool analogueSource_ = true;
+  bool captureRunning_ = false;
+  bool deviceConfigRequested_ = false;
+  bool cropDetectRequested_ = false;
   double sourceFps_ = 0.0;
   float inputPeak_ = 0.0f;
   float micPeak_ = 0.0f;
