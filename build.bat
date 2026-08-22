@@ -37,6 +37,10 @@ if not exist "%ROOT%\build\bin\CapView.exe" goto :missing
 copy /y "%ROOT%\build\bin\CapView.exe" "%ROOT%\CapView.exe" >nul
 if errorlevel 1 exit /b 1
 
+rem Die Medienquelle der virtuellen Kamera muss neben der exe liegen -- dort sucht
+rem CapView sie, und dorthin zeigt die Registrierung nach dem Installieren.
+if exist "%ROOT%\build\bin\capview_vcam.dll" copy /y "%ROOT%\build\bin\capview_vcam.dll" "%ROOT%\capview_vcam.dll" >nul
+
 if "%CLEAN%"=="0" goto :kept
 
 rem Alles retten, was zufaellig neben der exe liegt, bevor der Ordner faellt:

@@ -298,6 +298,9 @@ struct AppSettings {
   // Ask GitHub for the newest release once at startup. Only ever asks -- the
   // download is a separate, explicit action.
   bool checkUpdatesOnStart = true;
+  // Offer the picture to other programs as a webcam. Remembered, so it comes
+  // back with CapView -- the camera itself only exists while CapView runs.
+  bool virtualCamera = false;
   StatsDetail statsDetail = StatsDetail::Compact;
   bool logToFile = false;
 

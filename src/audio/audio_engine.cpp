@@ -1,4 +1,5 @@
 #include "audio/audio_engine.h"
+#include "i18n.h"
 
 #include <avrt.h>
 
@@ -56,7 +57,7 @@ bool AudioEngine::Start(const DeviceRef& input, const AudioSettings& settings, s
     // Empty or stale reference: fall back to the system default output.
     std::vector<AudioDeviceInfo> outputs = EnumerateAudioDevices(false);
     if (outputs.empty()) {
-      if (error) *error = "Kein Wiedergabegerät verfügbar";
+      if (error) *error = T("Kein Wiedergabegerät verfügbar", "No playback device available");
       return false;
     }
     outputInfo = outputs.front();
@@ -86,7 +87,8 @@ bool AudioEngine::Start(const DeviceRef& input, const AudioSettings& settings, s
 
   stopEvent_ = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
   if (!stopEvent_) {
-    if (error) *error = "Audio-Stopp-Event konnte nicht erstellt werden";
+    if (error) *error = T("Audio-Stopp-Event konnte nicht erstellt werden",
+                             "The audio stop event could not be created");
     return false;
   }
   ring_.Reset(kRingCapacityFrames);

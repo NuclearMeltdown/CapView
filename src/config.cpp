@@ -534,6 +534,7 @@ bool Config::Load(std::string* error) {
   app.showToolbar = a["showToolbar"].AsBool(true);
   app.settingsSeparateWindow = a["settingsSeparateWindow"].AsBool(false);
   app.checkUpdatesOnStart = a["checkUpdatesOnStart"].AsBool(true);
+  app.virtualCamera = a["virtualCamera"].AsBool(false);
   app.statsDetail = ReadEnum<StatsDetail>(a, "statsDetail", 3, StatsDetail::Compact);
   app.logToFile = a["logToFile"].AsBool(false);
   app.windowX = a["windowX"].AsInt(-1);
@@ -620,6 +621,7 @@ std::string Config::Serialize() const {
   a["showToolbar"] = app.showToolbar;
   a["settingsSeparateWindow"] = app.settingsSeparateWindow;
   a["checkUpdatesOnStart"] = app.checkUpdatesOnStart;
+  a["virtualCamera"] = app.virtualCamera;
   a["statsDetail"] = (int)app.statsDetail;
   a["logToFile"] = app.logToFile;
   a["windowX"] = app.windowX;

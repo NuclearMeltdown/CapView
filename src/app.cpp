@@ -1502,11 +1502,62 @@ void App::FeedRecorder() {
     return;
   }
 
+}
+
+void App::FeedFrameConsumers() {
+  const bool wantRecorder = recorder_.recording();
+  // Only while something is actually watching. An idle camera costs a flag.
+  const bool wantCamera = virtualCamera_.running() && virtualCamera_.consumed();
+
+  renderer_.SetReadbackEnabled(wantRecorder || wantCamera);
+  if (!wantRecorder && !wantCamera) return;
+
   VideoRenderer::ReadbackFrame frame;
-  if (renderer_.FetchReadback(&frame)) {
-    recorder_.PushVideo(frame.data, frame.stride);
-    renderer_.ReleaseReadback();
+  if (!renderer_.FetchReadback(&frame)) return;
+  if (wantRecorder) recorder_.PushVideo(frame.data, frame.stride);
+  if (wantCamera) {
+    virtualCamera_.PushFrame(frame.data, frame.stride, frame.width, frame.height);
   }
+  renderer_.ReleaseReadback();
+}
+
+void App::UpdateVirtualCamera() {
+  const int request = settings_.takeVirtualCameraRequest();
+  if (request != 0) {
+    // Installing while it runs would pull the source out from under a reader,
+    // so it goes off first either way.
+    const bool wasOn = config_.app.virtualCamera;
+    if (virtualCamera_.running()) virtualCamera_.Stop();
+
+    std::string error;
+    const bool ok = request == 1 ? VirtualCamera::InstallSource(&error)
+                                 : VirtualCamera::UninstallSource(&error);
+    if (ok) {
+      Toast(request == 1 ? T("Kamera installiert.", "Camera installed.")
+                         : T("Kamera deinstalliert.", "Camera uninstalled."));
+      if (request == 2) config_.app.virtualCamera = false;
+    } else {
+      Toast(error);
+      config_.app.virtualCamera = wasOn;
+    }
+  }
+
+  const bool want = config_.app.virtualCamera;
+  if (want && !virtualCamera_.running()) {
+    std::string error;
+    if (!virtualCamera_.Start(&error)) {
+      // Turning the switch back off rather than leaving it on and doing
+      // nothing, so the tab does not claim a camera that is not there.
+      config_.app.virtualCamera = false;
+      Toast(error);
+    }
+  } else if (!want && virtualCamera_.running()) {
+    virtualCamera_.Stop();
+  }
+
+  int w = 0, h = 0, fps = 0;
+  virtualCamera_.wanted(&w, &h, &fps);
+  settings_.SetVirtualCameraState(virtualCamera_.running(), virtualCamera_.consumed(), w, h, fps);
 }
 
 void App::ShowVolumeOsd() {
@@ -1755,6 +1806,8 @@ void App::RenderFrame() {
   if (sink) lastFrameAgeMs_ = sink->stats().lastArrivalAgeMs;
   SyncMicrophone();
   FeedRecorder();
+  UpdateVirtualCamera();
+  FeedFrameConsumers();
   d3d_.EndFrame(config_.app.vsync);
 
   // ---- present rate ----

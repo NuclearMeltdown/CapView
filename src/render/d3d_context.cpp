@@ -1,4 +1,5 @@
 #include "render/d3d_context.h"
+#include "i18n.h"
 
 #include <algorithm>
 #include <vector>
@@ -86,13 +87,15 @@ bool D3DContext::Initialize(HWND hwnd, std::string* error) {
                              &context_);
   }
   if (FAILED(hr)) {
-    if (error) *error = "Direct3D 11 konnte nicht initialisiert werden: " + HrToString(hr);
+    if (error) *error = T("Direct3D 11 konnte nicht initialisiert werden: ",
+                             "Direct3D 11 could not be initialised: ") + HrToString(hr);
     return false;
   }
 
   ComPtr<IDXGIDevice1> dxgiDevice;
   if (FAILED(hr = device_.As(&dxgiDevice))) {
-    if (error) *error = "IDXGIDevice1 nicht verfügbar: " + HrToString(hr);
+    if (error) *error = T("IDXGIDevice1 nicht verfügbar: ",
+                             "IDXGIDevice1 is not available: ") + HrToString(hr);
     return false;
   }
   // One frame of latency: the CPU never runs more than a frame ahead of the GPU.
@@ -100,12 +103,14 @@ bool D3DContext::Initialize(HWND hwnd, std::string* error) {
 
   ComPtr<IDXGIAdapter> adapter;
   if (FAILED(hr = dxgiDevice->GetAdapter(&adapter))) {
-    if (error) *error = "DXGI-Adapter nicht verfügbar: " + HrToString(hr);
+    if (error) *error = T("DXGI-Adapter nicht verfügbar: ",
+                             "The DXGI adapter is not available: ") + HrToString(hr);
     return false;
   }
   ComPtr<IDXGIFactory2> factory;
   if (FAILED(hr = adapter->GetParent(IID_PPV_ARGS(&factory)))) {
-    if (error) *error = "DXGI-Factory nicht verfügbar: " + HrToString(hr);
+    if (error) *error = T("DXGI-Factory nicht verfügbar: ",
+                             "The DXGI factory is not available: ") + HrToString(hr);
     return false;
   }
 
@@ -133,7 +138,8 @@ bool D3DContext::Initialize(HWND hwnd, std::string* error) {
 
   hr = factory->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr, nullptr, &swapchain_);
   if (FAILED(hr)) {
-    if (error) *error = "Swapchain konnte nicht erstellt werden: " + HrToString(hr);
+    if (error) *error = T("Swapchain konnte nicht erstellt werden: ",
+                             "The swapchain could not be created: ") + HrToString(hr);
     return false;
   }
 
@@ -142,7 +148,8 @@ bool D3DContext::Initialize(HWND hwnd, std::string* error) {
   factory->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
 
   if (!CreateRenderTarget()) {
-    if (error) *error = "Rendertarget konnte nicht erstellt werden";
+    if (error) *error = T("Rendertarget konnte nicht erstellt werden",
+                             "The render target could not be created");
     return false;
   }
 

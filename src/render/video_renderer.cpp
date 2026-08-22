@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "render/shaders.h"
+#include "i18n.h"
 
 namespace cap {
 namespace {
@@ -106,8 +107,44 @@ void StoreCachedShader(const std::wstring& path, ID3DBlob* code) {
   ::CloseHandle(file);
 }
 
+// Was in diesem Lauf tatsaechlich gebraucht wurde. Alles andere neben der exe
+// ist ein Rest aus einer aelteren Fassung des Shaders.
+std::vector<std::wstring>& ShaderCacheInUse() {
+  static std::vector<std::wstring> names;
+  return names;
+}
+
+// Loescht die Dateien, die kein Shader dieser Fassung mehr beansprucht. Der
+// Cache ist nach Inhalt benannt, eine geaenderte Quelle trifft also eine neue
+// Datei und die alte bleibt sonst fuer immer liegen -- nach ein paar Releases
+// steht da ein Dutzend toter Blobs.
+void PruneShaderCache() {
+  const std::wstring dir = ExeDirectory();
+  WIN32_FIND_DATAW found = {};
+  HANDLE search = ::FindFirstFileW((dir + L"shader-*.cso").c_str(), &found);
+  if (search == INVALID_HANDLE_VALUE) return;
+  int removed = 0;
+  do {
+    if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+    const std::wstring path = dir + found.cFileName;
+    bool live = false;
+    for (const std::wstring& used : ShaderCacheInUse()) {
+      if (_wcsicmp(used.c_str(), path.c_str()) == 0) {
+        live = true;
+        break;
+      }
+    }
+    // Ein Fehlschlag ist keiner: liegt die Datei fest, weil eine zweite Instanz
+    // sie gerade liest, ist der naechste Start wieder an der Reihe.
+    if (!live && ::DeleteFileW(path.c_str())) ++removed;
+  } while (::FindNextFileW(search, &found));
+  ::FindClose(search);
+  if (removed > 0) CAP_LOG("Shadercache: %d veraltete Datei(en) entfernt", removed);
+}
+
 ComPtr<ID3DBlob> CompileShader(const char* source, const char* target, std::string* error) {
   const std::wstring cachePath = ShaderCachePath(source, target);
+  ShaderCacheInUse().push_back(cachePath);
   if (ComPtr<ID3DBlob> cached = LoadCachedShader(cachePath)) return cached;
 
   UINT flags = D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_ENABLE_STRICTNESS;
@@ -125,7 +162,8 @@ ComPtr<ID3DBlob> CompileShader(const char* source, const char* target, std::stri
     std::string detail = errors ? std::string((const char*)errors->GetBufferPointer(),
                                               errors->GetBufferSize())
                                 : HrToString(hr);
-    if (error) *error = "Shader (" + std::string(target) + ") konnte nicht kompiliert werden: " + detail;
+    if (error) *error = T("Shader (", "Shader (") + std::string(target) +
+                  T(") konnte nicht kompiliert werden: ", ") could not be compiled: ") + detail;
     CAP_ERR("Shaderfehler: %s", detail.c_str());
     return nullptr;
   }
@@ -159,7 +197,7 @@ VideoRenderer::~VideoRenderer() {
 bool VideoRenderer::Initialize(D3DContext* ctx, std::string* error) {
   ctx_ = ctx;
   if (!ctx_ || !ctx_->device()) {
-    if (error) *error = "Kein Direct3D-Gerät";
+    if (error) *error = T("Kein Direct3D-Gerät", "No Direct3D device");
     return false;
   }
   if (!CreateShaders(error)) return false;
@@ -192,7 +230,8 @@ bool VideoRenderer::CreateShaders(std::string* error) {
   if (!vsCode) return false;
   if (FAILED(CAP_HR(dev->CreateVertexShader(vsCode->GetBufferPointer(), vsCode->GetBufferSize(),
                                             nullptr, &vs_)))) {
-    if (error) *error = "Vertex-Shader konnte nicht erstellt werden";
+    if (error) *error = T("Vertex-Shader konnte nicht erstellt werden",
+                             "The vertex shader could not be created");
     return false;
   }
 
@@ -200,7 +239,8 @@ bool VideoRenderer::CreateShaders(std::string* error) {
   if (!cleanCode) return false;
   if (FAILED(CAP_HR(dev->CreatePixelShader(cleanCode->GetBufferPointer(),
                                            cleanCode->GetBufferSize(), nullptr, &psClean_)))) {
-    if (error) *error = "Aufbereitungs-Shader konnte nicht erstellt werden";
+    if (error) *error = T("Aufbereitungs-Shader konnte nicht erstellt werden",
+                             "The cleanup shader could not be created");
     return false;
   }
 
@@ -208,7 +248,8 @@ bool VideoRenderer::CreateShaders(std::string* error) {
   if (!convertCode) return false;
   if (FAILED(CAP_HR(dev->CreatePixelShader(convertCode->GetBufferPointer(),
                                            convertCode->GetBufferSize(), nullptr, &psConvert_)))) {
-    if (error) *error = "Konvertierungs-Shader konnte nicht erstellt werden";
+    if (error) *error = T("Konvertierungs-Shader konnte nicht erstellt werden",
+                             "The conversion shader could not be created");
     return false;
   }
 
@@ -216,9 +257,13 @@ bool VideoRenderer::CreateShaders(std::string* error) {
   if (!scaleCode) return false;
   if (FAILED(CAP_HR(dev->CreatePixelShader(scaleCode->GetBufferPointer(), scaleCode->GetBufferSize(),
                                            nullptr, &psScale_)))) {
-    if (error) *error = "Skalierungs-Shader konnte nicht erstellt werden";
+    if (error) *error = T("Skalierungs-Shader konnte nicht erstellt werden",
+                             "The scaling shader could not be created");
     return false;
   }
+
+  // Erst hier, wo feststeht, welche Dateien diese Fassung braucht.
+  PruneShaderCache();
 
   D3D11_BUFFER_DESC bd = {};
   bd.Usage = D3D11_USAGE_DYNAMIC;
@@ -227,12 +272,14 @@ bool VideoRenderer::CreateShaders(std::string* error) {
 
   bd.ByteWidth = sizeof(ConvertCB);
   if (FAILED(CAP_HR(dev->CreateBuffer(&bd, nullptr, &cbConvert_)))) {
-    if (error) *error = "Konstantenpuffer konnte nicht erstellt werden";
+    if (error) *error = T("Konstantenpuffer konnte nicht erstellt werden",
+                             "The constant buffer could not be created");
     return false;
   }
   bd.ByteWidth = sizeof(ScaleCB);
   if (FAILED(CAP_HR(dev->CreateBuffer(&bd, nullptr, &cbScale_)))) {
-    if (error) *error = "Konstantenpuffer konnte nicht erstellt werden";
+    if (error) *error = T("Konstantenpuffer konnte nicht erstellt werden",
+                             "The constant buffer could not be created");
     return false;
   }
   return true;
@@ -248,12 +295,14 @@ bool VideoRenderer::CreateStates(std::string* error) {
 
   sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
   if (FAILED(CAP_HR(dev->CreateSamplerState(&sd, &sampPoint_)))) {
-    if (error) *error = "Sampler konnte nicht erstellt werden";
+    if (error) *error = T("Sampler konnte nicht erstellt werden",
+                             "The sampler could not be created");
     return false;
   }
   sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
   if (FAILED(CAP_HR(dev->CreateSamplerState(&sd, &sampLinear_)))) {
-    if (error) *error = "Sampler konnte nicht erstellt werden";
+    if (error) *error = T("Sampler konnte nicht erstellt werden",
+                             "The sampler could not be created");
     return false;
   }
 
@@ -262,14 +311,16 @@ bool VideoRenderer::CreateStates(std::string* error) {
   rd.CullMode = D3D11_CULL_NONE;
   rd.DepthClipEnable = TRUE;
   if (FAILED(CAP_HR(dev->CreateRasterizerState(&rd, &raster_)))) {
-    if (error) *error = "Rasterizer-State konnte nicht erstellt werden";
+    if (error) *error = T("Rasterizer-State konnte nicht erstellt werden",
+                             "The rasteriser state could not be created");
     return false;
   }
 
   D3D11_BLEND_DESC bd = {};
   bd.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
   if (FAILED(CAP_HR(dev->CreateBlendState(&bd, &blendOpaque_)))) {
-    if (error) *error = "Blend-State konnte nicht erstellt werden";
+    if (error) *error = T("Blend-State konnte nicht erstellt werden",
+                             "The blend state could not be created");
     return false;
   }
   return true;
@@ -401,7 +452,8 @@ bool VideoRenderer::CreateSourceTextures(std::string* error) {
 
   if (!ok) {
     ReleaseSourceTextures();
-    if (error) *error = "Videotexturen konnten nicht angelegt werden";
+    if (error) *error = T("Videotexturen konnten nicht angelegt werden",
+                             "The video textures could not be created");
     return false;
   }
   CAP_LOG("Quelltexturen angelegt: %s %dx%d (%d Ebenen)", source_.subtypeLabel.c_str(), w, h,

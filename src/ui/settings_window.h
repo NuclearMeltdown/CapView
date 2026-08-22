@@ -100,6 +100,12 @@ class SettingsWindow {
   // Set when the user wants the black border measured and cropped away.
   bool takeCropDetectRequest();
 
+  // The virtual camera. 0 = nothing wanted, 1 = install the source, 2 = remove
+  // it. Both raise a UAC prompt, so the app does it rather than the UI thread.
+  int takeVirtualCameraRequest();
+  // What the app knows and the settings cannot see for themselves.
+  void SetVirtualCameraState(bool running, bool consumed, int width, int height, int fps);
+
   // True while the binding editor is waiting for a key press. The app routes
   // key messages here instead of acting on them.
   bool waitingForKey() const { return captureAction_ >= 0; }
@@ -118,6 +124,7 @@ class SettingsWindow {
   void DrawRecordTab(FfmpegInfo* ffmpeg);
   void DrawFfmpegBlock(FfmpegInfo* ffmpeg);
   void DrawToolsTab(FfmpegInfo* ffmpeg);
+  void DrawVirtualCameraBlock();
   void DrawHotkeysTab();
   void DrawUpdatesTab();
   // Text field plus Browse / Default / Open, shared by both output folders.
@@ -192,6 +199,14 @@ class SettingsWindow {
   bool captureRunning_ = false;
   bool deviceConfigRequested_ = false;
   bool cropDetectRequested_ = false;
+  int virtualCameraRequest_ = 0;
+  int vcamStatus_ = 0;
+  double vcamStatusChecked_ = -10.0;
+  bool vcamRunning_ = false;
+  bool vcamConsumed_ = false;
+  int vcamWidth_ = 0;
+  int vcamHeight_ = 0;
+  int vcamFps_ = 0;
   double sourceFps_ = 0.0;
   float inputPeak_ = 0.0f;
   float micPeak_ = 0.0f;

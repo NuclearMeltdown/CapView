@@ -1,6 +1,7 @@
 # Build output. Everyone builds their own with build.bat, or takes a release.
 build/
 /CapView.exe
+/capview_vcam.dll
 /capview_probe.exe
 
 # Settings are per machine and hold device names and paths.
