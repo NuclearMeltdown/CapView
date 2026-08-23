@@ -181,9 +181,10 @@ int SettingsWindow::takeVirtualCameraRequest() {
 }
 
 void SettingsWindow::SetVirtualCameraState(bool running, bool consumed, int width, int height,
-                                           int fps) {
+                                           int fps, bool sourceOutdated) {
   vcamRunning_ = running;
   vcamConsumed_ = consumed;
+  vcamOutdated_ = sourceOutdated;
   vcamWidth_ = width;
   vcamHeight_ = height;
   vcamFps_ = fps;
@@ -1718,6 +1719,20 @@ void SettingsWindow::DrawVirtualCameraBlock() {
       vcamStatusChecked_ = 0.0;
     }
     return;
+  }
+
+  if (vcamOutdated_) {
+    ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s",
+                       T("Die installierte Kameraquelle stammt aus einer anderen Version "
+                         "als dieses Programm. Unten neu installieren.",
+                         "The installed camera source is from a different build than this "
+                         "program. Install it again below."));
+    ImGui::TextDisabled("%s",
+                        T("Windows hält die Datei fest, solange die Kamera irgendwo benutzt "
+                          "wird -- vorher alle Programme schließen, die sie geöffnet haben.",
+                          "Windows holds the file while the camera is in use anywhere -- "
+                          "close whatever has it open first."));
+    ImGui::Spacing();
   }
 
   bool on = cfg().app.virtualCamera;

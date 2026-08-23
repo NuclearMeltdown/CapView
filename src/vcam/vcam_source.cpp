@@ -80,6 +80,7 @@ class SharedFrames {
       ::memset(view_, 0, sizeof(SharedState));
       view_->magic = kMagic;
       view_->version = kVersion;
+      view_->stateBytes = (uint32_t)sizeof(SharedState);
     }
     return true;
   }
@@ -104,6 +105,7 @@ class SharedFrames {
     view_->wantHeight = h;
     view_->wantFps = fps;
     if (streaming) {
+      ::InterlockedIncrement((volatile LONG*)&view_->sourceStarted);
       ::InterlockedIncrement((volatile LONG*)&view_->consumers);
     } else if (view_->consumers > 0) {
       ::InterlockedDecrement((volatile LONG*)&view_->consumers);
@@ -113,7 +115,10 @@ class SharedFrames {
   // Copies the newest whole picture. False when CapView has published nothing
   // yet, or when what is there does not match what we are handing out.
   bool ReadNewest(uint8_t* dst, uint32_t width, uint32_t height, uint32_t* lastIndex) {
-    if (!view_ || view_->magic != kMagic) return false;
+    if (!view_ || view_->magic != kMagic || view_->version != kVersion ||
+        view_->stateBytes != sizeof(SharedState)) {
+      return false;
+    }
     const uint32_t index = view_->writeIndex;
     if (index == 0 || index == *lastIndex) return false;
 
@@ -278,7 +283,10 @@ class VCamStream : public IMFMediaStream2 {
 // ---------------------------------------------------------------------------
 // The source.
 // ---------------------------------------------------------------------------
-class VCamSource : public IMFMediaSourceEx, public IMFGetService, public IKsControl {
+class VCamSource : public IMFMediaSourceEx,
+                   public IMFGetService,
+                   public IKsControl,
+                   public IMFActivate {
  public:
   VCamSource() { AddLiveObject(); }
 
@@ -294,6 +302,13 @@ class VCamSource : public IMFMediaSourceEx, public IMFGetService, public IKsCont
       *out = static_cast<IMFGetService*>(this);
     } else if (riid == __uuidof(IKsControl)) {
       *out = static_cast<IKsControl*>(this);
+    } else if (riid == IID_IMFActivate || riid == IID_IMFAttributes) {
+      // Not optional in practice, whatever the documentation calls it. The
+      // frame server activates a virtual camera through IMFActivate and hands
+      // it its device configuration through the attribute store that comes
+      // with it -- without this, MFCreateVirtualCamera fails with
+      // E_NOINTERFACE and the camera never appears anywhere.
+      *out = static_cast<IMFActivate*>(this);
     } else {
       *out = nullptr;
       return E_NOINTERFACE;
@@ -383,6 +398,112 @@ class VCamSource : public IMFMediaSourceEx, public IMFGetService, public IKsCont
   // IMFGetService -- mandatory, and entitled to say it serves nothing.
   STDMETHODIMP GetService(REFGUID, REFIID, LPVOID*) override {
     return MF_E_UNSUPPORTED_SERVICE;
+  }
+
+  // IMFActivate. ActivateObject hands back this same object, because the
+  // source and its attribute store are one thing here -- which is what the
+  // documentation recommends when they are implemented together. The other two
+  // are required to say E_NOTIMPL.
+  STDMETHODIMP ActivateObject(REFIID riid, void** out) override {
+    return QueryInterface(riid, out);
+  }
+  STDMETHODIMP DetachObject() override { return E_NOTIMPL; }
+  STDMETHODIMP ShutdownObject() override { return E_NOTIMPL; }
+
+  // IMFAttributes, inherited by IMFActivate. Every one of these is the store
+  // created in Init, so the pipeline writes to and reads from the same place
+  // GetSourceAttributes hands out.
+  STDMETHODIMP GetItem(REFGUID key, PROPVARIANT* value) override {
+    return attributes_ ? attributes_->GetItem(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetItemType(REFGUID key, MF_ATTRIBUTE_TYPE* type) override {
+    return attributes_ ? attributes_->GetItemType(key, type) : E_UNEXPECTED;
+  }
+  STDMETHODIMP CompareItem(REFGUID key, REFPROPVARIANT value, BOOL* result) override {
+    return attributes_ ? attributes_->CompareItem(key, value, result) : E_UNEXPECTED;
+  }
+  STDMETHODIMP Compare(IMFAttributes* other, MF_ATTRIBUTES_MATCH_TYPE type,
+                       BOOL* result) override {
+    return attributes_ ? attributes_->Compare(other, type, result) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetUINT32(REFGUID key, UINT32* value) override {
+    return attributes_ ? attributes_->GetUINT32(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetUINT64(REFGUID key, UINT64* value) override {
+    return attributes_ ? attributes_->GetUINT64(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetDouble(REFGUID key, double* value) override {
+    return attributes_ ? attributes_->GetDouble(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetGUID(REFGUID key, GUID* value) override {
+    return attributes_ ? attributes_->GetGUID(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetStringLength(REFGUID key, UINT32* length) override {
+    return attributes_ ? attributes_->GetStringLength(key, length) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetString(REFGUID key, LPWSTR value, UINT32 size, UINT32* length) override {
+    return attributes_ ? attributes_->GetString(key, value, size, length) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetAllocatedString(REFGUID key, LPWSTR* value, UINT32* length) override {
+    return attributes_ ? attributes_->GetAllocatedString(key, value, length) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetBlobSize(REFGUID key, UINT32* size) override {
+    return attributes_ ? attributes_->GetBlobSize(key, size) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetBlob(REFGUID key, UINT8* buffer, UINT32 bufferSize,
+                       UINT32* blobSize) override {
+    return attributes_ ? attributes_->GetBlob(key, buffer, bufferSize, blobSize) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetAllocatedBlob(REFGUID key, UINT8** buffer, UINT32* size) override {
+    return attributes_ ? attributes_->GetAllocatedBlob(key, buffer, size) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetUnknown(REFGUID key, REFIID riid, LPVOID* out) override {
+    return attributes_ ? attributes_->GetUnknown(key, riid, out) : E_UNEXPECTED;
+  }
+  STDMETHODIMP SetItem(REFGUID key, REFPROPVARIANT value) override {
+    return attributes_ ? attributes_->SetItem(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP DeleteItem(REFGUID key) override {
+    return attributes_ ? attributes_->DeleteItem(key) : E_UNEXPECTED;
+  }
+  STDMETHODIMP DeleteAllItems() override {
+    return attributes_ ? attributes_->DeleteAllItems() : E_UNEXPECTED;
+  }
+  STDMETHODIMP SetUINT32(REFGUID key, UINT32 value) override {
+    return attributes_ ? attributes_->SetUINT32(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP SetUINT64(REFGUID key, UINT64 value) override {
+    return attributes_ ? attributes_->SetUINT64(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP SetDouble(REFGUID key, double value) override {
+    return attributes_ ? attributes_->SetDouble(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP SetGUID(REFGUID key, REFGUID value) override {
+    return attributes_ ? attributes_->SetGUID(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP SetString(REFGUID key, LPCWSTR value) override {
+    return attributes_ ? attributes_->SetString(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP SetBlob(REFGUID key, const UINT8* buffer, UINT32 size) override {
+    return attributes_ ? attributes_->SetBlob(key, buffer, size) : E_UNEXPECTED;
+  }
+  STDMETHODIMP SetUnknown(REFGUID key, IUnknown* value) override {
+    return attributes_ ? attributes_->SetUnknown(key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP LockStore() override {
+    return attributes_ ? attributes_->LockStore() : E_UNEXPECTED;
+  }
+  STDMETHODIMP UnlockStore() override {
+    return attributes_ ? attributes_->UnlockStore() : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetCount(UINT32* count) override {
+    return attributes_ ? attributes_->GetCount(count) : E_UNEXPECTED;
+  }
+  STDMETHODIMP GetItemByIndex(UINT32 index, GUID* key, PROPVARIANT* value) override {
+    return attributes_ ? attributes_->GetItemByIndex(index, key, value) : E_UNEXPECTED;
+  }
+  STDMETHODIMP CopyAllItems(IMFAttributes* dest) override {
+    return attributes_ ? attributes_->CopyAllItems(dest) : E_UNEXPECTED;
   }
 
   // IKsControl -- the pipeline routes camera controls through here. This
@@ -494,8 +615,14 @@ HRESULT VCamStream::ProduceSample(IMFSample** out) {
   // Nothing new is not a failure. A camera that stops answering stalls the
   // consumer; one that repeats its last picture merely looks frozen, which is
   // the truth of the matter.
+  if (SharedState* shared = frames_.state()) {
+    ::InterlockedIncrement((volatile LONG*)&shared->samplesServed);
+  }
   if (frames_.ReadNewest(picture_.data(), format_.width, format_.height, &lastIndex_)) {
     havePicture_ = true;
+    if (SharedState* shared = frames_.state()) {
+      ::InterlockedIncrement((volatile LONG*)&shared->framesTaken);
+    }
   }
 
   IMFMediaBuffer* buffer = nullptr;
@@ -573,6 +700,10 @@ HRESULT VCamSource::Init() {
 
   hr = ::MFCreateAttributes(&attributes_, 4);
   if (FAILED(hr)) return hr;
+  // Says what kind of device this is. Without it the pipeline has to guess,
+  // and it guesses that this is not a camera.
+  attributes_->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+                       MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
 
   std::vector<IMFMediaType*> types;
   for (uint32_t i = 0; i < kFormatCount; ++i) {
@@ -606,6 +737,10 @@ HRESULT VCamSource::Init() {
     streamAttributes_->SetUINT32(MF_DEVICESTREAM_STREAM_ID, 0);
     streamAttributes_->SetGUID(MF_DEVICESTREAM_STREAM_CATEGORY, PINNAME_VIDEO_CAPTURE);
     streamAttributes_->SetUINT32(MF_DEVICESTREAM_FRAMESERVER_SHARED, 1);
+    // Colour pictures, as opposed to depth or infrared. Consumers filter on
+    // this, so a stream that does not say leaves itself out of the list.
+    streamAttributes_->SetUINT32(MF_DEVICESTREAM_ATTRIBUTE_FRAMESOURCE_TYPES,
+                                 MFFrameSourceTypes_Color);
   }
   if (FAILED(hr)) return hr;
 

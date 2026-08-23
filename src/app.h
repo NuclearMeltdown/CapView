@@ -280,6 +280,7 @@ class App {
   SettingsHost settingsHost_;
   Updater updater_;
   VirtualCamera virtualCamera_;
+  bool virtualCameraMismatchSaid_ = false;
   bool updatePromptQueued_ = false;   // waiting to be opened
   bool updatePromptRaised_ = false;   // already shown once this session
   bool devicePagesWereBusy_ = false;

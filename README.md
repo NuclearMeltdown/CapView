@@ -233,13 +233,30 @@ The picture can be offered to other programs as a webcam — Discord, OBS, Teams
 a browser — under the name *CapView*. It is switched on in *Settings → Tools*
 and exists only while CapView is running.
 
-It is built on Media Foundation rather than DirectShow, and that is not a
-preference. A DirectShow virtual camera is invisible to anything capturing
-through Media Foundation, which by now means the Windows Camera app, Teams and
-the browsers; the reverse is not true, because Windows bridges frame-server
-cameras into DirectShow enumeration. The cost of that choice is that this needs
-**Windows 11** (build 22000), where `MFCreateVirtualCamera` first appeared.
-There is no equivalent before it.
+It is built on Media Foundation rather than DirectShow, because that reaches
+strictly more programs. Measured on one machine with several virtual cameras
+installed:
+
+| | DirectShow | Media Foundation |
+|---|---|---|
+| OBS Virtual Camera | yes | **no** |
+| Camera (NVIDIA Broadcast) | yes | **no** |
+| CapView | yes | yes |
+| real cameras (webcam, capture card) | yes | yes |
+
+A DirectShow virtual camera is genuinely absent from Media Foundation, while one
+registered through `MFCreateVirtualCamera` appears in both — Windows bridges
+frame-server cameras into DirectShow enumeration, and not the other way about.
+
+That does not mean a DirectShow camera reaches nothing modern. Chromium
+enumerates both backends, so Discord, Chrome and Edge see OBS's camera perfectly
+well. What it cannot reach is anything that goes only through the frame server:
+the Windows Camera app, the camera list in Settings, packaged apps, Windows
+Hello, and the current Teams. Media Foundation is the superset, which is the
+whole of the argument.
+
+The cost of that choice is **Windows 11** (build 22000), where
+`MFCreateVirtualCamera` first appeared. There is no equivalent before it.
 
 Installing is a separate, one-time step with a UAC prompt, and there is a button
 next to it to undo it. The reason is structural rather than fussy: Windows loads
@@ -263,8 +280,16 @@ keeping its shape and black bars filling the rest — a 4:3 console in a 16:9
 camera is pillarboxed rather than stretched.
 
 Note that this makes a release two files: `CapView.exe` and `capview_vcam.dll`
-have to sit in the same folder. The update check downloads only the executable,
-so a build that changes the media source needs the DLL replaced by hand.
+have to sit in the same folder, and they have to be from the same build. The
+update check downloads only the executable, and Windows keeps the DLL locked
+while the camera is in use anywhere on the machine, so the two really can drift
+apart. Both halves therefore check that they agree about the shape of what they
+share, and say so plainly if they do not — the alternative symptom is a black
+picture and no explanation, which is worth some trouble to avoid.
+
+If the source needs replacing and Windows will not let go of the file, close
+whatever has the camera open; failing that, restarting the *Windows Camera Frame
+Server* service releases it.
 
 ### Updates
 
