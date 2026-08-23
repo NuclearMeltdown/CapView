@@ -403,14 +403,48 @@ void VirtualCamera::WorkerLoop() {
 
     if (!AttachShared()) {
       // No section means no reader. Say so, so PushFrame stops copying.
-      consumed_ = false;
+      if (consumed_.exchange(false)) CAP_LOG("Virtuelle Kamera: Leser weg");
+      const DWORD now = ::GetTickCount();
+      if (now - lastReport_ > 5000) {
+        lastReport_ = now;
+        CAP_LOG("Virtuelle Kamera: kein geteilter Speicher (Fehler %lu)",
+                (unsigned long)::GetLastError());
+      }
       continue;
     }
 
     auto* state = static_cast<vcam::SharedState*>(view_);
-    const bool live = state->magic == vcam::kMagic && state->consumers > 0 && state->wantWidth > 0;
+
+    // Same build on both sides, or nothing doing. A mismatch here is what a
+    // half finished update looks like from the inside.
+    if (state->magic != vcam::kMagic || state->version != vcam::kVersion ||
+        state->stateBytes != sizeof(vcam::SharedState)) {
+      if (!outdated_.exchange(true)) {
+        CAP_ERR("Virtuelle Kamera: Quelle passt nicht zum Programm "
+                "(Version %u statt %u, %u statt %u Byte)",
+                state->version, vcam::kVersion, state->stateBytes,
+                (unsigned)sizeof(vcam::SharedState));
+      }
+      consumed_ = false;
+      continue;
+    }
+    outdated_ = false;
+
+    const bool live = state->consumers > 0 && state->wantWidth > 0;
     consumed_ = live;
     if (!live) continue;
+
+    // Once a second, what both ends think is happening. Everything about this
+    // feature crosses a process and a session boundary, so without this the
+    // only symptom available is "the picture is black".
+    const DWORD now = ::GetTickCount();
+    if (now - lastReport_ > 1000) {
+      lastReport_ = now;
+      CAP_LOG("Virtuelle Kamera: %ux%u, Leser %u, Quellstarts %u, Proben %u, davon frisch %u, "
+              "veröffentlicht %u",
+              state->wantWidth, state->wantHeight, state->consumers, state->sourceStarted,
+              state->samplesServed, state->framesTaken, state->writeIndex);
+    }
 
     std::vector<uint8_t> frame;
     int width = 0, height = 0;

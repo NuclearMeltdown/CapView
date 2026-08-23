@@ -104,7 +104,8 @@ class SettingsWindow {
   // it. Both raise a UAC prompt, so the app does it rather than the UI thread.
   int takeVirtualCameraRequest();
   // What the app knows and the settings cannot see for themselves.
-  void SetVirtualCameraState(bool running, bool consumed, int width, int height, int fps);
+  void SetVirtualCameraState(bool running, bool consumed, int width, int height, int fps,
+                             bool sourceOutdated);
 
   // True while the binding editor is waiting for a key press. The app routes
   // key messages here instead of acting on them.
@@ -204,6 +205,7 @@ class SettingsWindow {
   double vcamStatusChecked_ = -10.0;
   bool vcamRunning_ = false;
   bool vcamConsumed_ = false;
+  bool vcamOutdated_ = false;
   int vcamWidth_ = 0;
   int vcamHeight_ = 0;
   int vcamFps_ = 0;

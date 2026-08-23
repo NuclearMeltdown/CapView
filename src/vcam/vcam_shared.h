@@ -29,7 +29,14 @@ inline constexpr wchar_t kSectionName[] = L"Global\\CapViewVirtualCameraFrames";
 inline constexpr wchar_t kFrameEventName[] = L"Global\\CapViewVirtualCameraFrame";
 
 inline constexpr uint32_t kMagic = 0x43565643u;  // 'CVVC'
-inline constexpr uint32_t kVersion = 1u;
+// Raise this whenever anything below it changes shape. The executable and the
+// media source are installed separately -- the update check replaces only the
+// executable, and Windows keeps the DLL locked while a camera is in use -- so
+// the two genuinely can end up from different builds. Left undetected that
+// produces a black picture and no explanation, which is the worst kind of
+// failure; detected, it is one sentence telling the user to install the camera
+// again.
+inline constexpr uint32_t kVersion = 2u;
 
 // Three slots is enough to keep a reader from ever waiting on the writer: one
 // being written, one being read, one spare.
@@ -70,6 +77,7 @@ struct alignas(64) SlotHeader {
 struct SharedState {
   uint32_t magic;
   uint32_t version;
+  uint32_t stateBytes;  // sizeof(SharedState) as the creator understood it
 
   // Written by the media source, read by CapView: the format the consumer
   // actually settled on. Zero means nobody is streaming.
@@ -81,6 +89,12 @@ struct SharedState {
   // Written by CapView, read by the media source.
   volatile uint32_t writeIndex;  // total pictures published, ever
   volatile uint32_t producerAlive;
+
+  // Counters, so the half that runs inside a service can say what it is doing
+  // without needing somewhere to write a log. CapView reads them out.
+  volatile uint32_t sourceStarted;  // times the media source began streaming
+  volatile uint32_t samplesServed;  // samples handed to the pipeline
+  volatile uint32_t framesTaken;    // of those, ones carrying a fresh picture
 
   SlotHeader slots[kSlotCount];
 };

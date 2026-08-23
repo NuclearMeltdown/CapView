@@ -1555,9 +1555,19 @@ void App::UpdateVirtualCamera() {
     virtualCamera_.Stop();
   }
 
+  // Said once, not once a frame.
+  if (virtualCamera_.sourceOutdated() && !virtualCameraMismatchSaid_) {
+    virtualCameraMismatchSaid_ = true;
+    Toast(T("Die Kameraquelle stammt aus einer anderen Version. Im Reiter Werkzeuge "
+            "neu installieren.",
+            "The camera source is from a different build. Install it again on the Tools tab."));
+  }
+  if (!virtualCamera_.sourceOutdated()) virtualCameraMismatchSaid_ = false;
+
   int w = 0, h = 0, fps = 0;
   virtualCamera_.wanted(&w, &h, &fps);
-  settings_.SetVirtualCameraState(virtualCamera_.running(), virtualCamera_.consumed(), w, h, fps);
+  settings_.SetVirtualCameraState(virtualCamera_.running(), virtualCamera_.consumed(), w, h, fps,
+                                  virtualCamera_.sourceOutdated());
 }
 
 void App::ShowVolumeOsd() {

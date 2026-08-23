@@ -62,6 +62,12 @@ class VirtualCamera {
   // pushing frames costs nothing, so callers need not check first.
   bool consumed() const { return consumed_.load(std::memory_order_relaxed); }
 
+  // The installed media source is from a different build than this executable
+  // and the two cannot agree on the shape of what they share. Reported rather
+  // than worked around: the picture would be black either way, and only saying
+  // so turns that into something the user can act on.
+  bool sourceOutdated() const { return outdated_.load(std::memory_order_relaxed); }
+
   // Hands over one displayed frame, RGBA8, top row first. Returns immediately:
   // the copy is cheap and the conversion happens on a thread of its own, so the
   // render loop is never waiting on a webcam.
@@ -81,6 +87,7 @@ class VirtualCamera {
 
   std::atomic<bool> running_{false};
   std::atomic<bool> consumed_{false};
+  std::atomic<bool> outdated_{false};
   std::atomic<bool> quit_{false};
 
   std::thread worker_;
@@ -97,6 +104,7 @@ class VirtualCamera {
   HANDLE section_ = nullptr;
   void* view_ = nullptr;
   std::vector<uint8_t> scratch_;
+  unsigned long lastReport_ = 0;
 };
 
 }  // namespace cap
