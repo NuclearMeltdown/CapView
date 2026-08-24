@@ -533,6 +533,10 @@ bool Config::Load(std::string* error) {
   app.showStats = a["showStats"].AsBool(false);
   app.showToolbar = a["showToolbar"].AsBool(true);
   app.settingsSeparateWindow = a["settingsSeparateWindow"].AsBool(false);
+  app.settingsWindowX = a["settingsWindowX"].AsInt(-1);
+  app.settingsWindowY = a["settingsWindowY"].AsInt(-1);
+  app.settingsWindowW = a["settingsWindowW"].AsInt(0);
+  app.settingsWindowH = a["settingsWindowH"].AsInt(0);
   app.checkUpdatesOnStart = a["checkUpdatesOnStart"].AsBool(true);
   app.virtualCamera = a["virtualCamera"].AsBool(false);
   app.hdrInput = ReadEnum<HdrInput>(a, "hdrInput", kHdrInputCount, HdrInput::Auto);
@@ -637,6 +641,10 @@ std::string Config::Serialize() const {
   a["showStats"] = app.showStats;
   a["showToolbar"] = app.showToolbar;
   a["settingsSeparateWindow"] = app.settingsSeparateWindow;
+  a["settingsWindowX"] = app.settingsWindowX;
+  a["settingsWindowY"] = app.settingsWindowY;
+  a["settingsWindowW"] = app.settingsWindowW;
+  a["settingsWindowH"] = app.settingsWindowH;
   a["checkUpdatesOnStart"] = app.checkUpdatesOnStart;
   a["virtualCamera"] = app.virtualCamera;
   a["hdrInput"] = (int)app.hdrInput;

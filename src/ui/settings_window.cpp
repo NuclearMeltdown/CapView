@@ -385,6 +385,14 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
       ImGui::EndTabItem();
     }
     ++tabIndex;
+    if (ImGui::BeginTabItem(T("HDR###hdr", "HDR###hdr"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
+      ImGui::BeginChild("scroll_hdr", ImVec2(0, -footer));
+      DrawHdrTab();
+      ImGui::EndChild();
+      ImGui::EndTabItem();
+    }
+    ++tabIndex;
     if (ImGui::BeginTabItem(T("Ton###audio", "Audio###audio"), nullptr, tabFlags())) {
       activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_audio", ImVec2(0, -footer));
@@ -409,10 +417,10 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
       ImGui::EndTabItem();
     }
     ++tabIndex;
-    if (ImGui::BeginTabItem(T("Werkzeuge###tools", "Tools###tools"), nullptr, tabFlags())) {
+    if (ImGui::BeginTabItem(T("Encoder###encoder", "Encoder###encoder"), nullptr, tabFlags())) {
       activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_tools", ImVec2(0, -footer));
-      DrawToolsTab(ffmpeg);
+      ImGui::BeginChild("scroll_encoder", ImVec2(0, -footer));
+      DrawEncoderTab(ffmpeg);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
@@ -1594,8 +1602,6 @@ void SettingsWindow::DrawDisplayTab() {
   ImGui::Checkbox(T("Beim Start im Vollbild öffnen", "Start in fullscreen"), &app.startFullscreen);
 
   ImGui::Spacing();
-  DrawHdrBlock();
-
   ImGui::SeparatorText(T("Sonstiges", "Other"));
   ImGui::Checkbox(T("Protokoll in CapView.log schreiben", "Write a log to CapView.log"),
                   &app.logToFile);
@@ -1716,28 +1722,33 @@ void SettingsWindow::DrawFfmpegBlock(FfmpegInfo* ffmpeg) {
   ImGui::EndDisabled();
 }
 
+void SettingsWindow::LoadRecordBuffers() {
+  if (recordBuffersLoaded_) return;
+  const RecordSettings& rec = cfg().record;
+  std::snprintf(ffmpegPathBuffer_, sizeof(ffmpegPathBuffer_), "%s", rec.ffmpegPath.c_str());
+  std::snprintf(folderBuffer_, sizeof(folderBuffer_), "%s", rec.outputFolder.c_str());
+  std::snprintf(shotFolderBuffer_, sizeof(shotFolderBuffer_), "%s", rec.screenshotFolder.c_str());
+  recordBuffersLoaded_ = true;
+}
+
+// HDR has a tab of its own rather than a block inside Display. It is not a
+// display setting: three of its switches decide what the recorder, the
+// screenshots and the virtual camera write, and those live in other tabs
+// entirely. A subject that reaches across four tabs is a subject, not a section.
+void SettingsWindow::DrawHdrTab() { DrawHdrBlock(); }
+
 void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   RecordSettings& rec = cfg().record;
 
-  if (!recordBuffersLoaded_) {
-    std::snprintf(ffmpegPathBuffer_, sizeof(ffmpegPathBuffer_), "%s", rec.ffmpegPath.c_str());
-    std::snprintf(folderBuffer_, sizeof(folderBuffer_), "%s", rec.outputFolder.c_str());
-    std::snprintf(shotFolderBuffer_, sizeof(shotFolderBuffer_), "%s", rec.screenshotFolder.c_str());
-    recordBuffersLoaded_ = true;
-  }
+  LoadRecordBuffers();
 
-  // Without ffmpeg none of the recording settings mean anything, so it leads and
-  // the rest is greyed out rather than inviting people to configure a bitrate
-  // for an encoder that cannot run.
   const bool ready = ffmpeg && ffmpeg->found;
-  // Always here, whether ffmpeg was found or not. It used to move to the bottom
-  // of the tab once it was working, so where you last saw it was no guide to
-  // where it is -- and a thing that moves is a thing you hunt for.
-  ImGui::Spacing();
-  DrawFfmpegBlock(ffmpeg);
-  ImGui::Spacing();
-  ImGui::Separator();
-  ImGui::Spacing();
+  if (!ready) {
+    ImGui::Spacing();
+    ImGui::TextWrapped(T("Ohne ffmpeg lässt sich nicht aufnehmen. Im Reiter Encoder steht, "
+                         "wie es dazu kommt.",
+                         "Recording needs ffmpeg. The Encoder tab says how to get it."));
+  }
 
   ImGui::BeginDisabled(!ready);
 
@@ -1794,6 +1805,102 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   ImGui::SetNextItemWidth(-260.0f);
   ImGui::SliderInt(T("Teilgröße", "Split size"), &rec.splitSizeMb, 100, 20000, "%d MB");
   ImGui::EndDisabled();
+
+  ImGui::EndDisabled();
+
+  // ---- stills ----
+  // Outside the disabled block on purpose: screenshots go through Windows' own
+  // imaging stack and have nothing to do with ffmpeg.
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Screenshots", "Screenshots"));
+  ImGui::TextWrapped(T("Einzelbild in Quellauflösung, ohne Bedienoberfläche. Benötigt kein ffmpeg.",
+                       "Single frame at source resolution, without the interface. Does not need "
+                       "ffmpeg."));
+  ImGui::Spacing();
+
+  int shot = (int)rec.screenshotFormat;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Format", "Format"), &shot, 2, ScreenshotFormatName)) {
+    rec.screenshotFormat = (ScreenshotFormat)shot;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("PNG verlustfrei, JPEG kleiner.", "PNG lossless, JPEG smaller."));
+
+  ImGui::BeginDisabled(rec.screenshotFormat != ScreenshotFormat::Jpeg);
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderInt(T("JPEG-Qualität", "JPEG quality"), &rec.jpegQuality, 1, 100, "%d %%");
+  ImGui::EndDisabled();
+
+  FolderRow("shotfolder", kPickShotFolder, shotFolderBuffer_, sizeof(shotFolderBuffer_),
+            &rec.screenshotFolder, DefaultScreenshotFolder());
+  ImGui::Spacing();
+  DrawVirtualCameraBlock();
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Nach MP4 umpacken", "Rewrap to MP4"));
+
+  ImGui::TextWrapped(T("Legt MKV-Dateien ohne Neukodierung in eine MP4 um. Dauert Sekunden und "
+                       "kostet keine Qualität. Das Original bleibt erhalten.",
+                       "Puts MKV files into an MP4 without re-encoding. Takes seconds and costs "
+                       "no quality. The original is kept."));
+  ImGui::Spacing();
+
+  const bool remuxBusy = remuxer_.busy();
+  ImGui::BeginDisabled(remuxBusy || picker_.busy() || !ffmpeg || !ffmpeg->found);
+  if (ImGui::Button(T("Dateien wählen ...", "Choose files ..."))) {
+    FileDialogRequest request;
+    request.mode = FileDialogRequest::Mode::OpenFiles;
+    request.title = ToWide(T("Aufnahmen auswählen", "Select recordings"));
+    request.startPath =
+        rec.outputFolder.empty() ? DefaultRecordFolder() : ToWide(rec.outputFolder);
+    request.filters = {{ToWide(T("Aufnahmen", "Recordings")), L"*.mkv;*.mp4;*.mov;*.avi;*.ts"},
+                       {ToWide(T("Alle Dateien", "All files")), L"*.*"}};
+    picker_.Start(request, (HWND)ImGui::GetMainViewport()->PlatformHandleRaw, kPickRemux);
+  }
+  ImGui::EndDisabled();
+
+  if (remuxBusy) {
+    ImGui::SameLine();
+    if (ImGui::Button(T("Abbrechen##remux", "Cancel##remux"))) remuxer_.Cancel();
+  }
+  if (ffmpeg && !ffmpeg->found) {
+    ImGui::SameLine();
+    ImGui::TextDisabled(T("(benötigt ffmpeg)", "(needs ffmpeg)"));
+  }
+
+  if (remuxer_.state() != Remuxer::State::Idle) {
+    if (remuxBusy) ImGui::ProgressBar(remuxer_.progress(), ImVec2(-1.0f, 0.0f));
+    const std::string status = remuxer_.message();
+    if (!status.empty()) {
+      const bool failed = remuxer_.state() == Remuxer::State::Failed;
+      ImGui::TextColored(
+          failed ? ImVec4(0.9f, 0.5f, 0.4f, 1.0f) : ImGui::GetStyle().Colors[ImGuiCol_Text], "%s",
+          status.c_str());
+    }
+    // Only failures are listed; a success is its own file on disk.
+    for (const Remuxer::Item& item : remuxer_.items()) {
+      if (!item.done || item.ok) continue;
+      ImGui::TextDisabled("- %s", item.error.c_str());
+    }
+  }}
+
+void SettingsWindow::DrawEncoderTab(FfmpegInfo* ffmpeg) {
+  RecordSettings& rec = cfg().record;
+  LoadRecordBuffers();
+
+  // Without ffmpeg none of the recording settings mean anything, so it leads and
+  // the rest is greyed out rather than inviting people to configure a bitrate
+  // for an encoder that cannot run.
+  const bool ready = ffmpeg && ffmpeg->found;
+  // Always here, whether ffmpeg was found or not. It used to move to the bottom
+  // of the tab once it was working, so where you last saw it was no guide to
+  // where it is -- and a thing that moves is a thing you hunt for.
+  ImGui::Spacing();
+  DrawFfmpegBlock(ffmpeg);
+  ImGui::Spacing();
+  ImGui::Separator();
+  ImGui::Spacing();
+
+  ImGui::BeginDisabled(!ready);
 
   // ---- encoder ----
   ImGui::Spacing();
@@ -1918,31 +2025,6 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
 
   ImGui::EndDisabled();
 
-  // ---- stills ----
-  // Outside the disabled block on purpose: screenshots go through Windows' own
-  // imaging stack and have nothing to do with ffmpeg.
-  ImGui::Spacing();
-  ImGui::SeparatorText(T("Screenshots", "Screenshots"));
-  ImGui::TextWrapped(T("Einzelbild in Quellauflösung, ohne Bedienoberfläche. Benötigt kein ffmpeg.",
-                       "Single frame at source resolution, without the interface. Does not need "
-                       "ffmpeg."));
-  ImGui::Spacing();
-
-  int shot = (int)rec.screenshotFormat;
-  ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Format", "Format"), &shot, 2, ScreenshotFormatName)) {
-    rec.screenshotFormat = (ScreenshotFormat)shot;
-  }
-  ImGui::SameLine();
-  HelpMarker(T("PNG verlustfrei, JPEG kleiner.", "PNG lossless, JPEG smaller."));
-
-  ImGui::BeginDisabled(rec.screenshotFormat != ScreenshotFormat::Jpeg);
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderInt(T("JPEG-Qualität", "JPEG quality"), &rec.jpegQuality, 1, 100, "%d %%");
-  ImGui::EndDisabled();
-
-  FolderRow("shotfolder", kPickShotFolder, shotFolderBuffer_, sizeof(shotFolderBuffer_),
-            &rec.screenshotFolder, DefaultScreenshotFolder());
 }
 
 // ----------------------------------------------------------------- tools tab
@@ -2160,58 +2242,6 @@ void SettingsWindow::DrawEncoderBlock(const EncoderInfo* encoder) {
   }
 }
 
-void SettingsWindow::DrawToolsTab(FfmpegInfo* ffmpeg) {
-  RecordSettings& rec = cfg().record;
-  DrawVirtualCameraBlock();
-
-  ImGui::Spacing();
-  ImGui::SeparatorText(T("Nach MP4 umpacken", "Rewrap to MP4"));
-
-  ImGui::TextWrapped(T("Legt MKV-Dateien ohne Neukodierung in eine MP4 um. Dauert Sekunden und "
-                       "kostet keine Qualität. Das Original bleibt erhalten.",
-                       "Puts MKV files into an MP4 without re-encoding. Takes seconds and costs "
-                       "no quality. The original is kept."));
-  ImGui::Spacing();
-
-  const bool remuxBusy = remuxer_.busy();
-  ImGui::BeginDisabled(remuxBusy || picker_.busy() || !ffmpeg || !ffmpeg->found);
-  if (ImGui::Button(T("Dateien wählen ...", "Choose files ..."))) {
-    FileDialogRequest request;
-    request.mode = FileDialogRequest::Mode::OpenFiles;
-    request.title = ToWide(T("Aufnahmen auswählen", "Select recordings"));
-    request.startPath =
-        rec.outputFolder.empty() ? DefaultRecordFolder() : ToWide(rec.outputFolder);
-    request.filters = {{ToWide(T("Aufnahmen", "Recordings")), L"*.mkv;*.mp4;*.mov;*.avi;*.ts"},
-                       {ToWide(T("Alle Dateien", "All files")), L"*.*"}};
-    picker_.Start(request, (HWND)ImGui::GetMainViewport()->PlatformHandleRaw, kPickRemux);
-  }
-  ImGui::EndDisabled();
-
-  if (remuxBusy) {
-    ImGui::SameLine();
-    if (ImGui::Button(T("Abbrechen##remux", "Cancel##remux"))) remuxer_.Cancel();
-  }
-  if (ffmpeg && !ffmpeg->found) {
-    ImGui::SameLine();
-    ImGui::TextDisabled(T("(benötigt ffmpeg)", "(needs ffmpeg)"));
-  }
-
-  if (remuxer_.state() != Remuxer::State::Idle) {
-    if (remuxBusy) ImGui::ProgressBar(remuxer_.progress(), ImVec2(-1.0f, 0.0f));
-    const std::string status = remuxer_.message();
-    if (!status.empty()) {
-      const bool failed = remuxer_.state() == Remuxer::State::Failed;
-      ImGui::TextColored(
-          failed ? ImVec4(0.9f, 0.5f, 0.4f, 1.0f) : ImGui::GetStyle().Colors[ImGuiCol_Text], "%s",
-          status.c_str());
-    }
-    // Only failures are listed; a success is its own file on disk.
-    for (const Remuxer::Item& item : remuxer_.items()) {
-      if (!item.done || item.ok) continue;
-      ImGui::TextDisabled("- %s", item.error.c_str());
-    }
-  }
-}
 
 // --------------------------------------------------------------- hotkeys tab
 

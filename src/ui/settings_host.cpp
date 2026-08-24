@@ -110,7 +110,7 @@ void SettingsHost::PumpModalFrame() {
 
 bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
                           ID3D11DeviceContext* context, ImFontAtlas* atlas, float uiScale,
-                          bool allowTearing, std::string* error) {
+                          bool allowTearing, const Placement& where, std::string* error) {
   if (hwnd_) return true;
   device_ = device;
   ctx_ = context;
@@ -135,8 +135,25 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   // tells us it is already there.
   ::RegisterClassExW(&wc);
 
-  const int w = (int)(720 * uiScale_);
-  const int h = (int)(640 * uiScale_);
+  // What it was last time, or a sensible default the first time. Checked
+  // against the virtual screen, so a window remembered on a monitor that is no
+  // longer there does not come up somewhere nobody can reach it.
+  int w = where.width > 200 ? where.width : (int)(720 * uiScale_);
+  int h = where.height > 200 ? where.height : (int)(640 * uiScale_);
+  int x = CW_USEDEFAULT;
+  int y = CW_USEDEFAULT;
+  if (where.x != -1 || where.y != -1) {
+    RECT desk = {::GetSystemMetrics(SM_XVIRTUALSCREEN), ::GetSystemMetrics(SM_YVIRTUALSCREEN), 0,
+                 0};
+    desk.right = desk.left + ::GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    desk.bottom = desk.top + ::GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    // A hundred pixels of title bar has to remain reachable.
+    if (where.x + 100 > desk.left && where.x < desk.right - 100 && where.y >= desk.top &&
+        where.y < desk.bottom - 40) {
+      x = where.x;
+      y = where.y;
+    }
+  }
   // WS_EX_APPWINDOW, and it is not decoration. An owned window is deliberately
   // kept off the taskbar by Windows -- and a window with no taskbar button, when
   // minimised, has nowhere to go, so it lands as a stub in the bottom left
@@ -144,7 +161,7 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   // both reported symptoms, and this one flag is both fixes. The owner is worth
   // keeping: it makes the settings stay above the preview and close with it.
   hwnd_ = ::CreateWindowExW(WS_EX_APPWINDOW, kClassName, L"CapView", WS_OVERLAPPEDWINDOW,
-                            CW_USEDEFAULT, CW_USEDEFAULT, w, h, owner, nullptr, instance, this);
+                            x, y, w, h, owner, nullptr, instance, this);
   if (!hwnd_) {
     if (error) *error = T("Einstellungsfenster konnte nicht erstellt werden",
                              "The settings window could not be created");
@@ -398,6 +415,21 @@ void SettingsHost::EndFrame() {
 
   ImGui::SetCurrentContext(previous_);
   previous_ = nullptr;
+}
+
+SettingsHost::Placement SettingsHost::placement() const {
+  Placement out;
+  if (!hwnd_) return out;
+  // The restored rectangle, not the current one: a window read while it is
+  // minimised or maximised would be remembered at the wrong size.
+  WINDOWPLACEMENT wp = {};
+  wp.length = sizeof(wp);
+  if (!::GetWindowPlacement(hwnd_, &wp)) return out;
+  out.x = wp.rcNormalPosition.left;
+  out.y = wp.rcNormalPosition.top;
+  out.width = wp.rcNormalPosition.right - wp.rcNormalPosition.left;
+  out.height = wp.rcNormalPosition.bottom - wp.rcNormalPosition.top;
+  return out;
 }
 
 }  // namespace cap

@@ -348,7 +348,7 @@ colour matrix left to apply on top.
 ### Virtual camera
 
 The picture can be offered to other programs as a webcam — Discord, OBS, Teams,
-a browser — under the name *CapView*. It is switched on in *Settings → Tools*
+a browser — under the name *CapView*. It is switched on in *Settings → Recording*
 and exists only while CapView is running.
 
 It is built on Media Foundation rather than DirectShow, because that reaches
@@ -433,6 +433,38 @@ failed update leaves the program as it was rather than gone.
 
 An installation directory that needs administrator rights to write to will refuse
 the swap and say so.
+
+### How the settings are arranged
+
+Ten tabs, grouped by what a setting *affects* rather than by what it technically
+is. That distinction did real work: the switches deciding whether a recording, a
+screenshot or the virtual camera keeps its full range used to sit under Display,
+three tabs away from any of the three things they govern.
+
+| | |
+|---|---|
+| **Source** | the card and the signal coming out of it |
+| **Picture** | what is done to that signal for viewing |
+| **HDR** | the whole subject, including what the outputs write |
+| **Audio** | playback, delay, levels, microphone |
+| **Recording** | everything that leaves CapView as a file or a camera |
+| **Encoder** | ffmpeg, which encoder, and what it is told |
+| **Display** | the window, the theme, the language, the overlays |
+| **Keys** | |
+| **Profiles** | |
+| **Updates** | |
+
+Recording and Encoder are separate because they answer different questions.
+*Where does the file go, how big, how often* is a decision about the recording;
+*which chip encodes it and how hard it works* is a decision about the machine,
+and one of them is set once and the other every session. ffmpeg lives with the
+encoder for the same reason — it is what the encoder runs on, not a property of
+the recording.
+
+HDR earns a tab rather than a section because it is not a display setting. Its
+source curve belongs to the card, its tone mapping to the screen, and three of
+its switches decide what the recorder, the screenshots and the virtual camera
+write. A subject that reaches across four tabs is a subject.
 
 ## Shortcuts
 
@@ -526,7 +558,7 @@ Prebuilt executables are attached to each [release](../../releases).
 
 ## ffmpeg
 
-Recording requires `ffmpeg.exe`. Nothing else does. *Settings → Recording*
+Recording requires `ffmpeg.exe`. Nothing else does. *Settings → Encoder*
 provides a button that downloads a static build, verifies its published SHA-256
 and extracts only the executable. The same operation is available from the
 command line:

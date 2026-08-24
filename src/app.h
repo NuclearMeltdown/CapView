@@ -157,6 +157,9 @@ class App {
   // The settings window's own frame. Called *after* the main window has been
   // presented, never inside its frame -- see the comment at the call site.
   void DrawSettingsWindowed();
+  // Copies the settings window's position into the configuration, so it comes
+  // back where it was left rather than wherever Windows decides.
+  void RememberSettingsWindow();
   // The one-off notice when the check made at startup finds something. Shown in
   // the picture, because a tab nobody opened is not a notice.
   void DrawUpdatePrompt();

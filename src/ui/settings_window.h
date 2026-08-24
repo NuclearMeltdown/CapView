@@ -135,7 +135,11 @@ class SettingsWindow {
   void DrawHdrBlock();
   void DrawRecordTab(FfmpegInfo* ffmpeg);
   void DrawFfmpegBlock(FfmpegInfo* ffmpeg);
-  void DrawToolsTab(FfmpegInfo* ffmpeg);
+  void DrawEncoderTab(FfmpegInfo* ffmpeg);
+  void DrawHdrTab();
+  // The three text buffers the recording and encoder tabs share. Filled once
+  // from the configuration; both tabs need them and either may be first.
+  void LoadRecordBuffers();
   void DrawVirtualCameraBlock();
   void DrawEncoderBlock(const EncoderInfo* encoder);
   void DrawHotkeysTab();
