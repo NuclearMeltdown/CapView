@@ -191,6 +191,35 @@ filters — TComb, DeDot, LUTDeCrawl, Checkmate — are all temporal and say so
 themselves about moving content. Going further needs motion compensation of the
 QTGMC sort, which is not a real-time proposition.
 
+### What the encoder is told
+
+Bitrate alone leaves most of an encoder unused, so the settings that matter are
+exposed under one set of names and translated into each vendor's own. What NVIDIA
+calls `p1`–`p7`, Intel calls `veryfast`–`veryslow` and AMD calls three words; a
+quality target is `-cq` on one, `-qp_i` on another, `-global_quality` on a third
+and `-crf` in software.
+
+| | NVENC | AMF | Quick Sync | Software |
+|---|---|---|---|---|
+| Rate control | CBR, VBR, constant quality | CBR, VBR, constant quality | by which of bitrate or quality is given | CBR, VBR, CRF |
+| Preset | seven steps | three, which the seven fold onto | seven steps | seven steps |
+| Tuning | quality or low latency | quality or low latency | — | — |
+| Look-ahead | yes | yes | yes | — |
+| Adaptive quantisation | spatial and temporal | VBAQ | MBBRC | — |
+| Multipass | off, quarter, full | — | — | — |
+
+Anything an encoder has no opinion about is greyed out rather than hidden, which
+says "your card cannot" instead of "CapView cannot". Everything defaults to
+automatic, meaning nothing is passed at all — which is not the same as passing
+the encoder's default, and is the only honest way to leave something alone.
+
+Constant bitrate means constant: the ceiling is the bitrate. Variable is allowed
+to peak at half again, which is what makes it worth choosing. Constant quality
+sends no bitrate at all, because a quality target and a bitrate are contradictory
+instructions and ffmpeg resolves them by quietly ignoring one.
+
+Keyframe interval and B-frames are left to the encoder.
+
 ### Audio
 
 The card's embedded audio, or any Windows recording device, played out through
@@ -282,7 +311,7 @@ Each of the three can be told to keep the range instead:
 | | What it writes | What it needs at the other end |
 |---|---|---|
 | Recording | ten bit P010, PQ, BT.2020, with `smpte2084` and `bt2020nc` in the file | an encoder that does ten bits — usual for HEVC and AV1, rare for H.264 — and a player that reads PQ |
-| Screenshots | JPEG XR holding scRGB half floats | the Photos app, or anything that reads .jxr |
+| Screenshots | JPEG XR holding scRGB half floats, or AVIF | the Photos app for .jxr; any browser for AVIF |
 | Virtual camera | ten bit P010 offered alongside the ordinary eight bit | a program that asks for it, which today is almost nothing |
 
 The camera one is off by default and deliberately so: something that takes the
@@ -293,9 +322,13 @@ exists, since it builds its list of formats when it is created — so it is the
 plainest thing that works across that boundary, a file in `ProgramData` that is
 either there or not.
 
-Screenshots use JPEG XR because it is the one container Windows ships an encoder
-for that holds half floats, and the one the Photos app recognises as HDR; a
-sixteen bit PNG would be neither.
+Screenshots offer two formats and the difference is worth knowing. JPEG XR costs
+nothing: Windows ships the encoder, the Photos app reads it, and screenshots stay
+the one part of CapView that never needs ffmpeg. AVIF is read by every browser
+and by most things that are not Windows, but it goes through ffmpeg — which is
+already there for recording, so it is not a new dependency, only a newly
+required one. A sixteen bit PNG would be neither: nothing would know to read it
+as HDR.
 
 The recording and the camera share one buffer rather than two, because the
 picture they want is the same: ten bit PQ in BT.2020. The camera only has a

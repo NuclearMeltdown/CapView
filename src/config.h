@@ -83,11 +83,39 @@ inline constexpr int kHdrOutputCount = 3;
 
 enum class RecordContainer { Mkv, Mp4 };
 
+// How the bitrate is spent. The three every encoder here understands, under one
+// set of names -- what each vendor calls them differs, and translating that is
+// the recorder's job rather than the user's.
+enum class RateControl {
+  Cbr,      // the same every second. What streaming wants.
+  Vbr,      // spends more where the picture needs it, up to the ceiling.
+  Quality,  // no bitrate at all: a quality target, and the file is what it is.
+};
+inline constexpr int kRateControlCount = 3;
+
+// Speed against quality, seven steps because that is what NVENC offers and the
+// others map onto it. Auto leaves it to the encoder's own default.
+enum class EncoderPreset { Auto, Fastest, Faster, Fast, Medium, Slow, Slower, Slowest };
+inline constexpr int kEncoderPresetCount = 8;
+
+// What the encoder should optimise for. Only NVENC and AMF have an opinion.
+enum class EncoderTune { Auto, Quality, LowLatency };
+inline constexpr int kEncoderTuneCount = 3;
+
+// Two passes cost time and buy accuracy near the bitrate ceiling. NVENC only.
+enum class Multipass { Auto, Off, Quarter, Full };
+inline constexpr int kMultipassCount = 4;
+
 // PNG is lossless and the sane default for a capture card: the point of a still
 // is usually to look at it closely. JPEG is there for whoever takes hundreds.
-// Jxr is not a choice in the format list -- it is what an HDR screenshot comes
-// out as, because it is the one container Windows can write half floats into.
-enum class ScreenshotFormat { Png, Jpeg, Jxr };
+enum class ScreenshotFormat { Png, Jpeg };
+
+// What an HDR screenshot comes out as. JPEG XR needs nothing: Windows ships the
+// encoder, and the Photos app reads it. AVIF is read by every browser and by
+// most things that are not Windows -- but it goes through ffmpeg, and
+// screenshots are otherwise the one part of CapView that never needs it.
+enum class HdrShotFormat { Jxr, Avif };
+inline constexpr int kHdrShotFormatCount = 2;
 
 // Which encoder ffmpeg is asked for. Auto picks the best one that survived the
 // test encode, preferring hardware. The AV1 entries need recent hardware
@@ -261,6 +289,23 @@ struct RecordSettings {
   RecordEncoder encoder = RecordEncoder::Auto;
   RecordSpeed speed = RecordSpeed::VeryFast;  // software encoder only
   int bitrateKbps = 20000;
+
+
+  // ---- what the encoder is told ----
+  //
+  // All of these are "leave it alone" by default, so a recording made without
+  // touching any of them is exactly what it was before these existed.
+  RateControl rateControl = RateControl::Cbr;
+  // For RateControl::Quality. Lower is better; the scale differs a little
+  // between encoders, which is why it is a number and not a word.
+  int qualityLevel = 23;
+  EncoderPreset preset = EncoderPreset::Auto;
+  EncoderTune tune = EncoderTune::Auto;
+  Multipass multipass = Multipass::Auto;
+  // Looking ahead costs latency and buys better bit distribution; adaptive
+  // quantisation spends bits where the eye looks. Both cost a little speed.
+  bool lookAhead = false;
+  bool adaptiveQuant = false;
   // 0 = whatever the source delivers. Otherwise frames are dropped to hit this.
   double fps = 0.0;
   // Off by default: only FAT32 needs it, NTFS does not.
@@ -333,6 +378,7 @@ struct AppSettings {
   bool recordHdr = false;
   // Screenshots that keep the range, written as JPEG XR rather than PNG.
   bool screenshotHdr = false;
+  HdrShotFormat hdrShotFormat = HdrShotFormat::Jxr;
   // Offer the virtual camera in ten bit PQ as well as the ordinary eight bit.
   // Off by default, and deliberately: almost nothing on the other end knows
   // what to do with an HDR webcam yet.

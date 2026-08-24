@@ -74,6 +74,18 @@ class Recorder {
     hdr_ = hdr;
   }
 
+
+ private:
+  // Everything the settings say, in the words this particular encoder uses.
+  std::wstring EncoderOptions(const RecordSettings& settings, const EncoderInfo& encoder) const;
+
+ public:
+
+  // Which family an encoder belongs to. The settings are one set of names; what
+  // each vendor actually calls them is another, and this is the seam.
+  enum class Family { Software, Nvenc, Amf, Qsv };
+  static Family FamilyOf(const std::string& ffmpegName);
+
   bool Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, int width, int height,
              double sourceFps, const AudioSource& main, const AudioSource& mic,
              MicTrackMode micTrackMode, std::string* error);

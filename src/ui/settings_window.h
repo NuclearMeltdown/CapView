@@ -133,6 +133,7 @@ class SettingsWindow {
   void DrawFfmpegBlock(FfmpegInfo* ffmpeg);
   void DrawToolsTab(FfmpegInfo* ffmpeg);
   void DrawVirtualCameraBlock();
+  void DrawEncoderBlock(const EncoderInfo* encoder);
   void DrawHotkeysTab();
   void DrawUpdatesTab();
   // Text field plus Browse / Default / Open, shared by both output folders.

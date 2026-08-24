@@ -541,6 +541,8 @@ bool Config::Load(std::string* error) {
   app.sourcePeakNits = (float)a["sourcePeakNits"].AsNumber(1000.0);
   app.recordHdr = a["recordHdr"].AsBool(false);
   app.screenshotHdr = a["screenshotHdr"].AsBool(false);
+  app.hdrShotFormat = ReadEnum<HdrShotFormat>(a, "hdrShotFormat", kHdrShotFormatCount,
+                                              HdrShotFormat::Jxr);
   app.cameraHdr = a["cameraHdr"].AsBool(false);
   app.statsDetail = ReadEnum<StatsDetail>(a, "statsDetail", 3, StatsDetail::Compact);
   app.logToFile = a["logToFile"].AsBool(false);
@@ -559,6 +561,14 @@ bool Config::Load(std::string* error) {
       ReadEnum<RecordEncoder>(r, "encoder", kRecordEncoderCount, RecordEncoder::Auto);
   record.speed = ReadEnum<RecordSpeed>(r, "speed", 5, RecordSpeed::VeryFast);
   record.bitrateKbps = Clamp(r["bitrateKbps"].AsInt(20000), 500, 500000);
+  record.rateControl = ReadEnum<RateControl>(r, "rateControl", kRateControlCount,
+                                          RateControl::Cbr);
+  record.qualityLevel = (int)r["qualityLevel"].AsNumber(23);
+  record.preset = ReadEnum<EncoderPreset>(r, "preset", kEncoderPresetCount, EncoderPreset::Auto);
+  record.tune = ReadEnum<EncoderTune>(r, "tune", kEncoderTuneCount, EncoderTune::Auto);
+  record.multipass = ReadEnum<Multipass>(r, "multipass", kMultipassCount, Multipass::Auto);
+  record.lookAhead = r["lookAhead"].AsBool(false);
+  record.adaptiveQuant = r["adaptiveQuant"].AsBool(false);
   record.fps = Clamp(r["fps"].AsNumber(0.0), 0.0, 480.0);
   record.splitFiles = r["splitFiles"].AsBool(false);
   record.splitSizeMb = Clamp(r["splitSizeMb"].AsInt(4000), 100, 100000);
@@ -635,6 +645,7 @@ std::string Config::Serialize() const {
   a["sourcePeakNits"] = app.sourcePeakNits;
   a["recordHdr"] = app.recordHdr;
   a["screenshotHdr"] = app.screenshotHdr;
+  a["hdrShotFormat"] = (int)app.hdrShotFormat;
   a["cameraHdr"] = app.cameraHdr;
   a["statsDetail"] = (int)app.statsDetail;
   a["logToFile"] = app.logToFile;
@@ -653,6 +664,13 @@ std::string Config::Serialize() const {
   r["encoder"] = (int)record.encoder;
   r["speed"] = (int)record.speed;
   r["bitrateKbps"] = record.bitrateKbps;
+  r["rateControl"] = (int)record.rateControl;
+  r["qualityLevel"] = record.qualityLevel;
+  r["preset"] = (int)record.preset;
+  r["tune"] = (int)record.tune;
+  r["multipass"] = (int)record.multipass;
+  r["lookAhead"] = record.lookAhead;
+  r["adaptiveQuant"] = record.adaptiveQuant;
   r["fps"] = record.fps;
   r["splitFiles"] = record.splitFiles;
   r["splitSizeMb"] = record.splitSizeMb;

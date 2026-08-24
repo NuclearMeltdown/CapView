@@ -1,5 +1,6 @@
 #include "ui/settings_window.h"
 
+#include "record/recorder.h"
 #include "vcam/virtual_camera.h"
 
 #include <shellapi.h>
@@ -1292,14 +1293,26 @@ void SettingsWindow::DrawHdrBlock() {
                "Without it the tone mapped picture is recorded, which plays anywhere."));
 
   ImGui::Checkbox(T("Screenshots", "Screenshots"), &app.screenshotHdr);
+  if (app.screenshotHdr) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150.0f);
+    const char* shotNames[] = {T("JPEG XR (.jxr)", "JPEG XR (.jxr)"), T("AVIF", "AVIF")};
+    int shot = (int)app.hdrShotFormat;
+    if (ImGui::Combo("##hdrshot", &shot, shotNames, kHdrShotFormatCount)) {
+      app.hdrShotFormat = (HdrShotFormat)shot;
+    }
+  }
   ImGui::SameLine();
-  HelpMarker(T("Speichert als JPEG XR (.jxr) statt PNG, weil das das einzige Format ist, "
-               "für das Windows einen Encoder mitbringt, der Halbfloats hält -- und weil "
-               "die Fotos-App es als HDR erkennt. Das eingestellte Bildformat wird dabei "
-               "übergangen.",
-               "Saves as JPEG XR (.jxr) rather than PNG, that being the one format Windows "
-               "ships an encoder for that holds half floats -- and the one the Photos app "
-               "recognises as HDR. The chosen picture format is bypassed."));
+  HelpMarker(T("Das eingestellte Bildformat wird dabei übergangen -- PNG und JPEG können "
+               "den Umfang nicht halten.\n\n"
+               "JPEG XR braucht nichts: Windows bringt den Encoder mit und die Fotos-App "
+               "liest es. AVIF lesen alle Browser und das meiste außerhalb von Windows, "
+               "geht aber über ffmpeg -- Screenshots kommen sonst ohne aus.",
+               "The chosen picture format is bypassed -- PNG and JPEG cannot hold the "
+               "range.\n\n"
+               "JPEG XR needs nothing: Windows ships the encoder and the Photos app reads "
+               "it. AVIF is read by every browser and by most things outside Windows, but "
+               "it goes through ffmpeg -- which screenshots otherwise never need."));
 
   ImGui::Checkbox(T("Virtuelle Kamera", "Virtual camera"), &app.cameraHdr);
   ImGui::SameLine();
@@ -1769,8 +1782,11 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   }
   ImGui::EndDisabled();
   ImGui::SameLine();
-  HelpMarker(T("Nur für CPU-Encoder. Hardware-Encoder behalten die Werkseinstellung.",
-               "Software encoders only. Hardware encoders keep the vendor default."));
+  HelpMarker(T("Nur für CPU-Encoder, und nur solange die Voreinstellung unten auf "
+               "automatisch steht.",
+               "Software encoders only, and only while the preset below is on automatic."));
+
+  DrawEncoderBlock(selected ? selected : (ffmpeg ? ffmpeg->Resolve(rec.encoder) : nullptr));
 
   if (ready) {
     ImGui::Spacing();
@@ -1906,6 +1922,119 @@ void SettingsWindow::DrawVirtualCameraBlock() {
   ImGui::SameLine();
   ImGui::TextDisabled("%s", T("(fragt wieder nach Administratorrechten)",
                               "(asks for administrator rights again)"));
+}
+
+void SettingsWindow::DrawEncoderBlock(const EncoderInfo* encoder) {
+  RecordSettings& rec = cfg().record;
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Encoder-Einstellungen", "Encoder settings"));
+
+  // Which of these mean anything depends on the encoder. Showing the rest
+  // greyed out says more than hiding them: it is the difference between "your
+  // card cannot" and "CapView cannot".
+  const Recorder::Family family =
+      encoder ? Recorder::FamilyOf(encoder->ffmpegName) : Recorder::Family::Software;
+  const bool nvenc = family == Recorder::Family::Nvenc;
+  const bool amf = family == Recorder::Family::Amf;
+  const bool qsv = family == Recorder::Family::Qsv;
+
+  const char* rateNames[] = {T("Konstant (CBR)", "Constant (CBR)"),
+                             T("Variabel (VBR)", "Variable (VBR)"),
+                             T("Feste Qualität", "Constant quality")};
+  int rate = (int)rec.rateControl;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::Combo(T("Ratensteuerung", "Rate control"), &rate, rateNames, kRateControlCount)) {
+    rec.rateControl = (RateControl)rate;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Konstant hält die Datenrate stabil -- das will man beim Streamen. Variabel "
+               "gibt bewegten Stellen mehr und darf bis auf das Anderthalbfache "
+               "hochgehen. Feste Qualität ignoriert die Datenrate ganz: die Datei wird so "
+               "groß, wie das Bild es verlangt.",
+               "Constant keeps the data rate steady, which is what streaming wants. "
+               "Variable gives busy moments more and may peak at half again. Constant "
+               "quality ignores the data rate entirely: the file comes out as large as the "
+               "picture demands."));
+
+  if (rec.rateControl == RateControl::Quality) {
+    ImGui::SetNextItemWidth(-260.0f);
+    ImGui::SliderInt(T("Qualität", "Quality"), &rec.qualityLevel, 1, 51,
+                     T("%d (kleiner = besser)", "%d (lower is better)"));
+    ImGui::SameLine();
+    HelpMarker(T("Die Skala unterscheidet sich zwischen den Encodern leicht. 18 bis 24 ist "
+                 "der übliche Bereich; darunter wächst die Datei schnell, ohne dass man "
+                 "viel sieht.",
+                 "The scale differs a little between encoders. 18 to 24 is the usual range; "
+                 "below that the file grows quickly for little that anyone can see."));
+  }
+
+  const char* presetNames[] = {T("Automatisch", "Automatic"),
+                               T("Am schnellsten", "Fastest"),
+                               T("Schneller", "Faster"),
+                               T("Schnell", "Fast"),
+                               T("Mittel", "Medium"),
+                               T("Langsam", "Slow"),
+                               T("Langsamer", "Slower"),
+                               T("Am langsamsten", "Slowest")};
+  int preset = (int)rec.preset;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::Combo(T("Voreinstellung", "Preset"), &preset, presetNames, kEncoderPresetCount)) {
+    rec.preset = (EncoderPreset)preset;
+  }
+  ImGui::SameLine();
+  HelpMarker(amf ? T("AMF kennt nur drei Stufen; die sieben hier fallen darauf zusammen.",
+                     "AMF has three steps; these seven fold onto them.")
+                 : T("Langsamer heißt besseres Bild bei gleicher Datenrate -- und mehr Last. "
+                     "Automatisch überlässt es dem Encoder.",
+                     "Slower means a better picture at the same data rate, and more load. "
+                     "Automatic leaves it to the encoder."));
+
+  ImGui::BeginDisabled(!nvenc && !amf);
+  const char* tuneNames[] = {T("Automatisch", "Automatic"), T("Qualität", "Quality"),
+                             T("Geringe Latenz", "Low latency")};
+  int tune = (int)rec.tune;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::Combo(T("Abstimmung", "Tuning"), &tune, tuneNames, kEncoderTuneCount)) {
+    rec.tune = (EncoderTune)tune;
+  }
+  ImGui::EndDisabled();
+
+  ImGui::BeginDisabled(!nvenc);
+  const char* passNames[] = {T("Automatisch", "Automatic"), T("Aus", "Off"),
+                             T("Zwei (Viertelauflösung)", "Two (quarter resolution)"),
+                             T("Zwei (volle Auflösung)", "Two (full resolution)")};
+  int pass = (int)rec.multipass;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::Combo(T("Durchläufe", "Multipass"), &pass, passNames, kMultipassCount)) {
+    rec.multipass = (Multipass)pass;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Ein zweiter Durchlauf trifft die Datenrate genauer, vor allem nah am Limit. "
+               "Nur NVENC kann das.",
+               "A second pass hits the data rate more accurately, especially near the "
+               "ceiling. NVENC only."));
+  ImGui::EndDisabled();
+
+  ImGui::BeginDisabled(!nvenc && !amf && !qsv);
+  ImGui::Checkbox(T("Vorausschau", "Look-ahead"), &rec.lookAhead);
+  ImGui::SameLine();
+  HelpMarker(T("Der Encoder sieht ein Stück in die Zukunft und verteilt die Bits besser. "
+               "Kostet etwas Verzögerung -- beim Aufnehmen egal, beim Streamen nicht.",
+               "The encoder looks a little way ahead and spreads its bits better. Costs some "
+               "delay -- which does not matter for recording and does for streaming."));
+  ImGui::Checkbox(T("Adaptive Quantisierung", "Adaptive quantisation"), &rec.adaptiveQuant);
+  ImGui::SameLine();
+  HelpMarker(T("Gibt den Stellen mehr Bits, an denen das Auge hinsieht -- Flächen und "
+               "Verläufe -- und nimmt sie dort weg, wo ohnehin Unruhe ist.",
+               "Gives more bits to where the eye looks -- flat areas and gradients -- and "
+               "takes them from where there is already busyness."));
+  ImGui::EndDisabled();
+
+  if (!nvenc && !amf && !qsv) {
+    ImGui::TextDisabled("%s", T("Der Softwareencoder nimmt nur Ratensteuerung und "
+                                "Voreinstellung an.",
+                                "The software encoder takes only rate control and preset."));
+  }
 }
 
 void SettingsWindow::DrawToolsTab(FfmpegInfo* ffmpeg) {
