@@ -214,8 +214,9 @@ void Updater::SetStatus(const UpdateStatus& s) {
   status_ = s;
 }
 
-void Updater::CheckAsync() {
+void Updater::CheckAsync(bool announce) {
   if (busy_.exchange(true, std::memory_order_acq_rel)) return;
+  announceNext_ = announce;
   if (thread_.joinable()) thread_.join();
   thread_ = std::thread(&Updater::Run, this, false);
 }
@@ -232,6 +233,7 @@ void Updater::Run(bool install) {
   if (!install) {
     s.state = UpdateStatus::State::Checking;
     s.error = UpdateError::None;
+    s.announce = announceNext_;
     SetStatus(s);
 
     std::string body;

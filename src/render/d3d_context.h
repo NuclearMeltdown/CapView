@@ -68,6 +68,15 @@ class D3DContext {
   int height() const { return height_; }
   bool tearingSupported() const { return tearingSupported_; }
 
+  // How many frames the CPU may run ahead of the GPU. One is what the preview
+  // wants on its own -- it is the cheapest latency there is. It stops being
+  // right the moment a second window shares the device: the queue is per
+  // device, so with a depth of one the two swapchains take turns waiting for
+  // each other, and a present that should cost a fraction of a millisecond
+  // costs most of a refresh. Raised while the settings have a window, put back
+  // when they do not.
+  void SetFrameLatency(UINT frames);
+
  private:
   bool CreateRenderTarget();
   void ReleaseRenderTarget();
@@ -83,6 +92,7 @@ class D3DContext {
   int width_ = 0;
   int height_ = 0;
   bool tearingSupported_ = false;
+  UINT frameLatency_ = 1;
   bool occluded_ = false;
   UINT swapchainFlags_ = 0;
 };

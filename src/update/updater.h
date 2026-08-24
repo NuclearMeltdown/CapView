@@ -54,6 +54,10 @@ struct UpdateStatus {
   UpdateError error = UpdateError::None;
   int httpStatus = 0;  // only with UpdateError::HttpStatus
   int percent = 0;     // download progress
+  // Whether finding something is worth interrupting anybody for. True only for
+  // the check made at startup: somebody who pressed "check now" is already
+  // looking at the answer, and a dialog on top of it is just in the way.
+  bool announce = false;
 };
 
 // What to put on the screen for a failed status, in the language selected right
@@ -76,7 +80,9 @@ class Updater {
   static void CleanUpPreviousBuild();
 
   // Both return immediately; watch status().
-  void CheckAsync();
+  // `announce` marks the result as worth a popup. The check at startup sets it;
+  // the button in the settings does not.
+  void CheckAsync(bool announce = false);
   void InstallAsync();
 
   UpdateStatus status() const;
@@ -92,6 +98,8 @@ class Updater {
 
   mutable std::mutex mutex_;
   UpdateStatus status_;
+  // Set by CheckAsync, read by the thread it starts.
+  bool announceNext_ = false;
   std::string downloadUrl_;  // filled by the check, used by the install
   std::thread thread_;
   std::atomic<bool> busy_{false};

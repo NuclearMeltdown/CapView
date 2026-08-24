@@ -6,6 +6,7 @@
 #include <mutex>
 
 namespace cap {
+
 namespace {
 
 std::mutex g_log_mutex;

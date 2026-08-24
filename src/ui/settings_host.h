@@ -35,9 +35,11 @@ class SettingsHost {
   // rather than rebuilt: the fonts are identical and one copy is enough.
   // `owner` only decides stacking -- the window is not a child and can be moved
   // anywhere on the desktop.
+  // `allowTearing` comes from the main context, which has already asked DXGI
+  // whether the adapter supports it.
   bool Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
               ID3D11DeviceContext* context, ImFontAtlas* atlas, float uiScale,
-              std::string* error);
+              bool allowTearing, std::string* error);
   void Destroy();
 
   bool created() const { return hwnd_ != nullptr; }
@@ -89,6 +91,15 @@ class SettingsHost {
   bool visible_ = false;
   bool closeRequested_ = false;
   bool occluded_ = false;
+  // Draws one frame from inside Windows' modal move loop, no more often than
+  // the ceiling below. See the comment on the implementation.
+  void PumpModalFrame();
+  unsigned long lastModalTick_ = 0;
+  // Whether this swapchain may hand a frame straight to the screen instead of
+  // waiting to be composited. Measured to be the difference between a present
+  // that costs 0.2 ms and one that costs 14.
+  UINT swapchainFlags_ = 0;
+  UINT presentFlags_ = 0;
   bool themeApplied_ = false;
   bool inFrameCallback_ = false;
   unsigned long lastDrawTick_ = 0;

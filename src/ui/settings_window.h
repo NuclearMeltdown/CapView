@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+struct ImGuiContext;
+
 #include "audio/audio_devices.h"
 #include "capture/video_capture.h"
 #include "update/updater.h"
@@ -220,6 +222,10 @@ class SettingsWindow {
   // depends on the video standard and the captured width, neither of which the
   // settings know.
   float carrierPeriod_ = 3.045f;
+  // Which tab is open, carried across the two ImGui contexts by hand.
+  ImGuiContext* tabContext_ = nullptr;
+  int activeTab_ = 0;
+  int wantTab_ = -1;
   // What the app knows about the screen and the source; the settings cannot
   // ask DXGI themselves.
   bool hdrDisplayCapable_ = false;

@@ -53,21 +53,27 @@ LRESULT CALLBACK SettingsHost::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
       if (wParam != SIZE_MINIMIZED) self->Resize();
       return 0;
     case WM_ENTERSIZEMOVE:
-      // 8 ms is about half a field; fast enough that the picture keeps moving
-      // while the window is dragged, slow enough not to fight the drag itself.
-      ::SetTimer(hwnd, 1, 8, nullptr);
+      // A timer as well, but only as a floor for when the mouse is held still:
+      // WM_TIMER is the lowest priority message there is and Windows only
+      // generates one when the queue is otherwise empty. During a drag the queue
+      // never is. Measured, at an interval of 8 ms it fired seven times in a
+      // second, and the preview stood still for over a second at a stretch.
+      ::SetTimer(hwnd, 1, 16, nullptr);
+      self->lastModalTick_ = 0;
       return 0;
     case WM_EXITSIZEMOVE:
       ::KillTimer(hwnd, 1);
       return 0;
+    case WM_MOVING:
+    case WM_SIZING:
+      // This is the hook that actually works. Windows sends these continuously
+      // while the window is being dragged or resized -- once per mouse movement
+      // -- and unlike WM_TIMER they are real messages that cannot be starved by
+      // the flood of mouse input that causes the problem in the first place.
+      self->PumpModalFrame();
+      break;  // and on to DefWindowProc, which does the actual moving
     case WM_TIMER:
-      // The callback draws a whole frame, which comes back through here for this
-      // window -- so it is kept out of itself.
-      if (wParam == 1 && self->onFrame_ && !self->inFrameCallback_) {
-        self->inFrameCallback_ = true;
-        self->onFrame_();
-        self->inFrameCallback_ = false;
-      }
+      if (wParam == 1) self->PumpModalFrame();
       return 0;
     case WM_DESTROY:
       self->hwnd_ = nullptr;
@@ -78,9 +84,33 @@ LRESULT CALLBACK SettingsHost::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
   return ::DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+// One frame from inside the modal loop, at most every twelve milliseconds.
+//
+// Dragging a window puts Windows into a loop of its own that does not return
+// until the mouse is released, so CapView's own loop stops running and the
+// preview stops with it. The only way back in is from a message this window
+// receives while that loop is running.
+//
+// The ceiling matters as much as the hook: rendering on every WM_MOVING would
+// put a whole frame -- shaders, readbacks, two presents -- between each mouse
+// movement and the window following it, which trades one kind of stutter for
+// another.
+void SettingsHost::PumpModalFrame() {
+  if (!onFrame_ || inFrameCallback_) return;
+  const DWORD now = ::GetTickCount();
+  // Thirty a second, not eighty. The preview has nothing more to show than the
+  // capture card delivers, and every frame drawn here is time the window is not
+  // following the mouse.
+  if (lastModalTick_ != 0 && now - lastModalTick_ < 30) return;
+  lastModalTick_ = now;
+  inFrameCallback_ = true;
+  onFrame_();
+  inFrameCallback_ = false;
+}
+
 bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
                           ID3D11DeviceContext* context, ImFontAtlas* atlas, float uiScale,
-                          std::string* error) {
+                          bool allowTearing, std::string* error) {
   if (hwnd_) return true;
   device_ = device;
   ctx_ = context;
@@ -137,9 +167,29 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
   desc.SampleDesc.Count = 1;
   desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-  desc.BufferCount = 2;
+  // Three, not two. The device asks for one frame of latency
+  // (SetMaximumFrameLatency in D3DContext, which is device-wide and binds this
+  // chain too), and with only two buffers a present that arrives before the
+  // previous one has been retired waits for it. The third buffer is a few
+  // megabytes against several milliseconds a frame.
+  desc.BufferCount = 3;
   desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
   desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+  // Measured before this was here: the present below cost 12 to 17 milliseconds
+  // on average and up to 41 at worst, roughly thirty-five times a second. A
+  // flip model swapchain with a sync interval of zero and *no* tearing flag is
+  // not "not vsynced" -- it still hands the frame to the compositor at a
+  // vertical blank, and with the device-wide SetMaximumFrameLatency(1) the call
+  // blocks until the previous one has been retired. The thread that owns both
+  // windows was therefore parked for better than half of every second, not
+  // pumping messages, which is why the *desktop's* cursor stuttered and not
+  // only the preview.
+  //
+  // The flags have to match in three places -- creation, resize and present --
+  // or the resize fails and the present blocks anyway.
+  swapchainFlags_ = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u;
+  presentFlags_ = allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0u;
+  desc.Flags = swapchainFlags_;
   if (FAILED(CAP_HR(factory->CreateSwapChainForHwnd(device_.Get(), hwnd_, &desc, nullptr, nullptr,
                                                     &swapchain_)))) {
     if (error) *error = T("Swapchain für das Einstellungsfenster fehlgeschlagen",
@@ -238,7 +288,7 @@ void SettingsHost::ReleaseRenderTarget() { rtv_.Reset(); }
 void SettingsHost::Resize() {
   if (!swapchain_) return;
   ReleaseRenderTarget();
-  swapchain_->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
+  swapchain_->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, swapchainFlags_);
   CreateRenderTarget();
 }
 
@@ -336,7 +386,7 @@ void SettingsHost::EndFrame() {
   // The result is kept rather than discarded: a fully covered window gets DXGI's
   // occluded-present throttle, and every present then takes far longer than it
   // looks like it should. The main window handles that the same way.
-  const HRESULT hr = swapchain_->Present(0, 0);
+  const HRESULT hr = swapchain_->Present(0, presentFlags_);
   occluded_ = hr == DXGI_STATUS_OCCLUDED;
 
   // And unbind. Defensive now rather than necessary -- the preview sets its own
