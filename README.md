@@ -62,7 +62,7 @@ Whatever the driver keeps to itself — input selection, decoder tuning, the
 vendor's own controls — is reachable through **Configure card**, which opens the
 driver's own property pages. The picture keeps running while they are open.
 
-![The source tab, with the capture device, its embedded audio, and separate pickers for colour format, resolution and frame rate](docs/settings-source.jpg)
+![The Source tab: the capture device, the analogue video standard set to PAL 60, and the decoder reporting no lock because nothing was connected when this was taken](docs/settings-source.png)
 
 ### Picture
 
@@ -118,6 +118,9 @@ arise and bob is the sharpest option available.
 
 Field order is asked of the media type first and can be overridden, because
 guessing wrong does not soften the picture, it makes it judder.
+
+![The Picture tab: scaling and sharpening, the deinterlacer, the composite filter with its two
+controls, and the crop with its Detect button](docs/settings-picture.png)
 
 ### Composite
 
@@ -204,6 +207,9 @@ QTGMC sort, which is not a real-time proposition.
 
 ### What the encoder is told
 
+![The Encoder tab: ffmpeg at the top, then which encoder — naming the five that passed the test on
+this machine and the four that did not — and the settings it is given](docs/settings-encoder.png)
+
 Bitrate alone leaves most of an encoder unused, so the settings that matter are
 exposed under one set of names and translated into each vendor's own. What NVIDIA
 calls `p1`–`p7`, Intel calls `veryfast`–`veryslow` and AMD calls three words; a
@@ -255,7 +261,7 @@ The capture audio serves as the master clock, and the video timeline is derived
 from the number of audio samples written. The output is therefore constant frame
 rate and does not drift: measured at 1 ms over 15 seconds.
 
-![The recording tab, with container, bitrate, output folder, and an encoder list naming the five that passed the test on this machine](docs/settings-recording.jpg)
+![The Recording tab: container, bitrate, frame rate and output folder, with screenshots and the virtual camera below them](docs/settings-recording.png)
 
 ### Screenshots
 
@@ -268,6 +274,9 @@ A profile holds the device, input, capture format and all picture and audio
 settings. One per source, selected with Ctrl+1 to Ctrl+9.
 
 ### High dynamic range
+
+![The HDR tab: source curve, what goes to the display, paper white and source peak, and the three
+switches for keeping the range — greyed out here, because the source was SDR](docs/settings-hdr.png)
 
 A card that can carry HDR sends P010 or P016 — ten or sixteen bits of luma per
 sample rather than eight — encoded against one of two curves. Both are read.

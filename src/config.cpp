@@ -533,6 +533,7 @@ bool Config::Load(std::string* error) {
   app.showStats = a["showStats"].AsBool(false);
   app.showToolbar = a["showToolbar"].AsBool(true);
   app.settingsSeparateWindow = a["settingsSeparateWindow"].AsBool(false);
+  app.settingsTab = a["settingsTab"].AsInt(0);
   app.settingsWindowX = a["settingsWindowX"].AsInt(-1);
   app.settingsWindowY = a["settingsWindowY"].AsInt(-1);
   app.settingsWindowW = a["settingsWindowW"].AsInt(0);
@@ -641,6 +642,7 @@ std::string Config::Serialize() const {
   a["showStats"] = app.showStats;
   a["showToolbar"] = app.showToolbar;
   a["settingsSeparateWindow"] = app.settingsSeparateWindow;
+  a["settingsTab"] = app.settingsTab;
   a["settingsWindowX"] = app.settingsWindowX;
   a["settingsWindowY"] = app.settingsWindowY;
   a["settingsWindowW"] = app.settingsWindowW;

@@ -229,6 +229,7 @@ class SettingsWindow {
   // Which tab is open, carried across the two ImGui contexts by hand.
   ImGuiContext* tabContext_ = nullptr;
   int activeTab_ = 0;
+  bool tabRestored_ = false;
   int wantTab_ = -1;
   // What the app knows about the screen and the source; the settings cannot
   // ask DXGI themselves.
