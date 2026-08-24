@@ -136,6 +136,90 @@ void DrawStatsPanel(const OverlayStats& s) {
   ImGui::End();
 }
 
+void DrawIdleScreen(unsigned long long icon, int iconPixels, const std::string& detail) {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+
+  // A scrim over whatever the card is putting out, because that is not always
+  // something you can read text on. A muted input is a flat blue and would be
+  // fine; an unterminated analogue one is snow, and a wall of moving noise
+  // behind the wordmark is unreadable. Drawn into the background list, which
+  // sits over the video and under every window.
+  //
+  // Not opaque: what the card sends is still worth seeing, and the difference
+  // between blue, black and snow is exactly what tells you which cable to go
+  // and look at.
+  ImVec4 scrim = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+  scrim.w = 0.88f;
+  ImGui::GetBackgroundDrawList()->AddRectFilled(
+      vp->WorkPos, ImVec2(vp->WorkPos.x + vp->WorkSize.x, vp->WorkPos.y + vp->WorkSize.y),
+      ImGui::GetColorU32(scrim));
+
+  // Scaled against the window rather than fixed: the icon should read as the
+  // subject of the window at any size, and 256 pixels in a 3840 wide one is a
+  // stamp in the middle of a field.
+  float size = (float)iconPixels;
+  const float wide = vp->WorkSize.x * 0.18f;
+  const float tall = vp->WorkSize.y * 0.30f;
+  const float want = wide < tall ? wide : tall;
+  if (want < size) size = want;
+  if (size < 48.0f) size = 48.0f;
+
+  ImGui::SetNextWindowPos(
+      ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f),
+      ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  // No panel behind it, and no border either -- the border is a style variable
+  // and survives a transparent background, which leaves a rectangle drawn around
+  // nothing. The card has both because it sits over a picture and has to stay
+  // readable; here there is nothing underneath to separate it from.
+  ImGui::SetNextWindowBgAlpha(0.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+
+  if (!ImGui::Begin("##idle", nullptr, kOverlayFlags)) {
+    ImGui::End();
+    ImGui::PopStyleVar();
+    return;
+  }
+
+  // Centring has to be done by hand against the window's own width, and the
+  // window is auto-sized -- so the widest item sets the width and everything
+  // narrower is offset into it. The detail line is normally the widest.
+  auto centreFor = [](float itemWidth) {
+    const float width = ImGui::GetContentRegionAvail().x;
+    if (itemWidth < width) {
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (width - itemWidth) * 0.5f);
+    }
+  };
+  auto centred = [&](const char* text, bool dim) {
+    centreFor(ImGui::CalcTextSize(text).x);
+    if (dim) {
+      ImGui::TextDisabled("%s", text);
+    } else {
+      ImGui::TextUnformatted(text);
+    }
+  };
+
+  if (icon != 0) {
+    centreFor(size);
+    ImGui::Image((ImTextureID)icon, ImVec2(size, size));
+    ImGui::Spacing();
+  }
+
+  // The wordmark, at whatever the interface scale makes of it. Not a second
+  // font: one is enough, and a name set in the same face as everything else
+  // looks deliberate rather than like a logo dropped in.
+  ImGui::SetWindowFontScale(1.6f);
+  centred("CapView", false);
+  ImGui::SetWindowFontScale(1.0f);
+
+  if (!detail.empty()) {
+    ImGui::Spacing();
+    centred(detail.c_str(), true);
+  }
+
+  ImGui::End();
+  ImGui::PopStyleVar();
+}
+
 void DrawStatusCard(const std::string& title, const std::string& detail, bool spinner) {
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(

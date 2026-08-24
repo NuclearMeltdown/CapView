@@ -212,6 +212,16 @@ class App {
   Config config_;
   D3DContext d3d_;
   VideoRenderer renderer_;
+
+  // The application icon as a texture, for the empty state. Loaded once; zero
+  // when the icon could not be read, which costs the idle screen its picture
+  // and nothing else.
+  ComPtr<ID3D11ShaderResourceView> idleIcon_;
+  int idleIconSize_ = 0;
+  void LoadIdleIcon();
+  // Whether the picture arriving is worth showing. Combines what the pixels say
+  // with what the analogue decoder says, because neither is sufficient alone.
+  bool HaveLiveSignal() const;
   VideoCapture capture_;
   AudioEngine audio_;
   MicCapture mic_;

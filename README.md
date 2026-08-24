@@ -60,7 +60,13 @@ cycles the plausible standards and keeps the first that locks.
 Whatever the driver keeps to itself is reachable through **Configure card**,
 which opens the driver's own property pages while the picture keeps running.
 
-More: [Source and signal](../../wiki/Source-and-signal).
+When nothing is coming in, the viewer says so. That is measured from the pixels
+rather than from whether frames arrive, because an analogue card with nothing
+connected keeps delivering frames regardless — and no signal on composite is not
+black but snow, which a naive darkness test would read as picture.
+
+More: [Source and signal](../../wiki/Source-and-signal),
+[Signal detection](../../wiki/Signal-detection).
 
 ![The Source tab: the capture device, the analogue video standard set to PAL 60, and the decoder reporting no lock because nothing was connected when this was taken](docs/settings-source.png)
 
