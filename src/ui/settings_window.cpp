@@ -357,6 +357,15 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
   // of their own -- so switching between the two always landed back on the
   // first tab. Remembered here instead, and asked for once whenever the context
   // underneath changes.
+  // Once per run, the tab from the configuration; after that, whatever was last
+  // opened. The context check below covers the other case -- which tab is open
+  // is state ImGui keeps per context, and the settings are drawn into a
+  // different one depending on whether they live in a window of their own.
+  if (!tabRestored_) {
+    tabRestored_ = true;
+    activeTab_ = cfg().app.settingsTab;
+    wantTab_ = activeTab_;
+  }
   ImGuiContext* nowContext = ImGui::GetCurrentContext();
   if (nowContext != tabContext_) {
     tabContext_ = nowContext;
@@ -452,6 +461,7 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
     ImGui::EndTabBar();
   }
   wantTab_ = -1;
+  cfg().app.settingsTab = activeTab_;
 
   ImGui::Separator();
   ImGui::TextDisabled(T("Änderungen wirken sofort.", "Changes take effect immediately."));

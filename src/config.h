@@ -358,6 +358,10 @@ struct AppSettings {
   // every time the setting is switched, and a window that jumps back to the
   // middle of the screen each time is a window you have to keep putting back.
   // -1 means "let Windows place it", which is right the first time only.
+  // Which tab the settings were last on. Reopening on the tab somebody was
+  // working in is worth the four bytes; reopening on the first one every time
+  // means finding the same thing again on every visit.
+  int settingsTab = 0;
   int settingsWindowX = -1;
   int settingsWindowY = -1;
   int settingsWindowW = 0;
