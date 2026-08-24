@@ -5,6 +5,7 @@
 #include <wincodec.h>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "i18n.h"
@@ -175,6 +176,125 @@ bool SaveScreenshotHdr(const std::wstring& path, const uint16_t* halfRgba, int w
   return true;
 }
 
+namespace {
+
+// Linear light with 1.0 at diffuse white, onto the PQ curve in BT.2020 and into
+// the ten bit packing DXGI and ffmpeg agree on. The same arithmetic the shader
+// does for the recording path, in software because a still is one frame.
+void HalfToPq10(const uint16_t* halfRgba, int width, int height, int stride,
+                float paperWhiteNits, std::vector<uint32_t>* out) {
+  out->resize((size_t)width * height);
+  for (int y = 0; y < height; ++y) {
+    const uint16_t* src = halfRgba + (size_t)y * ((size_t)stride / sizeof(uint16_t));
+    uint32_t* dst = out->data() + (size_t)y * width;
+    for (int x = 0; x < width; ++x) {
+      float rgb[3];
+      for (int c = 0; c < 3; ++c) {
+        rgb[c] = std::max(DirectX::PackedVector::XMConvertHalfToFloat(src[(size_t)x * 4 + c]),
+                          0.0f) * paperWhiteNits;
+      }
+      const float r = 0.627404f * rgb[0] + 0.329283f * rgb[1] + 0.043313f * rgb[2];
+      const float g = 0.069097f * rgb[0] + 0.919540f * rgb[1] + 0.011362f * rgb[2];
+      const float b = 0.016391f * rgb[0] + 0.088013f * rgb[1] + 0.895595f * rgb[2];
+
+      auto pq = [](float nits) {
+        const float m1 = 0.1593017578125f, m2 = 78.84375f;
+        const float c1 = 0.8359375f, c2 = 18.8515625f, c3 = 18.6875f;
+        const float yv = std::clamp(nits / 10000.0f, 0.0f, 1.0f);
+        const float p = std::pow(yv, m1);
+        return std::pow((c1 + c2 * p) / (1.0f + c3 * p), m2);
+      };
+      const uint32_t rc = (uint32_t)std::clamp((int)(pq(r) * 1023.0f + 0.5f), 0, 1023);
+      const uint32_t gc = (uint32_t)std::clamp((int)(pq(g) * 1023.0f + 0.5f), 0, 1023);
+      const uint32_t bc = (uint32_t)std::clamp((int)(pq(b) * 1023.0f + 0.5f), 0, 1023);
+      // R in the low bits, as DXGI packs R10G10B10A2 -- ffmpeg calls it x2bgr10le.
+      dst[x] = rc | (gc << 10) | (bc << 20) | (3u << 30);
+    }
+  }
+}
+
+}  // namespace
+
+bool SaveScreenshotAvif(const std::wstring& path, const std::wstring& ffmpegPath,
+                        const uint16_t* halfRgba, int width, int height, int stride,
+                        float paperWhiteNits, std::string* error) {
+  auto fail = [&](const std::string& what) {
+    if (error) *error = what;
+    return false;
+  };
+  if (!halfRgba || width <= 0 || height <= 0) return fail(T("Kein Bild.", "No picture."));
+  if (ffmpegPath.empty()) {
+    return fail(T("AVIF braucht ffmpeg. Unter Aufnahme herunterladen, oder JPEG XR wählen.",
+                  "AVIF needs ffmpeg. Download it under Recording, or choose JPEG XR."));
+  }
+
+  std::vector<uint32_t> packed;
+  HalfToPq10(halfRgba, width, height, stride, paperWhiteNits, &packed);
+
+  std::wstring args = L"-hide_banner -loglevel error -y -f rawvideo -pix_fmt x2bgr10le";
+  args += L" -s " + std::to_wstring(width) + L"x" + std::to_wstring(height);
+  args += L" -i pipe:0 -frames:v 1 -c:v libaom-av1 -still-picture 1 -crf 18";
+  args += L" -pix_fmt yuv420p10le";
+  // Without these it is a dark picture rather than an HDR one; nothing else in
+  // the file says the samples are on the PQ curve.
+  args += L" -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc";
+  args += L" -f avif \"" + path + L"\"";
+
+  // Through a file rather than a pipe. One still is not worth the plumbing, and
+  // a temporary file cannot deadlock against a process that stops reading.
+  wchar_t tempDir[MAX_PATH] = {};
+  ::GetTempPathW(MAX_PATH, tempDir);
+  wchar_t tempFile[MAX_PATH] = {};
+  if (!::GetTempFileNameW(tempDir, L"cvs", 0, tempFile)) {
+    return fail(T("Kein Platz für die Zwischendatei.", "Nowhere to put the working file."));
+  }
+  const std::wstring raw = tempFile;
+  {
+    HANDLE file = ::CreateFileW(raw.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+      return fail(T("Zwischendatei ließ sich nicht anlegen.",
+                    "The working file could not be created."));
+    }
+    DWORD written = 0;
+    const DWORD bytes = (DWORD)(packed.size() * sizeof(uint32_t));
+    const bool ok = ::WriteFile(file, packed.data(), bytes, &written, nullptr) && written == bytes;
+    ::CloseHandle(file);
+    if (!ok) {
+      ::DeleteFileW(raw.c_str());
+      return fail(T("Zwischendatei ließ sich nicht schreiben.",
+                    "The working file could not be written."));
+    }
+  }
+
+  args = args.substr(0, args.find(L"-i pipe:0")) + L"-i "" + raw + L"" " +
+         args.substr(args.find(L"-i pipe:0") + 9);
+
+  std::wstring command = L""" + ffmpegPath + L"" " + args;
+  STARTUPINFOW si = {};
+  si.cb = sizeof(si);
+  si.dwFlags = STARTF_USESHOWWINDOW;
+  si.wShowWindow = SW_HIDE;
+  PROCESS_INFORMATION pi = {};
+  std::vector<wchar_t> line(command.begin(), command.end());
+  line.push_back(0);
+  DWORD code = 1;
+  if (::CreateProcessW(nullptr, line.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                       nullptr, &si, &pi)) {
+    ::WaitForSingleObject(pi.hProcess, 60000);
+    ::GetExitCodeProcess(pi.hProcess, &code);
+    ::CloseHandle(pi.hThread);
+    ::CloseHandle(pi.hProcess);
+  }
+  ::DeleteFileW(raw.c_str());
+
+  if (code != 0) {
+    return fail(T("ffmpeg konnte das AVIF nicht schreiben.",
+                  "ffmpeg could not write the AVIF."));
+  }
+  return true;
+}
+
 std::wstring DefaultScreenshotFolder() {
   PWSTR pictures = nullptr;
   std::wstring folder;
@@ -187,14 +307,18 @@ std::wstring DefaultScreenshotFolder() {
   return folder + L"CapView";
 }
 
+std::wstring MakeHdrScreenshotPath(const std::wstring& folder, HdrShotFormat format) {
+  const std::wstring base = MakeScreenshotPath(folder, ScreenshotFormat::Png);
+  if (base.empty()) return base;
+  return base.substr(0, base.size() - 4) + (format == HdrShotFormat::Avif ? L".avif" : L".jxr");
+}
+
 std::wstring MakeScreenshotPath(const std::wstring& folder, ScreenshotFormat format) {
   std::wstring dir = folder;
   if (!dir.empty() && (dir.back() == L'\\' || dir.back() == L'/')) dir.pop_back();
   if (!EnsureFolder(dir)) return {};
 
-  const wchar_t* ext = format == ScreenshotFormat::Jpeg   ? L".jpg"
-                       : format == ScreenshotFormat::Jxr ? L".jxr"
-                                                         : L".png";
+  const wchar_t* ext = format == ScreenshotFormat::Jpeg ? L".jpg" : L".png";
 
   SYSTEMTIME st;
   ::GetLocalTime(&st);

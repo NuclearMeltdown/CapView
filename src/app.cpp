@@ -960,11 +960,12 @@ void App::WriteScreenshot() {
     return;
   }
 
-  const ScreenshotFormat format = wide ? ScreenshotFormat::Jxr : rec.screenshotFormat;
   const std::wstring folder =
       ResolveOutputFolder(&rec.screenshotFolder, DefaultScreenshotFolder());
   const std::wstring path =
-      folder.empty() ? std::wstring() : MakeScreenshotPath(folder, format);
+      folder.empty() ? std::wstring()
+      : wide          ? MakeHdrScreenshotPath(folder, config_.app.hdrShotFormat)
+                      : MakeScreenshotPath(folder, rec.screenshotFormat);
   if (path.empty()) {
     Toast(T("Zielordner nicht verfügbar.", "Folder not available."));
     CAP_ERR("Screenshot: Ordner nicht verfügbar: %s", ToUtf8(folder).c_str());
@@ -972,10 +973,14 @@ void App::WriteScreenshot() {
   }
 
   std::string error;
-  const bool ok = wide
-      ? SaveScreenshotHdr(path, halfPixels.data(), width, height, halfStride,
-                          config_.app.paperWhiteNits, &error)
-      : SaveScreenshot(path, pixels.data(), width, height, format, rec.jpegQuality, &error);
+  const bool ok =
+      !wide ? SaveScreenshot(path, pixels.data(), width, height, rec.screenshotFormat,
+                             rec.jpegQuality, &error)
+      : config_.app.hdrShotFormat == HdrShotFormat::Avif
+          ? SaveScreenshotAvif(path, ToWide(ffmpeg_.path), halfPixels.data(), width, height,
+                               halfStride, config_.app.paperWhiteNits, &error)
+          : SaveScreenshotHdr(path, halfPixels.data(), width, height, halfStride,
+                              config_.app.paperWhiteNits, &error);
   if (!ok) {
     Toast(T("Screenshot fehlgeschlagen: ", "Screenshot failed: ") + error);
     CAP_ERR("Screenshot fehlgeschlagen: %s", error.c_str());

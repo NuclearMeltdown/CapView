@@ -52,6 +52,136 @@ void Recorder::Fail(const std::string& message) {
 
 // ------------------------------------------------------------- command line
 
+Recorder::Family Recorder::FamilyOf(const std::string& name) {
+  if (name.find("_nvenc") != std::string::npos) return Family::Nvenc;
+  if (name.find("_amf") != std::string::npos) return Family::Amf;
+  if (name.find("_qsv") != std::string::npos) return Family::Qsv;
+  return Family::Software;
+}
+
+namespace {
+
+// The seven speed steps, in each vendor's own words. Empty means "this one has
+// nothing to say here", and then nothing is passed at all -- which is not the
+// same as passing its default, and is the only honest thing to do.
+const wchar_t* PresetName(Recorder::Family family, EncoderPreset preset) {
+  if (preset == EncoderPreset::Auto) return nullptr;
+  const int step = (int)preset - 1;  // 0 = fastest .. 6 = slowest
+  switch (family) {
+    case Recorder::Family::Nvenc: {
+      // p1 is fastest, p7 slowest. Straight across.
+      static const wchar_t* kNames[] = {L"p1", L"p2", L"p3", L"p4", L"p5", L"p6", L"p7"};
+      return kNames[step];
+    }
+    case Recorder::Family::Qsv: {
+      static const wchar_t* kNames[] = {L"veryfast", L"faster", L"fast",
+                                        L"medium",   L"slow",   L"slower", L"veryslow"};
+      return kNames[step];
+    }
+    case Recorder::Family::Amf: {
+      // AMF has three, so the seven steps fold onto them.
+      static const wchar_t* kNames[] = {L"speed",   L"speed",  L"balanced", L"balanced",
+                                        L"quality", L"quality", L"quality"};
+      return kNames[step];
+    }
+    default: {
+      static const wchar_t* kNames[] = {L"ultrafast", L"veryfast", L"faster", L"medium",
+                                        L"slow",      L"slower",   L"veryslow"};
+      return kNames[step];
+    }
+  }
+}
+
+}  // namespace
+
+std::wstring Recorder::EncoderOptions(const RecordSettings& settings,
+                                      const EncoderInfo& encoder) const {
+  const Family family = FamilyOf(encoder.ffmpegName);
+  std::wstring out;
+
+  // ---- how the bitrate is spent ----
+  //
+  // The names differ per vendor and so does the way a quality target is asked
+  // for. Quicksync has no -rc at all: what it does follows from which of
+  // bitrate or quality it is given.
+  switch (family) {
+    case Family::Nvenc:
+      out += settings.rateControl == RateControl::Cbr       ? L" -rc cbr"
+             : settings.rateControl == RateControl::Vbr     ? L" -rc vbr"
+                                                            : L" -rc constqp";
+      if (settings.rateControl == RateControl::Quality) {
+        out += L" -cq " + std::to_wstring(settings.qualityLevel);
+      }
+      break;
+    case Family::Amf:
+      out += settings.rateControl == RateControl::Cbr       ? L" -rc cbr"
+             : settings.rateControl == RateControl::Vbr     ? L" -rc vbr_peak"
+                                                            : L" -rc cqp";
+      if (settings.rateControl == RateControl::Quality) {
+        const std::wstring qp = std::to_wstring(settings.qualityLevel);
+        out += L" -qp_i " + qp + L" -qp_p " + qp;
+      }
+      break;
+    case Family::Qsv:
+      if (settings.rateControl == RateControl::Quality) {
+        out += L" -global_quality " + std::to_wstring(settings.qualityLevel);
+      }
+      break;
+    default:
+      if (settings.rateControl == RateControl::Quality) {
+        out += L" -crf " + std::to_wstring(settings.qualityLevel);
+      }
+      break;
+  }
+
+  // ---- speed against quality ----
+  if (const wchar_t* preset = PresetName(family, settings.preset)) {
+    out += family == Family::Amf ? L" -quality " : L" -preset ";
+    out += preset;
+  }
+
+  // ---- what to optimise for ----
+  if (settings.tune != EncoderTune::Auto) {
+    if (family == Family::Nvenc) {
+      out += settings.tune == EncoderTune::Quality ? L" -tune hq" : L" -tune ll";
+    } else if (family == Family::Amf) {
+      out += settings.tune == EncoderTune::Quality ? L" -usage transcoding"
+                                                   : L" -usage lowlatency";
+    }
+  }
+
+  // ---- looking ahead ----
+  if (settings.lookAhead) {
+    if (family == Family::Nvenc) {
+      out += L" -rc-lookahead 32";
+    } else if (family == Family::Qsv) {
+      out += L" -look_ahead 1";
+    } else if (family == Family::Amf) {
+      out += L" -preanalysis 1";
+    }
+  }
+
+  // ---- spending bits where the eye looks ----
+  if (settings.adaptiveQuant) {
+    if (family == Family::Nvenc) {
+      out += L" -spatial-aq 1 -temporal-aq 1";
+    } else if (family == Family::Amf) {
+      out += L" -vbaq 1";
+    } else if (family == Family::Qsv) {
+      out += L" -mbbrc 1";
+    }
+  }
+
+  // ---- two passes ----
+  if (family == Family::Nvenc && settings.multipass != Multipass::Auto) {
+    out += settings.multipass == Multipass::Off       ? L" -multipass disabled"
+           : settings.multipass == Multipass::Quarter ? L" -multipass qres"
+                                                      : L" -multipass fullres";
+  }
+
+  return out;
+}
+
 std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
                                         const EncoderInfo& encoder,
                                         const std::wstring& audioPipe,
@@ -120,7 +250,7 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
     }
   }
 
-  cmd += L" -c:v " + ToWide(encoder.ffmpegName);
+  cmd += L" -c:v " + ToWide(encoder.ffmpegName) + EncoderOptions(settings, encoder);
   if (hdr_) {
     // Ten bit 4:2:0 and the three pieces of colour description that make a file
     // playable as HDR rather than as a washed out mess. They are not optional:
@@ -134,13 +264,23 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
     // agrees on. Anything wider would exclude the very cards this is meant for.
     cmd += L" -pix_fmt nv12";
   }
-  cmd += L" -b:v " + std::to_wstring(settings.bitrateKbps) + L"k";
-  cmd += L" -maxrate " + std::to_wstring(settings.bitrateKbps) + L"k";
-  cmd += L" -bufsize " + std::to_wstring(settings.bitrateKbps * 2) + L"k";
+  if (settings.rateControl == RateControl::Quality) {
+    // A quality target and a bitrate are contradictory instructions, and ffmpeg
+    // resolves them by quietly ignoring one. Better to send only one.
+    cmd += L" -b:v 0";
+  } else {
+    cmd += L" -b:v " + std::to_wstring(settings.bitrateKbps) + L"k";
+    // Constant means constant: the ceiling is the bitrate. Variable is allowed
+    // to peak at half again, which is what makes it worth choosing.
+    const int ceiling = settings.rateControl == RateControl::Cbr ? settings.bitrateKbps
+                                                                 : settings.bitrateKbps * 3 / 2;
+    cmd += L" -maxrate " + std::to_wstring(ceiling) + L"k";
+    cmd += L" -bufsize " + std::to_wstring(ceiling * 2) + L"k";
+  }
 
-  // Speed presets only for the software encoders. For hardware the vendor
-  // defaults beat anything guessed here.
-  if (!encoder.hardware) {
+  // The old speed setting still applies when the new preset is left on
+  // automatic, so nobody's existing configuration changes meaning.
+  if (!encoder.hardware && settings.preset == EncoderPreset::Auto) {
     cmd += L" -preset " + ToWide(RecordSpeedName((int)settings.speed));
   }
 
