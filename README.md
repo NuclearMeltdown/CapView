@@ -227,6 +227,51 @@ through Windows Imaging Component, so no ffmpeg is required.
 A profile holds the device, input, capture format and all picture and audio
 settings. One per source, selected with Ctrl+1 to Ctrl+9.
 
+### High dynamic range
+
+A card that can carry HDR sends P010 or P016 — ten or sixteen bits of luma per
+sample rather than eight — encoded against one of two curves. Both are read.
+
+**PQ** (SMPTE ST 2084, what HDR10 uses) states outright how many nits a code
+means, from nothing up to ten thousand. **HLG** (BT.2100) states it relative to
+whatever the display can manage, and needs a system gamma applied on top. Either
+way the picture is turned into linear light with 1.0 meaning diffuse white, and
+BT.2020 primaries are brought back to BT.709. The maths was checked against the
+standards before it was written: PQ 0.5 comes out at 92.246 nits where ST.2084
+says 92.245, and HLG lands exactly on its three defined points.
+
+Which curve is in use is normally read from the media type — the driver puts it
+in `DXVA_ExtendedFormat`, and transfer function 15 is PQ, 16 is HLG. Most cards
+put nothing there at all, so it can be set by hand.
+
+What happens next depends on the screen, not the source:
+
+- **An ordinary screen** cannot show a thousand nit highlight and has to be told
+  a smaller story about it. The tone mapping is the curve from BT.2390, applied
+  in the PQ domain because PQ is roughly perceptually even and that is where a
+  knee belongs: straight below the knee so ordinary content passes through
+  untouched, a Hermite spline above it so highlights compress instead of
+  clipping to a flat white. Brightness is mapped and colour carried along rather
+  than running the curve per channel, which would pull saturated highlights
+  towards white.
+- **An HDR screen** is handed scRGB — half float, linear, 1.0 fixed at eighty
+  nits — so highlights simply carry on past one. The interface is drawn into a
+  buffer of its own and converted on the way, because it is written in sRGB and
+  handing those numbers to a linear target would show every grey in it wrong by
+  the difference between the two.
+
+Two settings are worth understanding rather than guessing at. **Paper white** is
+how bright ordinary white comes out; 203 nits is what BT.2408 recommends and
+what most material is graded against. **Source peak** is how bright the source
+gets at its brightest — and DirectShow carries no mastering metadata anywhere,
+so there is nothing to read it from. It matters more than it sounds: assume
+10000 where the content only reaches 1000 and paper white lands at 63 instead of
+88 out of 100 nits on an ordinary screen, darkening everything. 1000 is the
+default because that is where consoles sit.
+
+Recording is still SDR. What goes to the recorder is the tone mapped picture,
+not the original range.
+
 ### Virtual camera
 
 The picture can be offered to other programs as a webcam — Discord, OBS, Teams,
@@ -397,8 +442,12 @@ Foundation enumerates three.
 A card grants its capture pin to one process at a time. If OBS holds it, CapView
 cannot open it, and the other way round.
 
-HDR is not implemented. The colour description is parsed, including the PQ and
-HLG transfer functions, but nothing downstream acts on it.
+HDR recording is not implemented. The display path handles PQ and HLG, but what
+reaches the recorder and the screenshots is the tone mapped picture, in eight
+bits — the original range is not written out.
+
+HDR needs Windows 10 or later for the display side and offers nothing on a
+screen that is not in HDR mode, where the picture is tone mapped instead.
 
 ## Licence
 

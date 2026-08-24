@@ -31,7 +31,10 @@ struct ConvertCB {
   float yOffset;
   float yScale;
   float cScale;
-  float pad1;
+  // P010 keeps ten bits in the top of sixteen, so a R16_UNORM read comes back
+  // 1023*64/65535 for full scale rather than 1.0. This puts that right; it is
+  // 1.0 for everything else.
+  float pixelScale;
 
   // -1 = the fields are half a picture line apart, as a real interlaced signal
   // has them. 0 or 1 = they are co-sited, and this is the row a pair starts on.
@@ -45,6 +48,14 @@ struct ConvertCB {
   float dotNotch;
   float carrierPeriod;
 
+  // 0 = the picture is already display referred, as everything SDR is.
+  // 1 = PQ (SMPTE ST 2084), 2 = HLG. Either way the clean pass turns it into
+  // linear light with 1.0 meaning diffuse white.
+  int32_t transfer;
+  int32_t gamut;  // 1 = the primaries are BT.2020 and want converting to BT.709
+  float hdrPad0;
+  float hdrPad1;
+
   float coef[4];
 };
 static_assert(sizeof(ConvertCB) % 16 == 0, "constant buffer must be 16 byte aligned");
@@ -54,7 +65,13 @@ struct ScaleCB {
   float dstSize[2];
   int32_t filter;
   float sharpen;
-  float pad[2];
+  int32_t transfer;    // as ConvertCB::transfer -- was the source HDR
+  int32_t outputHdr;   // the swapchain is scRGB and wants linear light
+
+  float paperWhite;    // nits the source's diffuse white should come out at
+  float sourcePeak;    // nits the brightest part of the source is assumed to reach
+  float displayPeak;   // nits this display can actually manage
+  float scalePad;
 };
 static_assert(sizeof(ScaleCB) % 16 == 0, "constant buffer must be 16 byte aligned");
 
@@ -262,6 +279,15 @@ bool VideoRenderer::CreateShaders(std::string* error) {
     return false;
   }
 
+  ComPtr<ID3DBlob> uiCode = CompileShader(kUiCompositePS, "ps_4_0", error);
+  if (!uiCode) return false;
+  if (FAILED(CAP_HR(dev->CreatePixelShader(uiCode->GetBufferPointer(), uiCode->GetBufferSize(),
+                                           nullptr, &psUiComposite_)))) {
+    if (error) *error = T("Oberflächen-Shader konnte nicht erstellt werden",
+                             "The interface shader could not be created");
+    return false;
+  }
+
   // Erst hier, wo feststeht, welche Dateien diese Fassung braucht.
   PruneShaderCache();
 
@@ -276,6 +302,30 @@ bool VideoRenderer::CreateShaders(std::string* error) {
                              "The constant buffer could not be created");
     return false;
   }
+  bd.ByteWidth = 16;  // one float plus padding
+  if (FAILED(CAP_HR(dev->CreateBuffer(&bd, nullptr, &cbUi_)))) {
+    if (error) *error = T("Konstantenpuffer konnte nicht erstellt werden",
+                             "The constant buffer could not be created");
+    return false;
+  }
+
+  // Premultiplied: what arrives has already been multiplied by its own coverage,
+  // so the source contributes as it is rather than being scaled again.
+  D3D11_BLEND_DESC pm = {};
+  pm.RenderTarget[0].BlendEnable = TRUE;
+  pm.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+  pm.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+  pm.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+  pm.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+  pm.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+  pm.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+  pm.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+  if (FAILED(CAP_HR(dev->CreateBlendState(&pm, &blendPremultiplied_)))) {
+    if (error) *error = T("Blend-State konnte nicht erstellt werden",
+                             "The blend state could not be created");
+    return false;
+  }
+
   bd.ByteWidth = sizeof(ScaleCB);
   if (FAILED(CAP_HR(dev->CreateBuffer(&bd, nullptr, &cbScale_)))) {
     if (error) *error = T("Konstantenpuffer konnte nicht erstellt werden",
@@ -371,6 +421,11 @@ bool VideoRenderer::SetSourceFormat(const VideoFormatInfo& info, std::string* er
     kind_ = FormatKind::Yvyu;
   } else if (label == "NV12") {
     kind_ = FormatKind::Nv12;
+  } else if (label == "P010" || label == "P016") {
+    kind_ = FormatKind::P010;
+    // P010 parks ten bits at the top of each sixteen, so a full scale sample
+    // reads back as 65472/65535 rather than 1. P016 uses all sixteen.
+    tenBitContainer_ = (label == "P010");
   } else if (label == "YV12" || label == "I420" || label == "IYUV") {
     kind_ = FormatKind::Planar420;
     planarUvSwapped_ = (label == "YV12");  // YV12 stores V first
@@ -432,6 +487,11 @@ bool VideoRenderer::CreateSourceTextures(std::string* error) {
     case FormatKind::Nv12:
       ok = makePlane(0, w, h, DXGI_FORMAT_R8_UNORM) &&
            makePlane(1, (w + 1) / 2, (h + 1) / 2, DXGI_FORMAT_R8G8_UNORM);
+      break;
+
+    case FormatKind::P010:
+      ok = makePlane(0, w, h, DXGI_FORMAT_R16_UNORM) &&
+           makePlane(1, (w + 1) / 2, (h + 1) / 2, DXGI_FORMAT_R16G16_UNORM);
       planeCount_ = 2;
       break;
     case FormatKind::Planar420:
@@ -974,6 +1034,7 @@ bool VideoRenderer::UploadFrame(const FrameView& frame) {
     case FormatKind::Uyvy:
     case FormatKind::Yvyu: ok = UploadPacked(frame); break;
     case FormatKind::Nv12: ok = UploadNv12(frame); break;
+    case FormatKind::P010: ok = UploadP010(frame); break;
     case FormatKind::Planar420: ok = UploadPlanar(frame); break;
     case FormatKind::Rgb:
     default:
@@ -1030,6 +1091,113 @@ bool VideoRenderer::UploadNv12(const FrameView& frame) {
   if (FAILED(dc->Map(plane_[1].Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return false;
   // Interleaved chroma: (w/2) texels of two bytes each.
   CopyRows(mapped, frame.data + lumaBytes, srcPitch, (size_t)((w + 1) / 2) * 2, ch);
+  dc->Unmap(plane_[1].Get(), 0);
+  return true;
+}
+
+bool VideoRenderer::EnsureUiLayer(int width, int height) {
+  if (uiTex_ && uiWidth_ == width && uiHeight_ == height) return true;
+  uiSrv_.Reset();
+  uiRtv_.Reset();
+  uiTex_.Reset();
+  uiWidth_ = 0;
+  uiHeight_ = 0;
+  if (width <= 0 || height <= 0) return false;
+
+  // Eight bit on purpose. This holds an ordinary sRGB interface, and giving it
+  // more precision than the thing that drew it would buy nothing.
+  D3D11_TEXTURE2D_DESC td = {};
+  td.Width = (UINT)width;
+  td.Height = (UINT)height;
+  td.MipLevels = 1;
+  td.ArraySize = 1;
+  td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  td.SampleDesc.Count = 1;
+  td.Usage = D3D11_USAGE_DEFAULT;
+  td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+
+  ID3D11Device* dev = ctx_->device();
+  if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &uiTex_)))) return false;
+  if (FAILED(CAP_HR(dev->CreateRenderTargetView(uiTex_.Get(), nullptr, &uiRtv_)))) return false;
+  if (FAILED(CAP_HR(dev->CreateShaderResourceView(uiTex_.Get(), nullptr, &uiSrv_)))) return false;
+  uiWidth_ = width;
+  uiHeight_ = height;
+  return true;
+}
+
+bool VideoRenderer::BeginUiLayer() {
+  if (!ctx_->hdrOutput()) return false;
+  if (!EnsureUiLayer(ctx_->width(), ctx_->height())) return false;
+
+  ID3D11DeviceContext* dc = ctx_->context();
+  const float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  dc->ClearRenderTargetView(uiRtv_.Get(), clear);
+  ID3D11RenderTargetView* rtv[] = {uiRtv_.Get()};
+  dc->OMSetRenderTargets(1, rtv, nullptr);
+  return true;
+}
+
+void VideoRenderer::CompositeUiLayer() {
+  if (!ctx_->hdrOutput() || !uiSrv_) return;
+
+  ID3D11DeviceContext* dc = ctx_->context();
+
+  D3D11_MAPPED_SUBRESOURCE mapped = {};
+  if (SUCCEEDED(dc->Map(cbUi_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+    float value[4] = {paperWhiteNits_, 0.0f, 0.0f, 0.0f};
+    memcpy(mapped.pData, value, sizeof(value));
+    dc->Unmap(cbUi_.Get(), 0);
+  }
+
+  ID3D11RenderTargetView* backbuffer[] = {ctx_->rtv()};
+  dc->OMSetRenderTargets(1, backbuffer, nullptr);
+
+  D3D11_VIEWPORT vp = {};
+  vp.Width = (float)ctx_->width();
+  vp.Height = (float)ctx_->height();
+  vp.MaxDepth = 1.0f;
+  dc->RSSetViewports(1, &vp);
+
+  dc->IASetInputLayout(nullptr);
+  dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  dc->VSSetShader(vs_.Get(), nullptr, 0);
+  dc->PSSetShader(psUiComposite_.Get(), nullptr, 0);
+  ID3D11ShaderResourceView* srv[] = {uiSrv_.Get()};
+  dc->PSSetShaderResources(0, 1, srv);
+  ID3D11SamplerState* samp[] = {sampPoint_.Get()};
+  dc->PSSetSamplers(0, 1, samp);
+  ID3D11Buffer* cbs[] = {cbUi_.Get()};
+  dc->PSSetConstantBuffers(0, 1, cbs);
+  dc->RSSetState(raster_.Get());
+
+  const float blendFactor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  dc->OMSetBlendState(blendPremultiplied_.Get(), blendFactor, 0xffffffff);
+  dc->Draw(3, 0);
+  dc->OMSetBlendState(nullptr, blendFactor, 0xffffffff);
+
+  ID3D11ShaderResourceView* none[] = {nullptr};
+  dc->PSSetShaderResources(0, 1, none);
+}
+
+bool VideoRenderer::UploadP010(const FrameView& frame) {
+  // The same shape as NV12 with every sample twice as wide, chroma included:
+  // (w/2) pairs of two sixteen bit values is w*2 bytes, the same as the luma row.
+  const int w = source_.width;
+  const int h = source_.height;
+  const size_t srcPitch = source_.stride > 0 ? (size_t)source_.stride : (size_t)w * 2;
+  const size_t lumaBytes = srcPitch * (size_t)h;
+  const int ch = (h + 1) / 2;
+  if (frame.size < lumaBytes + srcPitch * (size_t)ch) return false;
+
+  ID3D11DeviceContext* dc = ctx_->context();
+  D3D11_MAPPED_SUBRESOURCE mapped = {};
+
+  if (FAILED(dc->Map(plane_[0].Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return false;
+  CopyRows(mapped, frame.data, srcPitch, (size_t)w * 2, h);
+  dc->Unmap(plane_[0].Get(), 0);
+
+  if (FAILED(dc->Map(plane_[1].Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) return false;
+  CopyRows(mapped, frame.data + lumaBytes, srcPitch, (size_t)((w + 1) / 2) * 4, ch);
   dc->Unmap(plane_[1].Get(), 0);
   return true;
 }
@@ -1424,6 +1592,10 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   }
   MatrixCoefficients(matrix, hd, cb.coef);
 
+  cb.pixelScale = (kind_ == FormatKind::P010 && tenBitContainer_) ? 65535.0f / 65472.0f : 1.0f;
+  cb.transfer = (int32_t)hdrTransfer_;
+  cb.gamut = hdrWideGamut_ ? 1 : 0;
+
   D3D11_MAPPED_SUBRESOURCE mapped = {};
   if (SUCCEEDED(dc->Map(cbConvert_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
     memcpy(mapped.pData, &cb, sizeof(cb));
@@ -1509,6 +1681,11 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   sc.dstSize[1] = (float)dstH;
   sc.filter = (int32_t)image.filter;
   sc.sharpen = Clamp(image.sharpen, 0.0f, 1.0f);
+  sc.transfer = (int32_t)hdrTransfer_;
+  sc.outputHdr = hdrOutput_ ? 1 : 0;
+  sc.paperWhite = paperWhiteNits_;
+  sc.sourcePeak = sourcePeakNits_;
+  sc.displayPeak = displayPeakNits_;
   if (SUCCEEDED(dc->Map(cbScale_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
     memcpy(mapped.pData, &sc, sizeof(sc));
     dc->Unmap(cbScale_.Get(), 0);

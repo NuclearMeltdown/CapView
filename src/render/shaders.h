@@ -72,7 +72,7 @@ cbuffer ConvertCB : register(b0) {
   float gYOffset;
   float gYScale;
   float gCScale;
-  float gPad1;
+  float gPixelScale;   // brings a ten-in-sixteen-bit sample back to 0..1
 
   int   gCoSitedPhase;    // -1 normal interlace, else the row a field pair starts on
   int   gRotation;        // 0 none, 1 quarter turn right, 2 half, 3 quarter turn left
@@ -83,6 +83,11 @@ cbuffer ConvertCB : register(b0) {
   int   gHistCount;       // how many previous frames actually hold a picture
   float gDotNotch;        // 0..1: width of the demodulation window, 0 = off
   float gCarrierPeriod;   // samples per cycle of the colour subcarrier
+
+  int   gTransfer;        // 0 display referred, 1 PQ, 2 HLG
+  int   gGamut;           // 1 = BT.2020 primaries, convert to BT.709
+  float gHdrPad0;
+  float gHdrPad1;
 
   float4 gCoef;           // Cr->R, Cb->G, Cr->G, Cb->B
 };
@@ -127,11 +132,13 @@ float3 FetchYuv(int2 p, int frame) {
     } else {                         // YVYU: Y0 V Y1 U
       return float3(odd ? t.z : t.x, t.w, t.y);
     }
-  } else if (gFormatKind == 3) {
-    // NV12: full res luma, interleaved half res chroma.
+  } else if (gFormatKind == 3 || gFormatKind == 7) {
+    // NV12, and P010/P016 which are the same arrangement in wider containers.
+    // gPixelScale carries the difference: the ten bit form leaves the bottom
+    // six bits of each sample empty.
     float y  = LoadPlane0(int3(p, 0), frame).x;
     float2 c = LoadPlane1(int3(p.x >> 1, p.y >> 1, 0), frame).xy;
-    return float3(y, c.x, c.y);
+    return float3(y, c.x, c.y) * gPixelScale;
   } else {
     // Planar 4:2:0. Plane order differs between YV12 and I420, which the
     // caller has already resolved by binding the planes accordingly.
@@ -141,6 +148,55 @@ float3 FetchYuv(int2 p, int frame) {
     float v = LoadPlane2(ac, frame).x;
     return float3(y, u, v);
   }
+}
+
+// ---------------------------------------------------------------------------
+// High dynamic range.
+//
+// A capture card hands over pictures encoded against one of two curves, and
+// neither is the one a screen expects. PQ says outright how many nits a code
+// means, from nothing up to ten thousand; HLG says it relative to whatever the
+// display can manage. Both are decoded here into linear light, scaled so that
+// 1.0 is diffuse white -- the brightness a sheet of paper would have. Anything
+// above 1.0 is a highlight, which is the whole point of the exercise.
+//
+// Checked against the numbers in the standards before it was written: PQ 0.5
+// comes out at 92.246 nits where ST.2084 says 92.245, and HLG lands exactly on
+// its three defined points.
+// ---------------------------------------------------------------------------
+static const float kPqM1 = 0.1593017578125;
+static const float kPqM2 = 78.84375;
+static const float kPqC1 = 0.8359375;
+static const float kPqC2 = 18.8515625;
+static const float kPqC3 = 18.6875;
+
+float PqToNits(float e) {
+  float p = pow(saturate(e), 1.0 / kPqM2);
+  float num = max(p - kPqC1, 0.0);
+  float den = kPqC2 - kPqC3 * p;
+  return 10000.0 * pow(num / max(den, 1e-6), 1.0 / kPqM1);
+}
+
+float NitsToPq(float nits) {
+  float y = saturate(nits / 10000.0);
+  float p = pow(y, kPqM1);
+  return pow((kPqC1 + kPqC2 * p) / (1.0 + kPqC3 * p), kPqM2);
+}
+
+float HlgToScene(float e) {
+  const float a = 0.17883277, b = 0.28466892, c = 0.55991073;
+  e = saturate(e);
+  return e <= 0.5 ? (e * e) / 3.0 : (exp((e - c) / a) + b) / 12.0;
+}
+
+// BT.2020 to BT.709, both through XYZ at D65. Components can come out negative:
+// BT.2020 holds colours BT.709 cannot name, and clamping them here would turn a
+// deep green into a flat one. That is left to the end of the pipeline.
+float3 Bt2020ToBt709(float3 c) {
+  return float3(
+      dot(c, float3( 1.660491, -0.587641, -0.072850)),
+      dot(c, float3(-0.124550,  1.132900, -0.008349)),
+      dot(c, float3(-0.018151, -0.100579,  1.118730)));
 }
 
 float3 YuvToRgb(float3 yuv) {
@@ -448,6 +504,23 @@ float4 main(VSOut i) : SV_Target {
   }
   if (gDotNotch > 0.0) rgb += DotDemodDelta(p.x, p.y) * (1.0 - handled);
   if (gChromaSoft > 0) rgb = SoftenChroma(rgb, p.x, p.y);
+
+  // Out of its curve and into linear light, once per pixel rather than once per
+  // fetch -- which is why it sits here and not in FetchRgbIn, where the
+  // deinterlacers would pay for it dozens of times over. Everything above this
+  // line is analogue repair and belongs in the encoded domain anyway.
+  if (gTransfer == 1) {
+    // PQ says what it means in nits. Diffuse white is 203 of them, per BT.2408.
+    rgb = float3(PqToNits(rgb.r), PqToNits(rgb.g), PqToNits(rgb.b)) / 203.0;
+  } else if (gTransfer == 2) {
+    // HLG is relative, and its system gamma depends on the display. 1.2 is the
+    // reference value for a thousand nit screen, which is the common case.
+    rgb = float3(HlgToScene(rgb.r), HlgToScene(rgb.g), HlgToScene(rgb.b));
+    float luma = max(dot(rgb, float3(0.2627, 0.6780, 0.0593)), 1e-6);
+    rgb *= pow(luma, 0.2);          // system gamma 1.2 applied to luminance
+    rgb *= 1000.0 / 203.0;          // reference white of that display, in units of paper white
+  }
+  if (gGamut != 0) rgb = Bt2020ToBt709(rgb);
 
   // Not clamped: the target is floating point and limited range material
   // legitimately reaches past both ends after expansion.
@@ -812,6 +885,46 @@ R"HLSL(        // gradient. Vertical detail that is genuinely in the picture rai
 }
 )HLSL";
 
+// Pass four, and only when the swapchain is scRGB: the interface, brought into
+// linear light.
+//
+// ImGui writes ordinary sRGB bytes. Handing those to a linear target shows them
+// far too bright -- sRGB 0.5 is linear 0.21, and every grey in the interface
+// would be wrong by that much. So it draws into a buffer of its own and lands
+// here, where it is converted once and scaled to whatever diffuse white is.
+//
+// What arrives is premultiplied: ImGui blends over a transparent buffer, which
+// leaves colour already multiplied by coverage. It has to be undone before the
+// curve and redone after, because a curve applied to a premultiplied colour is
+// not the same thing at all -- half covered black text would come out grey.
+inline const char* kUiCompositePS = R"HLSL(
+Texture2D<float4> texUi : register(t0);
+SamplerState sampPoint : register(s0);
+
+cbuffer UiCB : register(b0) {
+  float gPaperWhite;   // nits the interface's white should come out at
+  float3 gUiPad;
+};
+
+struct VSOut {
+  float4 pos : SV_Position;
+  float2 uv  : TEXCOORD0;
+};
+
+float3 SrgbToLinear(float3 c) {
+  c = saturate(c);
+  return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
+
+float4 main(VSOut i) : SV_Target {
+  float4 c = texUi.SampleLevel(sampPoint, i.uv, 0);
+  if (c.a <= 0.0001) return float4(0.0, 0.0, 0.0, 0.0);
+  float3 straight = c.rgb / c.a;
+  float3 lin = SrgbToLinear(straight) * (gPaperWhite / 80.0);
+  return float4(lin * c.a, c.a);
+}
+)HLSL";
+
 inline const char* kScalePS = R"HLSL(
 Texture2D<float4> texSrc : register(t0);
 SamplerState sampPoint  : register(s0);
@@ -822,7 +935,13 @@ cbuffer ScaleCB : register(b0) {
   float2 gDstSize;
   int    gFilter;   // 0 nearest, 1 bilinear, 2 bicubic, 3 lanczos3, 4 sharp bilinear
   float  gSharpen;  // 0..1
-  float2 gPad;
+  int    gTransfer;    // 0 the picture is display referred, otherwise it is linear light
+  int    gOutputHdr;   // the swapchain is scRGB and wants linear light
+
+  float  gPaperWhite;  // nits diffuse white should come out at
+  float  gSourcePeak;  // nits the source is assumed to reach at its brightest
+  float  gDisplayPeak; // nits this screen can manage
+  float  gScalePad;
 };
 
 struct VSOut {
@@ -915,6 +1034,74 @@ float3 Sharpen(float3 c, float2 uv, float amount) {
   return clamp(sharp, lo, hi);
 }
 
+// ---------------------------------------------------------------------------
+// Getting linear light onto a screen.
+//
+// Two jobs, and which one runs depends on the screen rather than the source.
+// An HDR screen is handed scRGB: still linear, with 1.0 meaning eighty nits by
+// definition, so the only work is a scale. An ordinary screen cannot show a
+// thousand nit highlight and has to be told a smaller story about it -- that is
+// the tone mapping, and it is done in the PQ domain because PQ is roughly
+// perceptually even, which is where a knee belongs.
+//
+// The curve is the one from BT.2390: linear below the knee so ordinary picture
+// content passes through untouched, a Hermite spline above it so highlights
+// compress smoothly instead of clipping to a flat white.
+// ---------------------------------------------------------------------------
+static const float kPqM1 = 0.1593017578125;
+static const float kPqM2 = 78.84375;
+static const float kPqC1 = 0.8359375;
+static const float kPqC2 = 18.8515625;
+static const float kPqC3 = 18.6875;
+
+float NitsToPq(float nits) {
+  float y = saturate(nits / 10000.0);
+  float p = pow(y, kPqM1);
+  return pow((kPqC1 + kPqC2 * p) / (1.0 + kPqC3 * p), kPqM2);
+}
+
+float PqToNits(float e) {
+  float p = pow(saturate(e), 1.0 / kPqM2);
+  float num = max(p - kPqC1, 0.0);
+  float den = kPqC2 - kPqC3 * p;
+  return 10000.0 * pow(num / max(den, 1e-6), 1.0 / kPqM1);
+}
+
+float Bt2390Knee(float e, float maxLum) {
+  float ks = 1.5 * maxLum - 0.5;   // where the straight part gives way
+  if (e < ks) return e;
+  float t = (e - ks) / max(1.0 - ks, 1e-6);
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return (2.0 * t3 - 3.0 * t2 + 1.0) * ks + (t3 - 2.0 * t2 + t) * (1.0 - ks) +
+         (-2.0 * t3 + 3.0 * t2) * maxLum;
+}
+
+float3 LinearToSrgb(float3 c) {
+  c = saturate(c);
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+}
+
+float3 SrgbToLinear(float3 c) {
+  c = saturate(c);
+  return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
+
+float3 ToneMapToSdr(float3 rgb) {
+  // Tone map the brightness and carry the colour along, rather than running the
+  // curve on each channel: doing it per channel pulls saturated highlights
+  // towards white, which is how a sunset turns into a smear.
+  float luma = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+  if (luma <= 1e-6) return rgb;
+
+  float scale = NitsToPq(gSourcePeak);
+  float e = NitsToPq(luma * gPaperWhite) / max(scale, 1e-6);
+  float maxLum = NitsToPq(gDisplayPeak) / max(scale, 1e-6);
+  float mapped = PqToNits(saturate(Bt2390Knee(saturate(e), saturate(maxLum)) * scale));
+
+  return rgb * (mapped / gDisplayPeak) / luma;
+}
+
 float4 main(VSOut i) : SV_Target {
   float2 pos = i.uv * gSrcSize;  // position in source pixels
 
@@ -933,6 +1120,21 @@ float4 main(VSOut i) : SV_Target {
 
   if (gSharpen > 0.001) {
     rgb = Sharpen(rgb, i.uv, gSharpen);
+  }
+
+  if (gTransfer != 0) {
+    // Linear light in, 1.0 being diffuse white.
+    if (gOutputHdr != 0) {
+      // scRGB: linear, BT.709 primaries, 1.0 is eighty nits by definition.
+      return float4(rgb * (gPaperWhite / 80.0), 1.0);
+    }
+    return float4(saturate(LinearToSrgb(ToneMapToSdr(rgb))), 1.0);
+  }
+  if (gOutputHdr != 0) {
+    // An ordinary picture on an HDR screen. It is encoded against sRGB and the
+    // screen is being fed linear light, so leaving it alone would show it far
+    // too bright -- this is the case that looks broken if it is forgotten.
+    return float4(SrgbToLinear(rgb) * (gPaperWhite / 80.0), 1.0);
   }
   return float4(saturate(rgb), 1.0);
 }

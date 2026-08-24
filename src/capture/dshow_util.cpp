@@ -52,8 +52,8 @@ const SubtypeInfo kSubtypes[] = {
     {"I420", FourccGuid(Fourcc('I', '4', '2', '0')), 12, Layout::Planar420, true},
     {"IYUV", FourccGuid(Fourcc('I', 'Y', 'U', 'V')), 12, Layout::Planar420, true},
     // 10 and 16 bit, the formats an HDR capable card delivers.
-    {"P010", FourccGuid(Fourcc('P', '0', '1', '0')), 24, Layout::Planar420, false},
-    {"P016", FourccGuid(Fourcc('P', '0', '1', '6')), 24, Layout::Planar420, false},
+    {"P010", FourccGuid(Fourcc('P', '0', '1', '0')), 24, Layout::Planar420, true},
+    {"P016", FourccGuid(Fourcc('P', '0', '1', '6')), 24, Layout::Planar420, true},
     {"Y210", FourccGuid(Fourcc('Y', '2', '1', '0')), 32, Layout::Packed, false},
     {"Y216", FourccGuid(Fourcc('Y', '2', '1', '6')), 32, Layout::Packed, false},
     {"Y410", FourccGuid(Fourcc('Y', '4', '1', '0')), 32, Layout::Packed, false},

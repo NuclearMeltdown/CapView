@@ -1186,6 +1186,92 @@ void SettingsWindow::DrawAudioTab() {
 
 // --------------------------------------------------------------- display tab
 
+void SettingsWindow::DrawHdrBlock() {
+  AppSettings& app = cfg().app;
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Hoher Kontrastumfang (HDR)", "High dynamic range"));
+
+  // What is actually the case, before any of the choices below. Two independent
+  // facts, and most confusion about HDR comes from mixing them up.
+  const char* sourceText =
+      hdrSourceTransfer_ == 1 ? T("Quelle: HDR (PQ)", "Source: HDR (PQ)")
+      : hdrSourceTransfer_ == 2 ? T("Quelle: HDR (HLG)", "Source: HDR (HLG)")
+                                : T("Quelle: SDR", "Source: SDR");
+  ImGui::TextDisabled("%s", sourceText);
+  ImGui::SameLine();
+  ImGui::TextDisabled("   |   ");
+  ImGui::SameLine();
+  if (!hdrDisplayCapable_) {
+    ImGui::TextDisabled("%s", T("Anzeige: kein HDR eingeschaltet",
+                                "Display: HDR not switched on"));
+  } else if (hdrOutputActive_) {
+    ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                       T("Anzeige: HDR aktiv, %.0f nits", "Display: HDR active, %.0f nits"),
+                       hdrDisplayPeak_);
+  } else {
+    ImGui::TextDisabled(T("Anzeige: HDR möglich, %.0f nits",
+                          "Display: HDR available, %.0f nits"), hdrDisplayPeak_);
+  }
+  ImGui::Spacing();
+
+  const char* inputNames[] = {
+      T("Automatisch", "Automatic"), T("SDR", "SDR"), T("HDR10 (PQ)", "HDR10 (PQ)"),
+      T("HLG", "HLG")};
+  int input = (int)app.hdrInput;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::Combo(T("Quellkurve", "Source curve"), &input, inputNames, kHdrInputCount)) {
+    app.hdrInput = (HdrInput)input;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Automatisch glaubt, was der Treiber in den Medientyp schreibt. Die "
+               "meisten Karten schreiben dort nichts -- dann bleibt es bei SDR und muss "
+               "hier von Hand gesetzt werden.",
+               "Automatic believes what the driver put in the media type. Most cards put "
+               "nothing there, in which case it stays on SDR and has to be set here by "
+               "hand."));
+
+  const char* outputNames[] = {T("Aus", "Off"), T("Automatisch", "Automatic"),
+                               T("Immer wenn möglich", "Whenever possible")};
+  int output = (int)app.hdrOutput;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::Combo(T("An die Anzeige", "To the display"), &output, outputNames,
+                   kHdrOutputCount)) {
+    app.hdrOutput = (HdrOutput)output;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Automatisch schaltet nur um, wenn die Anzeige im HDR-Modus läuft UND die "
+               "Quelle wirklich HDR ist. Sonst wird das Bild auf die Anzeige "
+               "heruntergerechnet, was auf einem gewöhnlichen Monitor genau richtig ist.",
+               "Automatic switches over only when the display is in HDR mode AND the source "
+               "really is HDR. Otherwise the picture is mapped down to the display, which "
+               "is exactly right on an ordinary monitor."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Papierweiß", "Paper white"), &app.paperWhiteNits, 80.0f, 400.0f,
+                     "%.0f nits");
+  ImGui::SameLine();
+  HelpMarker(T("Wie hell gewöhnliches Weiß herauskommt -- ein Blatt Papier im Bild, nicht "
+               "die hellste Stelle. 203 ist der Wert, gegen den HDR-Material üblicherweise "
+               "abgemischt wird.",
+               "How bright ordinary white comes out -- a sheet of paper in the picture, not "
+               "the brightest spot. 203 is what HDR material is usually graded against."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Spitze der Quelle", "Source peak"), &app.sourcePeakNits, 200.0f,
+                     10000.0f, "%.0f nits", ImGuiSliderFlags_Logarithmic);
+  ImGui::SameLine();
+  HelpMarker(T("Wie hell die Quelle an ihrer hellsten Stelle wird. DirectShow überträgt "
+               "das nirgends, es lässt sich also nicht auslesen -- und es zählt: nimmt man "
+               "10000 an, wo die Quelle nur 1000 erreicht, landet Papierweiß auf einem "
+               "SDR-Monitor bei 63 statt 88 von 100 nits, das ganze Bild wird zu dunkel. "
+               "1000 passt für Konsolen.",
+               "How bright the source gets at its brightest. DirectShow carries this "
+               "nowhere, so it cannot be read -- and it matters: assume 10000 where the "
+               "source only reaches 1000 and paper white lands at 63 instead of 88 out of "
+               "100 nits on an SDR monitor, darkening the whole picture. 1000 suits "
+               "consoles."));
+}
+
 void SettingsWindow::DrawDisplayTab() {
   AppSettings& app = cfg().app;
   ImGui::Spacing();
@@ -1319,6 +1405,8 @@ void SettingsWindow::DrawDisplayTab() {
   ImGui::Checkbox(T("Beim Start im Vollbild öffnen", "Start in fullscreen"), &app.startFullscreen);
 
   ImGui::Spacing();
+  DrawHdrBlock();
+
   ImGui::SeparatorText(T("Sonstiges", "Other"));
   ImGui::Checkbox(T("Protokoll in CapView.log schreiben", "Write a log to CapView.log"),
                   &app.logToFile);

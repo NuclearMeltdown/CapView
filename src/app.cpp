@@ -1152,6 +1152,75 @@ bool App::DrawSettingsWindowed() {
   return true;
 }
 
+void App::UpdateHdr() {
+  const VideoFormatInfo& src = renderer_.sourceFormat();
+
+  VideoRenderer::Transfer transfer = VideoRenderer::Transfer::Sdr;
+  bool wideGamut = false;
+  switch (config_.app.hdrInput) {
+    case HdrInput::Pq:
+      transfer = VideoRenderer::Transfer::Pq;
+      wideGamut = true;
+      break;
+    case HdrInput::Hlg:
+      transfer = VideoRenderer::Transfer::Hlg;
+      wideGamut = true;
+      break;
+    case HdrInput::Sdr:
+      break;
+    case HdrInput::Auto:
+    default:
+      // 15 and 16 are PQ and HLG in the DXVA numbering the media type uses.
+      if (src.transferFunction == 15) transfer = VideoRenderer::Transfer::Pq;
+      if (src.transferFunction == 16) transfer = VideoRenderer::Transfer::Hlg;
+      // 9 is BT.2020 primaries; the matrix codes say the same thing a second way.
+      wideGamut = src.primaries == 9 || src.transferMatrix == 4 || src.transferMatrix == 5;
+      break;
+  }
+  renderer_.SetHdrInput(transfer, wideGamut);
+
+  // The screen can change without anything else doing so -- dragging the window
+  // to another monitor, or turning HDR on in Windows while this runs. Asking
+  // DXGI costs a little, so not every frame.
+  if (++hdrDisplayPoll_ >= 120) {
+    hdrDisplayPoll_ = 0;
+    d3d_.RefreshDisplayCapability();
+  }
+
+  const D3DContext::DisplayCapability display = d3d_.displayCapability();
+  bool want = false;
+  switch (config_.app.hdrOutput) {
+    case HdrOutput::Always:
+      want = display.hdr;
+      break;
+    case HdrOutput::Auto:
+      // Only when there is something to gain. An ordinary picture on an HDR
+      // screen goes through one more conversion for no benefit.
+      want = display.hdr && transfer != VideoRenderer::Transfer::Sdr;
+      break;
+    case HdrOutput::Off:
+    default:
+      break;
+  }
+
+  if (want != d3d_.hdrOutput()) {
+    std::string error;
+    if (!d3d_.SetHdrOutput(want, &error)) {
+      // Said once and then left alone, rather than every frame from here on.
+      if (!error.empty() && want) {
+        config_.app.hdrOutput = HdrOutput::Off;
+        Toast(error);
+      }
+    }
+  }
+
+  renderer_.SetHdrOutput(d3d_.hdrOutput(), config_.app.paperWhiteNits,
+                         config_.app.sourcePeakNits,
+                         d3d_.hdrOutput() ? display.peakNits : 100.0f);
+
+  settings_.SetHdrState(display.hdr, d3d_.hdrOutput(), display.peakNits, (int)transfer);
+}
+
 void App::DrawUpdatePrompt() {
   // The startup check runs on its own thread, so the result turns up a second or
   // two in. Raised once per session and never again, whatever the user does with
@@ -1797,6 +1866,7 @@ void App::RenderFrame() {
   // Decided before drawing, so the picture is laid out around the bar in the
   // same frame the bar appears in.
   renderer_.SetTopInset(toolbarVisible_ ? (int)std::lround(ToolbarHeight()) : 0);
+  UpdateHdr();
   renderer_.Draw(profile.image, fieldIndex_);
 
   // Right after the first pass, so the still is the picture that was just put on
@@ -1811,7 +1881,12 @@ void App::RenderFrame() {
   ImGui::NewFrame();
   DrawUi();
   ImGui::Render();
+  // In HDR the interface goes to a buffer of its own first: it is drawn in sRGB
+  // and the screen is being fed linear light, so it needs converting rather than
+  // copying. In SDR both calls do nothing and it draws straight to the screen.
+  const bool uiLayer = renderer_.BeginUiLayer();
   ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+  if (uiLayer) renderer_.CompositeUiLayer();
 
   if (sink) lastFrameAgeMs_ = sink->stats().lastArrivalAgeMs;
   SyncMicrophone();

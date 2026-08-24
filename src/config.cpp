@@ -535,6 +535,10 @@ bool Config::Load(std::string* error) {
   app.settingsSeparateWindow = a["settingsSeparateWindow"].AsBool(false);
   app.checkUpdatesOnStart = a["checkUpdatesOnStart"].AsBool(true);
   app.virtualCamera = a["virtualCamera"].AsBool(false);
+  app.hdrInput = ReadEnum<HdrInput>(a, "hdrInput", kHdrInputCount, HdrInput::Auto);
+  app.hdrOutput = ReadEnum<HdrOutput>(a, "hdrOutput", kHdrOutputCount, HdrOutput::Auto);
+  app.paperWhiteNits = (float)a["paperWhiteNits"].AsNumber(203.0);
+  app.sourcePeakNits = (float)a["sourcePeakNits"].AsNumber(1000.0);
   app.statsDetail = ReadEnum<StatsDetail>(a, "statsDetail", 3, StatsDetail::Compact);
   app.logToFile = a["logToFile"].AsBool(false);
   app.windowX = a["windowX"].AsInt(-1);
@@ -622,6 +626,10 @@ std::string Config::Serialize() const {
   a["settingsSeparateWindow"] = app.settingsSeparateWindow;
   a["checkUpdatesOnStart"] = app.checkUpdatesOnStart;
   a["virtualCamera"] = app.virtualCamera;
+  a["hdrInput"] = (int)app.hdrInput;
+  a["hdrOutput"] = (int)app.hdrOutput;
+  a["paperWhiteNits"] = app.paperWhiteNits;
+  a["sourcePeakNits"] = app.sourcePeakNits;
   a["statsDetail"] = (int)app.statsDetail;
   a["logToFile"] = app.logToFile;
   a["windowX"] = app.windowX;
