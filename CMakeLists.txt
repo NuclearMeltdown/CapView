@@ -11,6 +11,34 @@ endif()
 
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
 
+# The virtual camera's media source. A DLL of its own because Windows loads it
+# into the Frame Server service, not into CapView -- see src/vcam/vcam_shared.h.
+# It is registered under HKLM, so installing it needs administrator rights while
+# using the camera afterwards does not.
+add_library(capview_vcam SHARED
+  src/vcam/vcam_dll.cpp
+  src/vcam/vcam_source.cpp
+  src/vcam/capview_vcam.def
+)
+target_include_directories(capview_vcam PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(capview_vcam PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(capview_vcam PRIVATE
+  mfplat mfuuid mf ole32 oleaut32 uuid advapi32 ksuser strmiids)
+if(MSVC)
+  target_compile_options(capview_vcam PRIVATE /W3 /permissive- /Zc:__cplusplus /utf-8 /MP)
+  set_property(TARGET capview_vcam PROPERTY MSVC_RUNTIME_LIBRARY
+               "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+set_target_properties(capview_vcam PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME "capview_vcam"
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+)
+
 add_executable(CapView WIN32
   src/main.cpp
   src/common.cpp
@@ -87,33 +115,20 @@ if(MSVC)
   target_link_options(CapView PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
 endif()
 
-# The virtual camera's media source. A DLL of its own because Windows loads it
-# into the Frame Server service, not into CapView -- see src/vcam/vcam_shared.h.
-# It is registered under HKLM, so installing it needs administrator rights while
-# using the camera afterwards does not.
-add_library(capview_vcam SHARED
-  src/vcam/vcam_dll.cpp
-  src/vcam/vcam_source.cpp
-  src/vcam/capview_vcam.def
-)
-target_include_directories(capview_vcam PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_compile_definitions(capview_vcam PRIVATE
-  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
-target_link_libraries(capview_vcam PRIVATE
-  mfplat mfuuid mf ole32 oleaut32 uuid advapi32 ksuser strmiids)
-if(MSVC)
-  target_compile_options(capview_vcam PRIVATE /W3 /permissive- /Zc:__cplusplus /utf-8 /MP)
-  set_property(TARGET capview_vcam PROPERTY MSVC_RUNTIME_LIBRARY
-               "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-endif()
-set_target_properties(capview_vcam PROPERTIES
-  PREFIX ""
-  OUTPUT_NAME "capview_vcam"
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
-  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
-)
+# The media source rides inside the executable as a resource, and the executable
+# lays it down when the camera is installed. Shipping it as a loose second file
+# meant the two could be from different builds -- which happened, because Windows
+# locks the file while the camera is in use and replacing it failed silently.
+set(VCAM_DLL_PATH "${CMAKE_BINARY_DIR}/bin/capview_vcam.dll")
+file(TO_NATIVE_PATH "${VCAM_DLL_PATH}" VCAM_DLL_NATIVE)
+string(REPLACE "\\" "\\\\" VCAM_DLL_ESCAPED "${VCAM_DLL_NATIVE}")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/res/vcam_resource.rc.in"
+               "${CMAKE_BINARY_DIR}/vcam_resource.rc" @ONLY)
+# So the resource is rebuilt when the source changes rather than when the path does.
+set_source_files_properties("${CMAKE_BINARY_DIR}/vcam_resource.rc"
+                            PROPERTIES OBJECT_DEPENDS "${VCAM_DLL_PATH}")
+target_sources(CapView PRIVATE "${CMAKE_BINARY_DIR}/vcam_resource.rc")
+add_dependencies(CapView capview_vcam)
 
 # Diagnostic console tool: prints the devices, formats and inputs CapView sees.
 add_executable(capview_probe

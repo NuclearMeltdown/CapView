@@ -37,22 +37,9 @@ if not exist "%ROOT%\build\bin\CapView.exe" goto :missing
 copy /y "%ROOT%\build\bin\CapView.exe" "%ROOT%\CapView.exe" >nul
 if errorlevel 1 exit /b 1
 
-rem Die Medienquelle der virtuellen Kamera muss neben der exe liegen -- dort sucht
-rem CapView sie, und dorthin zeigt die Registrierung nach dem Installieren.
-rem
-rem Der Fehlschlag hier ist kein Randfall: Windows haelt die DLL fest, solange die
-rem Kamera irgendwo benutzt wird oder wurde. Wird das verschluckt, laeuft eine neue
-rem exe gegen eine alte Quelle und das Bild ist einfach schwarz.
-if not exist "%ROOT%\build\bin\capview_vcam.dll" goto :novcam
-copy /y "%ROOT%\build\bin\capview_vcam.dll" "%ROOT%\capview_vcam.dll" >nul
-if errorlevel 1 (
-  echo.
-  echo [WARNUNG] capview_vcam.dll liess sich nicht ersetzen - vermutlich haelt der
-  echo           Frame Server sie fest. Programme schliessen, die die Kamera nutzen,
-  echo           dann erneut bauen. Bis dahin passen exe und Kameraquelle nicht.
-  echo.
-)
-:novcam
+rem Die Medienquelle wird nicht mehr danebengelegt: sie steckt als Ressource in
+rem der exe und wird beim Installieren der Kamera von dort herausgeschrieben.
+rem Ein Release ist damit wieder eine einzige Datei.
 
 if "%CLEAN%"=="0" goto :kept
 

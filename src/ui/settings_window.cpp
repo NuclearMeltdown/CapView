@@ -1797,10 +1797,14 @@ void SettingsWindow::DrawVirtualCameraBlock() {
                 "moved. Installing once more puts that right.")
             : T("Einmalig zu installieren. Windows lädt die Kameraquelle in einen "
                 "Systemdienst, deshalb muss sie systemweit registriert werden und Windows "
-                "fragt nach Administratorrechten. Das Benutzen danach braucht keine.",
+                "fragt nach Administratorrechten. Das Benutzen danach braucht keine. Die "
+                "Quelle steckt im Programm und wird beim Installieren danebengelegt -- "
+                "es gibt also keine zweite Datei, um die man sich kümmern müsste.",
                 "To be installed once. Windows loads the camera source into a system "
                 "service, so it has to be registered machine-wide and Windows will ask for "
-                "administrator rights. Using it afterwards needs none."));
+                "administrator rights. Using it afterwards needs none. The source travels "
+                "inside the program and is laid down when installing -- so there is no "
+                "second file to look after."));
     ImGui::Spacing();
     if (ImGui::Button(T("Kamera installieren", "Install camera"), ImVec2(200.0f, 0.0f))) {
       virtualCameraRequest_ = 1;
@@ -1816,10 +1820,10 @@ void SettingsWindow::DrawVirtualCameraBlock() {
                          "The installed camera source is from a different build than this "
                          "program. Install it again below."));
     ImGui::TextDisabled("%s",
-                        T("Windows hält die Datei fest, solange die Kamera irgendwo benutzt "
-                          "wird -- vorher alle Programme schließen, die sie geöffnet haben.",
-                          "Windows holds the file while the camera is in use anywhere -- "
-                          "close whatever has it open first."));
+                        T("Ein Klick genügt: die passende Fassung steckt im Programm. Eine "
+                          "festgehaltene alte Datei wird beiseite gelegt.",
+                          "One click is enough: the matching version is inside the program. "
+                          "A locked old file is moved aside."));
     ImGui::Spacing();
   }
 

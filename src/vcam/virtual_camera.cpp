@@ -56,6 +56,67 @@ bool RegisteredPath(std::wstring* out) {
   return true;
 }
 
+// Writes the media source that this executable carries next to it.
+//
+// The file it replaces is very likely in use: Windows loads it into the frame
+// server service, and into CapView itself the moment the camera is created --
+// measured, both hold it, and closing CapView does not release it. It cannot be
+// overwritten. It can be *renamed*, though, which is also measured: a loaded
+// module keeps its pages, not its directory entry. So the old one is moved
+// aside, the new one takes its name, and the leftover goes at some later start.
+bool WriteMediaSource(std::string* error) {
+  HRSRC found = ::FindResourceW(nullptr, MAKEINTRESOURCEW(vcam::kMediaSourceResourceId),
+                                RT_RCDATA);
+  HGLOBAL loaded = found ? ::LoadResource(nullptr, found) : nullptr;
+  const void* data = loaded ? ::LockResource(loaded) : nullptr;
+  const DWORD bytes = found ? ::SizeofResource(nullptr, found) : 0;
+  if (!data || bytes == 0) {
+    if (error) {
+      *error = T("Diese CapView-Fassung enthält keine Kameraquelle.",
+                 "This build of CapView carries no camera source.");
+    }
+    return false;
+  }
+
+  const std::wstring target = DllPath();
+  if (FileThere(target)) {
+    std::wstring aside = target + L".old";
+    for (int n = 0; n < 64 && ::GetFileAttributesW(aside.c_str()) != INVALID_FILE_ATTRIBUTES;
+         ++n) {
+      aside = target + L".old" + std::to_wstring(n);
+    }
+    if (!::MoveFileExW(target.c_str(), aside.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+      if (error) {
+        *error = T("Die alte Kameraquelle ließ sich nicht beiseite legen.",
+                   "The old camera source could not be moved aside.");
+      }
+      return false;
+    }
+  }
+
+  HANDLE file = ::CreateFileW(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    if (error) {
+      *error = T("Konnte die Kameraquelle nicht in den Programmordner schreiben.",
+                 "Could not write the camera source into the program folder.");
+    }
+    return false;
+  }
+  DWORD written = 0;
+  const bool ok = ::WriteFile(file, data, bytes, &written, nullptr) && written == bytes;
+  ::CloseHandle(file);
+  if (!ok) {
+    if (error) {
+      *error = T("Die Kameraquelle wurde nicht vollständig geschrieben.",
+                 "The camera source was not written in full.");
+    }
+    return false;
+  }
+  CAP_LOG("Kameraquelle geschrieben: %lu Byte", (unsigned long)bytes);
+  return true;
+}
+
 // regsvr32 under UAC. Waiting for it matters: without that the settings tab
 // would report the old state right after the user clicked.
 bool RunRegsvr(bool remove, std::string* error) {
@@ -210,7 +271,27 @@ bool VirtualCamera::InstallSource(std::string* error) {
     }
     return false;
   }
+  // Always lay down a fresh copy first. Registering only writes a registry
+  // entry; pointing it at a stale file again would change nothing, which is
+  // exactly the loop this used to sit in.
+  if (!WriteMediaSource(error)) return false;
   return RunRegsvr(false, error);
+}
+
+void VirtualCamera::CleanUpOldSources() {
+  const std::wstring pattern = DllPath() + L".old*";
+  WIN32_FIND_DATAW found = {};
+  HANDLE search = ::FindFirstFileW(pattern.c_str(), &found);
+  if (search == INVALID_HANDLE_VALUE) return;
+  const std::wstring folder = ExeFolder();
+  int removed = 0;
+  do {
+    if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+    // Still held is not a failure; some later start will get it.
+    if (::DeleteFileW((folder + found.cFileName).c_str())) ++removed;
+  } while (::FindNextFileW(search, &found));
+  ::FindClose(search);
+  if (removed > 0) CAP_LOG("Kameraquelle: %d alte Datei(en) entfernt", removed);
 }
 
 bool VirtualCamera::UninstallSource(std::string* error) { return RunRegsvr(true, error); }

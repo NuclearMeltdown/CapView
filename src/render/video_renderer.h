@@ -208,6 +208,8 @@ class VideoRenderer {
   bool CreateStates(std::string* error);
   bool CreateSourceTextures(std::string* error);
   bool EnsureIntermediate(int width, int height);
+  bool EnsureSdrCopy(int width, int height);
+  void RenderSdrCopy();
   void ReleaseSourceTextures();
 
   bool UploadPacked(const FrameView& frame);
@@ -285,6 +287,11 @@ class VideoRenderer {
 
   VideoFormatInfo source_;
   bool tenBitContainer_ = false;
+  DXGI_FORMAT intermediateFormat_ = DXGI_FORMAT_R8G8B8A8_UNORM;
+  ComPtr<ID3D11Texture2D> sdrCopy_;
+  ComPtr<ID3D11RenderTargetView> sdrCopyRtv_;
+  int sdrCopyWidth_ = 0;
+  int sdrCopyHeight_ = 0;
   Transfer hdrTransfer_ = Transfer::Sdr;
   bool hdrWideGamut_ = false;
   bool hdrOutput_ = false;
