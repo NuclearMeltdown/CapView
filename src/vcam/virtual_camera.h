@@ -51,6 +51,10 @@ class VirtualCamera {
   // Both raise a UAC prompt and wait for it. False with `error` filled when the
   // user declines or regsvr32 fails. The DLL is expected beside CapView.exe.
   static bool InstallSource(std::string* error);
+
+  // Deletes the copies left behind by earlier installs. Called once at start,
+  // when whatever had them open has usually let go.
+  static void CleanUpOldSources();
   static bool UninstallSource(std::string* error);
 
   // Turning the camera on and off. Start fails if the source is not installed.

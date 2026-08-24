@@ -28,6 +28,9 @@ inline constexpr wchar_t kSectionName[] = L"Global\\CapViewVirtualCameraFrames";
 // it simply serves the previous picture.
 inline constexpr wchar_t kFrameEventName[] = L"Global\\CapViewVirtualCameraFrame";
 
+// The media source, carried inside CapView.exe as a plain binary resource.
+inline constexpr int kMediaSourceResourceId = 101;
+
 inline constexpr uint32_t kMagic = 0x43565643u;  // 'CVVC'
 // Raise this whenever anything below it changes shape. The executable and the
 // media source are installed separately -- the update check replaces only the

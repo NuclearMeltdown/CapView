@@ -567,7 +567,17 @@ bool VideoRenderer::EnsureClean(int width, int height) {
 bool VideoRenderer::EnsureIntermediate(int width, int height) {
   width = std::max(1, width);
   height = std::max(1, height);
-  if (intermediate_ && intermediateWidth_ == width && intermediateHeight_ == height) return true;
+  // Eight bits cannot hold linear light: an HDR highlight is a value above one,
+  // and this is the buffer it would be thrown away in -- before the tone mapping
+  // at the end of the pipeline ever got to look at it. So the picture between
+  // the passes is half float whenever the source is HDR, and stays eight bit
+  // otherwise, where it costs nothing and is all that is needed.
+  const DXGI_FORMAT format = hdrTransfer_ == Transfer::Sdr ? DXGI_FORMAT_R8G8B8A8_UNORM
+                                                           : DXGI_FORMAT_R16G16B16A16_FLOAT;
+  if (intermediate_ && intermediateWidth_ == width && intermediateHeight_ == height &&
+      intermediateFormat_ == format) {
+    return true;
+  }
 
   intermediateRtv_.Reset();
   intermediateSrv_.Reset();
@@ -578,7 +588,7 @@ bool VideoRenderer::EnsureIntermediate(int width, int height) {
   td.Height = (UINT)height;
   td.MipLevels = 1;
   td.ArraySize = 1;
-  td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  td.Format = format;
   td.SampleDesc.Count = 1;
   td.Usage = D3D11_USAGE_DEFAULT;
   td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
@@ -593,7 +603,97 @@ bool VideoRenderer::EnsureIntermediate(int width, int height) {
   }
   intermediateWidth_ = width;
   intermediateHeight_ = height;
+  intermediateFormat_ = format;
   return true;
+}
+
+// The picture as an ordinary screen would see it, whatever the screen is
+// actually doing. Recording, screenshots and the virtual camera are all eight
+// bit and all want the same thing: the tone mapped picture. Reading back the
+// buffer between the passes would hand them linear light, and reading back what
+// went to the display would hand them scRGB when the display is HDR -- neither
+// is a picture anything else can use.
+//
+// It reuses the scaling shader at one to one with nearest sampling, because
+// that shader already knows how to turn linear light into an ordinary picture
+// and there is no reason to have two copies of that curve.
+bool VideoRenderer::EnsureSdrCopy(int width, int height) {
+  width = std::max(1, width);
+  height = std::max(1, height);
+  if (sdrCopy_ && sdrCopyWidth_ == width && sdrCopyHeight_ == height) return true;
+
+  sdrCopyRtv_.Reset();
+  sdrCopy_.Reset();
+
+  D3D11_TEXTURE2D_DESC td = {};
+  td.Width = (UINT)width;
+  td.Height = (UINT)height;
+  td.MipLevels = 1;
+  td.ArraySize = 1;
+  td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  td.SampleDesc.Count = 1;
+  td.Usage = D3D11_USAGE_DEFAULT;
+  td.BindFlags = D3D11_BIND_RENDER_TARGET;
+
+  ID3D11Device* dev = ctx_->device();
+  if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &sdrCopy_)))) return false;
+  if (FAILED(CAP_HR(dev->CreateRenderTargetView(sdrCopy_.Get(), nullptr, &sdrCopyRtv_)))) {
+    return false;
+  }
+  sdrCopyWidth_ = width;
+  sdrCopyHeight_ = height;
+  return true;
+}
+
+void VideoRenderer::RenderSdrCopy() {
+  if (hdrTransfer_ == Transfer::Sdr) return;
+  if (!EnsureSdrCopy(intermediateWidth_, intermediateHeight_)) return;
+
+  ID3D11DeviceContext* dc = ctx_->context();
+
+  ScaleCB sc = {};
+  sc.srcSize[0] = (float)intermediateWidth_;
+  sc.srcSize[1] = (float)intermediateHeight_;
+  sc.dstSize[0] = (float)intermediateWidth_;
+  sc.dstSize[1] = (float)intermediateHeight_;
+  sc.filter = 0;      // one to one, so nearest is exact
+  sc.sharpen = 0.0f;  // sharpening belongs to the display, not to a recording
+  sc.transfer = (int32_t)hdrTransfer_;
+  sc.outputHdr = 0;   // this copy is for things that are not a screen
+  sc.paperWhite = paperWhiteNits_;
+  sc.sourcePeak = sourcePeakNits_;
+  sc.displayPeak = 100.0f;  // an ordinary screen, by definition of what this is for
+
+  D3D11_MAPPED_SUBRESOURCE mapped = {};
+  if (SUCCEEDED(dc->Map(cbScale_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+    memcpy(mapped.pData, &sc, sizeof(sc));
+    dc->Unmap(cbScale_.Get(), 0);
+  }
+
+  ID3D11RenderTargetView* rtv[] = {sdrCopyRtv_.Get()};
+  dc->OMSetRenderTargets(1, rtv, nullptr);
+
+  D3D11_VIEWPORT vp = {};
+  vp.Width = (float)intermediateWidth_;
+  vp.Height = (float)intermediateHeight_;
+  vp.MaxDepth = 1.0f;
+  dc->RSSetViewports(1, &vp);
+
+  dc->IASetInputLayout(nullptr);
+  dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  dc->VSSetShader(vs_.Get(), nullptr, 0);
+  dc->PSSetShader(psScale_.Get(), nullptr, 0);
+  ID3D11ShaderResourceView* srv[] = {intermediateSrv_.Get()};
+  dc->PSSetShaderResources(0, 1, srv);
+  ID3D11SamplerState* samplers[] = {sampPoint_.Get(), sampLinear_.Get()};
+  dc->PSSetSamplers(0, 2, samplers);
+  ID3D11Buffer* cbs[] = {cbScale_.Get()};
+  dc->PSSetConstantBuffers(0, 1, cbs);
+  dc->RSSetState(raster_.Get());
+  dc->Draw(3, 0);
+
+  ID3D11ShaderResourceView* none[] = {nullptr};
+  dc->PSSetShaderResources(0, 1, none);
 }
 
 // ----------------------------------------------------------------- uploading
@@ -1332,7 +1432,13 @@ void VideoRenderer::QueueReadback() {
   // The slot about to be written must not be the one the caller still holds.
   if (readbackWrite_ == readbackMapped_) return;
 
-  ctx_->context()->CopyResource(readbackTex_[readbackWrite_].Get(), intermediate_.Get());
+  ID3D11Texture2D* from = intermediate_.Get();
+  if (hdrTransfer_ != Transfer::Sdr) {
+    RenderSdrCopy();
+    if (!sdrCopy_) return;
+    from = sdrCopy_.Get();
+  }
+  ctx_->context()->CopyResource(readbackTex_[readbackWrite_].Get(), from);
   readbackWrite_ = (readbackWrite_ + 1) % kReadbackSlots;
   if (readbackQueued_ < kReadbackSlots) ++readbackQueued_;
 }

@@ -269,8 +269,16 @@ so there is nothing to read it from. It matters more than it sounds: assume
 88 out of 100 nits on an ordinary screen, darkening everything. 1000 is the
 default because that is where consoles sit.
 
-Recording is still SDR. What goes to the recorder is the tone mapped picture,
-not the original range.
+Recording, screenshots and the virtual camera are all eight bit, and all three
+get the tone mapped picture — not the linear light the display path works in,
+and not what an HDR screen is being sent. That distinction matters: a recording
+made while watching on an HDR monitor should still be a recording anyone can
+play, so the mapping to an ordinary screen is done for them separately rather
+than borrowed from whatever the display happens to be doing. Sharpening is left
+out of it, being a property of viewing rather than of the picture.
+
+What is *not* there is an HDR recording: the original range is not written out,
+which would need a ten bit encoder and the colour metadata to go with it.
 
 ### Virtual camera
 
@@ -324,17 +332,20 @@ consumer picks. Whatever it picks is what CapView renders into, with the picture
 keeping its shape and black bars filling the rest — a 4:3 console in a 16:9
 camera is pillarboxed rather than stretched.
 
-Note that this makes a release two files: `CapView.exe` and `capview_vcam.dll`
-have to sit in the same folder, and they have to be from the same build. The
-update check downloads only the executable, and Windows keeps the DLL locked
-while the camera is in use anywhere on the machine, so the two really can drift
-apart. Both halves therefore check that they agree about the shape of what they
-share, and say so plainly if they do not — the alternative symptom is a black
-picture and no explanation, which is worth some trouble to avoid.
+The media source is a separate DLL because Windows loads it into a service, but
+it is not a separate *download*: it travels inside `CapView.exe` as a resource
+and is written out when the camera is installed. A release is one file, and the
+executable can only ever install a source that matches itself.
 
-If the source needs replacing and Windows will not let go of the file, close
-whatever has the camera open; failing that, restarting the *Windows Camera Frame
-Server* service releases it.
+It was two files briefly, and that was a mistake worth recording. Windows keeps
+the DLL locked while the camera is in use — measured, both the frame server and
+CapView itself hold it, and closing CapView does not release it — so replacing
+it quietly failed, a new executable ended up talking to an old source, and every
+frame came out black. Installing now lays down a fresh copy first, moving any
+locked one aside: a loaded module keeps its pages, not its name, so renaming it
+works where overwriting does not. The leftover goes at some later start. Both
+halves still check that they agree about the shape of what they share, as a
+belt to that brace.
 
 ### Updates
 

@@ -182,6 +182,7 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
   // A previous update left its predecessor lying next to us; it can go now that
   // nothing is running from it.
   Updater::CleanUpPreviousBuild();
+  VirtualCamera::CleanUpOldSources();
   if (config_.app.checkUpdatesOnStart) updater_.CheckAsync();
 
   running_ = true;

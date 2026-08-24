@@ -2,6 +2,7 @@
 build/
 /CapView.exe
 /capview_vcam.dll
+/capview_vcam.dll.old*
 /capview_probe.exe
 
 # Settings are per machine and hold device names and paths.
