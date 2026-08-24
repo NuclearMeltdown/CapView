@@ -123,8 +123,19 @@ guessing wrong does not soften the picture, it makes it judder.
 
 A composite signal carries colour and brightness on one wire, and the two leak
 into each other. What comes out is dot crawl — the crawling dotted zip along
-colour edges — and rainbow shimmer over fine detail. One slider addresses both,
-in two halves that hand over to each other.
+colour edges — and rainbow shimmer over fine detail. Two controls address it,
+and they hand over to each other.
+
+They are two different bargains, which is why they are two controls. Averaging
+costs nothing and only helps where the picture is standing still; demodulation
+is the only thing that helps where something is moving, and it costs sharpness.
+Behind the single slider they used to share, the first was switched on by the
+very first step above zero and the whole rest of the travel was the second
+getting gradually softer -- which was exactly what it felt like to use, and left
+no way to have the free half on its own. The averaging locks on whenever
+demodulation is asked for, though: without it the demodulator works over the
+still parts of the picture as well, paying sharpness there for something that is
+free.
 
 Where nothing is moving, four consecutive frames are averaged. Four, because the
 colour subcarrier walks through a four-frame sequence: measured on a PAL-60
@@ -444,7 +455,24 @@ All of these except Esc, the profile digits and Alt+F4 can be reassigned under
 
 The settings can be drawn over the picture or given a window of their own, which
 can then be moved to a second monitor or set beside the preview. The switch is
-under *Settings → Display → Window*.
+under *Settings → Display*.
+
+That second window shares one Direct3D device with the preview, and two things
+about it were wrong for longer than they should have been. Its frame used to be
+drawn and presented from inside the preview's own frame — and presenting a
+second swapchain part-way through another window's frame flushes everything
+already queued for it, sixty times a second. It runs after the preview has gone
+to the screen now. And it was created owned but without `WS_EX_APPWINDOW`, which
+is how Windows is asked for a taskbar button: without one, a window has nowhere
+to go when it is minimised, and lands as a stub in a corner of the screen the
+way windows did before there was a taskbar.
+
+Sharing the font atlas between the two windows had a sting in it as well. The
+DX11 backend stores the atlas's texture id *in the atlas*, so closing the second
+window released the texture the first one was still drawing with, and the whole
+interface went blank until restart. The atlas is still shared — the glyphs are
+the same and one copy on the GPU is enough — but the texture is rebuilt on the
+way out.
 
 The statistics overlay has three levels of detail: frame rates and frame age;
 those plus capture format, colour handling and audio buffer; and everything,

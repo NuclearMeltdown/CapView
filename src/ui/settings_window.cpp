@@ -859,6 +859,50 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
 
 // ----------------------------------------------------------------- image tab
 
+// The demodulation window the shader will use for this slider position. Kept
+// in step with kCleanPS by hand -- there is no way to ask a compiled shader what
+// it decided, and a readout that quietly drifts from the truth is worse than no
+// readout at all.
+int DotCrawlWindow(float slider, float carrierPeriod) {
+  const float cycles = 8.2f - slider * 5.9f;
+  int r = (int)std::floor(cycles * carrierPeriod * 0.5f + 0.5f);
+  r = r < 2 ? 2 : (r > 12 ? 12 : r);
+  return 2 * r + 1;
+}
+
+// What that window does, from the measurements on the capture card rather than
+// from theory: how much of the pattern goes, and what it costs in horizontal
+// sharpness. Between the measured points it is a straight line, which is honest
+// enough for a readout meant to give a sense of the trade.
+void DotCrawlEffect(int window, float* removed, float* softer) {
+  struct Point {
+    int window;
+    float removed;
+    float softer;
+  };
+  static const Point kMeasured[] = {
+      {25, 42.0f, 7.0f}, {15, 61.0f, 11.0f}, {11, 74.0f, 14.0f}, {9, 81.0f, 17.0f},
+  };
+  const int count = (int)(sizeof(kMeasured) / sizeof(kMeasured[0]));
+  if (window >= kMeasured[0].window) {
+    *removed = kMeasured[0].removed;
+    *softer = kMeasured[0].softer;
+    return;
+  }
+  for (int i = 1; i < count; ++i) {
+    if (window >= kMeasured[i].window) {
+      const Point& a = kMeasured[i - 1];
+      const Point& b = kMeasured[i];
+      const float t = (float)(a.window - window) / (float)(a.window - b.window);
+      *removed = a.removed + (b.removed - a.removed) * t;
+      *softer = a.softer + (b.softer - a.softer) * t;
+      return;
+    }
+  }
+  *removed = kMeasured[count - 1].removed;
+  *softer = kMeasured[count - 1].softer;
+}
+
 void SettingsWindow::DrawImageTab() {
   ImageSettings& img = cfg().active().image;
   ImGui::Spacing();
@@ -958,37 +1002,74 @@ void SettingsWindow::DrawImageTab() {
                  "Rainbow patterns over fine detail. Blurs colour sideways; sharpness "
                  "stays, because composite carries no fine colour detail anyway."));
 
-    // One control, not two. They are two halves of one job -- an average over
-    // time where the picture is still, and the carrier worked back out of the
-    // brightness where it is not -- and asking somebody to balance them against
-    // each other only invites the setting where they fight.
-    ImGui::SetNextItemWidth(-260.0f);
-    if (ImGui::SliderFloat(T("Punktkriechen", "Dot crawl"), &img.dotNotch, 0.0f, 1.0f,
-                           img.dotNotch <= 0.0f ? T("aus", "off") : "%.2f")) {
-      // The temporal half costs no sharpness and only acts where nothing moves,
-      // so there is never a reason to run it at half measures.
-      img.temporalDenoise = img.dotNotch > 0.0f ? 1.0f : 0.0f;
+    // Two controls, because they are two different bargains and pretending
+    // otherwise hid the more useful one.
+    //
+    // Averaging over four frames removes the pattern completely wherever the
+    // picture is standing still, and costs nothing at all. Working the carrier
+    // back out of the brightness is the only thing that helps where something is
+    // moving, and it costs sharpness. Behind one slider the first was switched
+    // on by the very first step and everything after it was the second getting
+    // gradually softer -- which is exactly what it felt like to use, and gave no
+    // way to have the free half on its own.
+    //
+    // They are not independent, though, which is why the checkbox locks: with
+    // the averaging off, the demodulator runs over still parts of the picture
+    // too, paying sharpness for something the averaging does for free.
+    const bool demodOn = img.dotNotch > 0.0f;
+    if (demodOn) img.temporalDenoise = 1.0f;
+
+    bool average = img.temporalDenoise > 0.0f;
+    ImGui::BeginDisabled(demodOn);
+    if (ImGui::Checkbox(T("Stillstehendes mitteln", "Average what stands still"), &average)) {
+      img.temporalDenoise = average ? 1.0f : 0.0f;
     }
+    ImGui::EndDisabled();
     ImGui::SameLine();
-    HelpMarker(T("Wo nichts in Bewegung ist, wird über vier Bilder gemittelt -- das kostet "
-                 "keine Schärfe. Wo etwas in Bewegung ist, wird der Farbträger aus der "
-                 "Helligkeit herausgerechnet, und weiter rechts heißt gründlicher und "
-                 "weicher: bei 0,5 gehen rund 60 % weg, ganz rechts über 90 %, dann aber "
-                 "auf Kosten des Bildes.\n\n"
-                 "Vier Bilder decken jede Norm ab: PAL wandert 270 Grad je Bild und "
-                 "wiederholt sich nach vier, NTSC 180 Grad und wiederholt sich nach zwei. "
-                 "Die zweite Hälfte braucht dagegen die richtige Trägerfrequenz, und die "
-                 "kommt aus der Videonorm im Reiter Quelle. Steht die falsch, sinkt die "
-                 "Wirkung von rund 70 auf 34 Prozent.",
-                 "Where nothing moves, four frames are averaged -- that costs no sharpness. "
-                 "Where something moves, the colour subcarrier is worked back out of the "
-                 "brightness, and further right is more thorough and softer: around 60 % "
-                 "goes at 0.5 and over 90 % at the far right, but by then at the picture's "
-                 "expense.\n\n"
-                 "Four frames cover every standard: PAL walks 270 degrees per frame and "
-                 "repeats after four, NTSC walks 180 and repeats after two. The second half "
-                 "does need the right carrier frequency, and that comes from the video "
+    HelpMarker(T("Mittelt über vier Bilder und entfernt das Punktkriechen dort vollständig, "
+                 "wo sich nichts bewegt -- ohne einen Deut Schärfe zu kosten. Vier, weil der "
+                 "Farbträger eine Folge über vier Bilder durchläuft: bei zwei bliebe alles "
+                 "stehen.\n\n"
+                 "Fest angehakt, sobald der Regler darunter über null steht: ohne die "
+                 "Mittelung rechnet der Demodulator auch über ruhende Bildteile und "
+                 "bezahlt dort Schärfe für etwas, das hier umsonst zu haben ist.",
+                 "Averages over four frames and removes the crawl entirely wherever nothing "
+                 "is moving, at no cost in sharpness at all. Four, because the colour "
+                 "subcarrier walks through a four frame sequence; two would cancel "
+                 "nothing.\n\n"
+                 "Held on whenever the slider below is above zero: without the averaging "
+                 "the demodulator works over the still parts of the picture as well, and "
+                 "pays sharpness there for something that is free here."));
+
+    ImGui::SetNextItemWidth(-260.0f);
+    ImGui::SliderFloat(T("Bewegtes entstören", "Clean up what moves"), &img.dotNotch, 0.0f, 1.0f,
+                       img.dotNotch <= 0.0f ? T("aus", "off") : T("Stufe %.2f", "step %.2f"));
+    ImGui::SameLine();
+    HelpMarker(T("Rechnet den Farbträger aus der Helligkeit heraus -- das Einzige, was gegen "
+                 "Punktkriechen an bewegten Stellen hilft, und es kostet Schärfe. Weiter "
+                 "rechts heißt gründlicher und weicher; die Zeile darunter sagt, wo man "
+                 "gerade steht.\n\n"
+                 "Braucht die richtige Trägerfrequenz, und die kommt aus der Videonorm im "
+                 "Reiter Quelle. Steht die falsch, sinkt die Wirkung von rund 70 auf 34 "
+                 "Prozent.",
+                 "Works the colour subcarrier back out of the brightness -- the only thing "
+                 "that helps against crawl on moving parts, and it costs sharpness. Further "
+                 "right is more thorough and softer; the line below says where you are.\n\n"
+                 "It needs the right carrier frequency, and that comes from the video "
                  "standard on the Source tab. Set wrong, it drops from about 70 % to 34 %."));
+
+    // What the number amounts to, because a number on its own says nothing and
+    // this is a trade the user should be able to see rather than infer.
+    if (demodOn) {
+      const int window = DotCrawlWindow(img.dotNotch, carrierPeriod_);
+      float removed = 0.0f, softer = 0.0f;
+      DotCrawlEffect(window, &removed, &softer);
+      ImGui::Indent();
+      ImGui::TextDisabled(T("In Bewegung: %.0f %% weg, dafür %.0f %% weicher (Fenster %d Punkte).",
+                            "Moving: %.0f %% gone, %.0f %% softer for it (window %d samples)."),
+                          removed, softer, window);
+      ImGui::Unindent();
+    }
   }
 
   ImGui::Spacing();
@@ -1398,7 +1479,7 @@ void SettingsWindow::DrawDisplayTab() {
   }
 
   ImGui::Spacing();
-  ImGui::SeparatorText(T("Fenster", "Window"));
+  ImGui::SeparatorText(T("Verhalten", "Behaviour"));
   ImGui::Checkbox("VSync", &app.vsync);
   ImGui::SameLine();
   HelpMarker(T("Aus ist der größte Latenzgewinn, kann aber Tearing zeigen.",
@@ -1407,10 +1488,21 @@ void SettingsWindow::DrawDisplayTab() {
   ImGui::Checkbox(T("Immer im Vordergrund", "Always on top"), &app.alwaysOnTop);
   ImGui::Checkbox(T("Mauszeiger im Vollbild ausblenden", "Hide cursor in fullscreen"),
                   &app.hideCursorFullscreen);
+  ImGui::SameLine();
+  HelpMarker(T("Zeiger nach kurzer Ruhe ausblenden.", "Hides the pointer after a short idle."));
+
   ImGui::Checkbox(T("Bildschirmschoner und Standby verhindern", "Prevent screensaver and sleep"),
                   &app.preventSleep);
   ImGui::SameLine();
-  HelpMarker(T("Zeiger nach kurzer Ruhe ausblenden.", "Hides the pointer after a short idle."));
+  HelpMarker(T("Hält den Bildschirm wach, solange CapView läuft -- beim Zusehen drückt "
+               "niemand eine Taste.",
+               "Keeps the screen awake while CapView is running -- nobody presses a key "
+               "while watching."));
+
+  // The toolbar's own Hide button was the only way to turn it off, and the
+  // right-click menu the only way back. A setting that can be reached from one
+  // place and undone from another is a setting people lose.
+  ImGui::Checkbox(T("Werkzeugleiste anzeigen", "Show toolbar"), &app.showToolbar);
 
   ImGui::Checkbox(T("Statistik einblenden", "Show statistics"), &app.showStats);
   ImGui::SameLine();
@@ -1603,13 +1695,14 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   // the rest is greyed out rather than inviting people to configure a bitrate
   // for an encoder that cannot run.
   const bool ready = ffmpeg && ffmpeg->found;
+  // Always here, whether ffmpeg was found or not. It used to move to the bottom
+  // of the tab once it was working, so where you last saw it was no guide to
+  // where it is -- and a thing that moves is a thing you hunt for.
   ImGui::Spacing();
-  if (!ready) {
-    DrawFfmpegBlock(ffmpeg);
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-  }
+  DrawFfmpegBlock(ffmpeg);
+  ImGui::Spacing();
+  ImGui::Separator();
+  ImGui::Spacing();
 
   ImGui::BeginDisabled(!ready);
 
@@ -1787,11 +1880,6 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
                "Software encoders only, and only while the preset below is on automatic."));
 
   DrawEncoderBlock(selected ? selected : (ffmpeg ? ffmpeg->Resolve(rec.encoder) : nullptr));
-
-  if (ready) {
-    ImGui::Spacing();
-    DrawFfmpegBlock(ffmpeg);
-  }
 
   ImGui::EndDisabled();
 

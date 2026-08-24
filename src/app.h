@@ -151,7 +151,12 @@ class App {
 
   // Draws the settings into their own window when that is switched on.
   // Returns true when it took care of them, so the in-picture panel is skipped.
-  bool DrawSettingsWindowed();
+  // True while the settings live in a window of their own, whether or not that
+  // window happens to be visible.
+  bool settingsAreWindowed() const { return config_.app.settingsSeparateWindow; }
+  // The settings window's own frame. Called *after* the main window has been
+  // presented, never inside its frame -- see the comment at the call site.
+  void DrawSettingsWindowed();
   // The one-off notice when the check made at startup finds something. Shown in
   // the picture, because a tab nobody opened is not a notice.
   void DrawUpdatePrompt();

@@ -1,5 +1,7 @@
 #include "ui/settings_host.h"
 
+#include "resource.h"
+
 #include <dwmapi.h>
 
 #include "backends/imgui_impl_dx11.h"
@@ -90,6 +92,14 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   wc.lpfnWndProc = &SettingsHost::WndProc;
   wc.hInstance = instance;
   wc.hCursor = ::LoadCursorW(nullptr, IDC_ARROW);
+  // The same icon as the preview. Without it the taskbar button this window now
+  // has -- and its Alt+Tab entry -- would show the generic placeholder.
+  wc.hIcon = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON,
+                                 ::GetSystemMetrics(SM_CXICON), ::GetSystemMetrics(SM_CYICON),
+                                 LR_DEFAULTCOLOR);
+  wc.hIconSm = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON,
+                                   ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON),
+                                   LR_DEFAULTCOLOR);
   wc.lpszClassName = kClassName;
   // Registering twice is not an error worth failing over; the second call just
   // tells us it is already there.
@@ -97,8 +107,14 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
 
   const int w = (int)(720 * uiScale_);
   const int h = (int)(640 * uiScale_);
-  hwnd_ = ::CreateWindowExW(0, kClassName, L"CapView", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
-                            CW_USEDEFAULT, w, h, owner, nullptr, instance, this);
+  // WS_EX_APPWINDOW, and it is not decoration. An owned window is deliberately
+  // kept off the taskbar by Windows -- and a window with no taskbar button, when
+  // minimised, has nowhere to go, so it lands as a stub in the bottom left
+  // corner of the screen the way windows did before there was a taskbar. That is
+  // both reported symptoms, and this one flag is both fixes. The owner is worth
+  // keeping: it makes the settings stay above the preview and close with it.
+  hwnd_ = ::CreateWindowExW(WS_EX_APPWINDOW, kClassName, L"CapView", WS_OVERLAPPEDWINDOW,
+                            CW_USEDEFAULT, CW_USEDEFAULT, w, h, owner, nullptr, instance, this);
   if (!hwnd_) {
     if (error) *error = T("Einstellungsfenster konnte nicht erstellt werden",
                              "The settings window could not be created");
@@ -131,7 +147,11 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
     Destroy();
     return false;
   }
-  factory->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER);
+  // Deliberately not calling MakeWindowAssociation here. It is a property of the
+  // *factory*, not of a window: calling it again would replace the association
+  // the main window made, and with it the NO_WINDOW_CHANGES that stops DXGI
+  // resizing the preview behind our back. Leaving it alone means Alt+Enter keeps
+  // meaning the preview, which is what it should mean anyway.
 
   // A context of its own, sharing the main one's fonts: the glyphs are the same
   // and one atlas on the GPU is enough for both.
@@ -158,14 +178,35 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
 void SettingsHost::Destroy() {
   if (imgui_) {
     ImGuiContext* previous = ImGui::GetCurrentContext();
+    // If this context is the current one, it is about to stop existing -- so
+    // there is nothing to go back to and nothing to repair.
+    if (previous == imgui_) previous = nullptr;
     ImGui::SetCurrentContext(imgui_);
-    ImGui_ImplDX11_Shutdown();
-    ImGui_ImplWin32_Shutdown();
+    // Guarded, because Create can fail between the two backends: the platform
+    // one is initialised first and the renderer one only if it succeeded, and
+    // the failure path comes straight here. Shutting down a backend that was
+    // never started walks a null.
+    if (ImGui::GetIO().BackendRendererUserData) ImGui_ImplDX11_Shutdown();
+    if (ImGui::GetIO().BackendPlatformUserData) ImGui_ImplWin32_Shutdown();
     // The shared atlas belongs to the main context, so it must survive this.
     ImGui::GetIO().Fonts = nullptr;
     ImGui::DestroyContext(imgui_);
     imgui_ = nullptr;
     ImGui::SetCurrentContext(previous == nullptr ? nullptr : previous);
+
+    // And then put back what that took from the main context, if there is a main
+    // context left to put it back into -- at program exit there may not be.
+    //
+    // Sharing one font atlas between two contexts has a sting in it that is
+    // easy to miss: the DX11 backend keeps the atlas's texture id *in the
+    // atlas*, and its shutdown calls io.Fonts->SetTexID(0) and releases the
+    // texture. Since the atlas is the main context's, closing this window left
+    // the main interface drawing every glyph with a null texture -- which is
+    // exactly the "everything breaks until restart" that was reported. One call
+    // rebuilds the texture and puts the id back.
+    if (previous && ImGui::GetIO().BackendRendererUserData) {
+      ImGui_ImplDX11_CreateDeviceObjects();
+    }
   }
   ReleaseRenderTarget();
   swapchain_.Reset();
@@ -204,7 +245,11 @@ void SettingsHost::Resize() {
 void SettingsHost::Show(const std::wstring& title) {
   if (!hwnd_) return;
   ::SetWindowTextW(hwnd_, title.c_str());
-  ::ShowWindow(hwnd_, SW_SHOW);
+  // SW_SHOW displays a minimised window *still minimised*, and BeginFrame then
+  // refuses to draw it -- so reopening the settings after minimising them did
+  // nothing at all. Only reachable since this window gained a taskbar button
+  // and could be minimised properly in the first place.
+  ::ShowWindow(hwnd_, ::IsIconic(hwnd_) ? SW_RESTORE : SW_SHOW);
   ::SetForegroundWindow(hwnd_);
   visible_ = true;
   closeRequested_ = false;
@@ -236,6 +281,12 @@ void SettingsHost::ApplyTheme(bool darkMode, unsigned accentColor) {
 bool SettingsHost::BeginFrame(bool darkMode, unsigned accentColor) {
   if (!hwnd_ || !visible_ || !imgui_ || !rtv_) return false;
   if (::IsIconic(hwnd_)) return false;
+  // Covered by something else: stop drawing and ask cheaply whether that is
+  // still true, rather than paying for a present nobody can see.
+  if (occluded_) {
+    if (swapchain_->Present(0, DXGI_PRESENT_TEST) != S_OK) return false;
+    occluded_ = false;
+  }
   if (width_ <= 0 || height_ <= 0) return false;
 
   // Sixty redraws a second is plenty for a dialog, and the preview runs at twice
@@ -277,16 +328,21 @@ void SettingsHost::EndFrame() {
   ctx_->RSSetViewports(1, &vp);
 
   ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-  // Emphatically not vsynced. This runs from the main loop, so waiting for this
-  // window's vertical blank stalls the *preview* for up to a frame -- every
-  // frame, for as long as the dialog is open. That was the stutter. The redraw
-  // is throttled instead, which costs nothing and is invisible on a dialog.
-  swapchain_->Present(0, 0);
+  // Sixty a second, after the preview has already gone to the screen. Both
+  // halves of that matter: this used to run in the middle of the preview's own
+  // frame, where presenting a second swapchain flushes everything queued for
+  // the first one.
+  //
+  // The result is kept rather than discarded: a fully covered window gets DXGI's
+  // occluded-present throttle, and every present then takes far longer than it
+  // looks like it should. The main window handles that the same way.
+  const HRESULT hr = swapchain_->Present(0, 0);
+  occluded_ = hr == DXGI_STATUS_OCCLUDED;
 
-  // And unbind. This runs in the middle of the main window's frame, so leaving
-  // our own back buffer bound sends everything the main window draws afterwards
-  // into a surface that has already been presented -- which is exactly what made
-  // the toolbar, the statistics and the toasts vanish while this was open.
+  // And unbind. Defensive now rather than necessary -- the preview sets its own
+  // targets at the start of every pass -- but leaving a presented back buffer
+  // bound to the shared immediate context is the sort of thing that only shows
+  // up later, in something unrelated.
   ID3D11RenderTargetView* none[] = {nullptr};
   ctx_->OMSetRenderTargets(1, none, nullptr);
 

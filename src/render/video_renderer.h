@@ -60,6 +60,13 @@ class VideoRenderer {
   // Samples per cycle of the colour subcarrier, for a full width line. Set from
   // the video standard; the dot crawl filter is built around it.
   void SetCarrierSamples(double samples) { carrierSamples_ = samples; }
+  // Samples per cycle of the subcarrier at the width actually being captured --
+  // what the shader works with, and what the settings need to say honestly how
+  // wide the demodulation window currently is.
+  float effectiveCarrierPeriod() const {
+    const int w = source_.width > 0 ? source_.width : 720;
+    return (float)(carrierSamples_ * (double)w / 720.0);
+  }
 
   const VideoFormatInfo& sourceFormat() const { return source_; }
   // What curve the incoming picture is encoded against. Kept apart from the

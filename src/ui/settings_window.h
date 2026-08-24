@@ -106,6 +106,8 @@ class SettingsWindow {
   // What the app knows and the settings cannot see for themselves.
   void SetVirtualCameraState(bool running, bool consumed, int width, int height, int fps,
                              bool sourceOutdated);
+  void SetCarrierPeriod(float samples) { carrierPeriod_ = samples > 1.5f ? samples : 3.045f; }
+
   void SetHdrState(bool displayCapable, bool outputActive, float displayPeak, int sourceTransfer) {
     hdrDisplayCapable_ = displayCapable;
     hdrOutputActive_ = outputActive;
@@ -214,6 +216,10 @@ class SettingsWindow {
   bool vcamRunning_ = false;
   bool vcamConsumed_ = false;
   bool vcamOutdated_ = false;
+  // What the dot crawl slider currently amounts to. Passed in because it
+  // depends on the video standard and the captured width, neither of which the
+  // settings know.
+  float carrierPeriod_ = 3.045f;
   // What the app knows about the screen and the source; the settings cannot
   // ask DXGI themselves.
   bool hdrDisplayCapable_ = false;

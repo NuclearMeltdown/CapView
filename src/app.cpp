@@ -1115,11 +1115,11 @@ void App::UpdateVideoStandard() {
   standardNextTryQpc_ = now + SecondsToQpc(kStandardSettleSeconds);
 }
 
-bool App::DrawSettingsWindowed() {
+void App::DrawSettingsWindowed() {
   const bool wanted = config_.app.settingsSeparateWindow;
 
   // Nothing to do, and nothing built: the common case, and it costs one branch.
-  if (!wanted && !settingsHost_.created()) return false;
+  if (!wanted && !settingsHost_.created()) return;
 
   if (wanted && !settingsHost_.created()) {
     std::string error;
@@ -1130,7 +1130,7 @@ bool App::DrawSettingsWindowed() {
       CAP_WARN("%s", error.c_str());
       config_.app.settingsSeparateWindow = false;
       Toast(error);
-      return false;
+      return;
     }
     settingsHost_.ApplyTheme(darkMode_, config_.app.accentColor);
     // While its window is being dragged, Windows keeps the loop to itself. The
@@ -1147,7 +1147,7 @@ bool App::DrawSettingsWindowed() {
   if (!wanted) {
     // Switched off again: put the panel back inside the picture.
     settingsHost_.Destroy();
-    return false;
+    return;
   }
 
   // Closing the window is closing the settings, the same as the button is.
@@ -1161,26 +1161,18 @@ bool App::DrawSettingsWindowed() {
     }
   }
 
-  if (!settingsHost_.BeginFrame(darkMode_, config_.app.accentColor)) return settings_.isOpen();
+  if (!settingsHost_.BeginFrame(darkMode_, config_.app.accentColor)) return;
 
   settings_.SetFillsWindow(true);
   const SettingsWindow::Result result =
       settings_.Draw(capture_.running() ? &capture_.capabilities() : nullptr, &ffmpeg_);
   settingsHost_.EndFrame();
 
-  // The host left the device pointing at its own back buffer; the main window is
-  // still in the middle of its frame and needs it back.
-  ID3D11RenderTargetView* backbuffer[] = {d3d_.rtv()};
-  d3d_.context()->OMSetRenderTargets(1, backbuffer, nullptr);
-  D3D11_VIEWPORT vp = {};
-  vp.Width = (float)d3d_.width();
-  vp.Height = (float)d3d_.height();
-  vp.MaxDepth = 1.0f;
-  d3d_.context()->RSSetViewports(1, &vp);
+  // Nothing to put back. This runs after the main window has presented, so the
+  // targets it wants are set again by the next frame's first pass.
 
   // Closing is closing, whether it was the footer button or the window's own.
   if (result == SettingsWindow::Result::Close) settings_.Close();
-  return true;
 }
 
 void App::UpdateHdr() {
@@ -1250,6 +1242,7 @@ void App::UpdateHdr() {
                          d3d_.hdrOutput() ? display.peakNits : 100.0f);
 
   settings_.SetHdrState(display.hdr, d3d_.hdrOutput(), display.peakNits, (int)transfer);
+  settings_.SetCarrierPeriod(renderer_.effectiveCarrierPeriod());
 }
 
 void App::DrawUpdatePrompt() {
@@ -1737,7 +1730,13 @@ int App::Run() {
     RenderFrame();
 
     // Wait for the next captured frame, a pending second field, or input.
-    DWORD timeout = settings_.isOpen() ? 8 : 100;
+    // 16, not 8. This is the ceiling on how often the whole preview pipeline
+    // runs -- video shaders, colour work, readbacks for the recorder and the
+    // camera, a present -- and with the settings open it was redrawing the same
+    // captured field up to a hundred and twenty-five times a second for the
+    // sake of the dialog feeling responsive. The dialog has had a redraw clock
+    // of its own since it became a window, so it no longer needs this.
+    DWORD timeout = settings_.isOpen() ? 16 : 100;
     if (secondFieldPending_) {
       // Rounded up, not truncated. Truncating asks to be woken a fraction of a
       // millisecond before the field is due, at which point the loop finds it is
@@ -1955,6 +1954,11 @@ void App::RenderFrame() {
   FeedFrameConsumers();
   d3d_.EndFrame(config_.app.vsync);
 
+  // The settings window, if it is one, gets its frame here: after the preview
+  // has gone to the screen, so its own present cannot cut into the middle of
+  // the preview's.
+  DrawSettingsWindowed();
+
   // ---- present rate ----
   ++presentCount_;
   if (fpsWindowQpc_ == 0) fpsWindowQpc_ = now;
@@ -2155,7 +2159,14 @@ void App::DrawUi() {
   if (settings_.takeDeviceConfigRequest()) OpenDeviceConfig();
   if (settings_.takeCropDetectRequest()) DetectCrop();
   settings_.setProbeBusy(probing_.load(std::memory_order_relaxed));
-  if (!DrawSettingsWindowed()) {
+  // Drawn here only when the settings live inside the picture. The separate
+  // window is deliberately not touched from in here: this runs between the main
+  // context's NewFrame and Render, and presenting a second swapchain in the
+  // middle of another window's frame flushes every bit of GPU work already
+  // queued for it -- sixty times a second, while the preview runs at twice that
+  // or more. That was not merely CapView stuttering; it was enough to make the
+  // desktop's own cursor stutter. It happens after the present instead.
+  if (!settingsAreWindowed()) {
     settings_.SetFillsWindow(false);
     if (settings_.Draw(capture_.running() ? &capture_.capabilities() : nullptr, &ffmpeg_) ==
         SettingsWindow::Result::Close) {
