@@ -539,6 +539,9 @@ bool Config::Load(std::string* error) {
   app.hdrOutput = ReadEnum<HdrOutput>(a, "hdrOutput", kHdrOutputCount, HdrOutput::Auto);
   app.paperWhiteNits = (float)a["paperWhiteNits"].AsNumber(203.0);
   app.sourcePeakNits = (float)a["sourcePeakNits"].AsNumber(1000.0);
+  app.recordHdr = a["recordHdr"].AsBool(false);
+  app.screenshotHdr = a["screenshotHdr"].AsBool(false);
+  app.cameraHdr = a["cameraHdr"].AsBool(false);
   app.statsDetail = ReadEnum<StatsDetail>(a, "statsDetail", 3, StatsDetail::Compact);
   app.logToFile = a["logToFile"].AsBool(false);
   app.windowX = a["windowX"].AsInt(-1);
@@ -630,6 +633,9 @@ std::string Config::Serialize() const {
   a["hdrOutput"] = (int)app.hdrOutput;
   a["paperWhiteNits"] = app.paperWhiteNits;
   a["sourcePeakNits"] = app.sourcePeakNits;
+  a["recordHdr"] = app.recordHdr;
+  a["screenshotHdr"] = app.screenshotHdr;
+  a["cameraHdr"] = app.cameraHdr;
   a["statsDetail"] = (int)app.statsDetail;
   a["logToFile"] = app.logToFile;
   a["windowX"] = app.windowX;

@@ -279,6 +279,16 @@ bool VideoRenderer::CreateShaders(std::string* error) {
     return false;
   }
 
+  ComPtr<ID3DBlob> recordCode = CompileShader(kHdrRecordPS, "ps_4_0", error);
+  if (!recordCode) return false;
+  if (FAILED(CAP_HR(dev->CreatePixelShader(recordCode->GetBufferPointer(),
+                                           recordCode->GetBufferSize(), nullptr,
+                                           &psHdrRecord_)))) {
+    if (error) *error = T("Aufnahme-Shader konnte nicht erstellt werden",
+                             "The recording shader could not be created");
+    return false;
+  }
+
   ComPtr<ID3DBlob> uiCode = CompileShader(kUiCompositePS, "ps_4_0", error);
   if (!uiCode) return false;
   if (FAILED(CAP_HR(dev->CreatePixelShader(uiCode->GetBufferPointer(), uiCode->GetBufferSize(),
@@ -303,6 +313,11 @@ bool VideoRenderer::CreateShaders(std::string* error) {
     return false;
   }
   bd.ByteWidth = 16;  // one float plus padding
+  if (FAILED(CAP_HR(dev->CreateBuffer(&bd, nullptr, &cbRecord_)))) {
+    if (error) *error = T("Konstantenpuffer konnte nicht erstellt werden",
+                             "The constant buffer could not be created");
+    return false;
+  }
   if (FAILED(CAP_HR(dev->CreateBuffer(&bd, nullptr, &cbUi_)))) {
     if (error) *error = T("Konstantenpuffer konnte nicht erstellt werden",
                              "The constant buffer could not be created");
@@ -617,6 +632,145 @@ bool VideoRenderer::EnsureIntermediate(int width, int height) {
 // It reuses the scaling shader at one to one with nearest sampling, because
 // that shader already knows how to turn linear light into an ordinary picture
 // and there is no reason to have two copies of that curve.
+bool VideoRenderer::GrabStillHalf(std::vector<uint16_t>* out, int* width, int* height,
+                                  int* strideBytes) {
+  if (!intermediate_ || !ctx_ || hdrTransfer_ == Transfer::Sdr) return false;
+  if (intermediateFormat_ != DXGI_FORMAT_R16G16B16A16_FLOAT) return false;
+
+  D3D11_TEXTURE2D_DESC td = {};
+  intermediate_->GetDesc(&td);
+  td.Usage = D3D11_USAGE_STAGING;
+  td.BindFlags = 0;
+  td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+  td.MiscFlags = 0;
+
+  ComPtr<ID3D11Texture2D> staging;
+  if (FAILED(CAP_HR(ctx_->device()->CreateTexture2D(&td, nullptr, &staging)))) return false;
+
+  ID3D11DeviceContext* dc = ctx_->context();
+  dc->CopyResource(staging.Get(), intermediate_.Get());
+
+  D3D11_MAPPED_SUBRESOURCE mapped = {};
+  if (FAILED(CAP_HR(dc->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped)))) return false;
+
+  out->resize((size_t)mapped.RowPitch / sizeof(uint16_t) * intermediateHeight_);
+  memcpy(out->data(), mapped.pData, out->size() * sizeof(uint16_t));
+  dc->Unmap(staging.Get(), 0);
+
+  *width = intermediateWidth_;
+  *height = intermediateHeight_;
+  *strideBytes = (int)mapped.RowPitch;
+  return true;
+}
+
+bool VideoRenderer::EnsureHdrRecord(int width, int height) {
+  width = std::max(1, width);
+  height = std::max(1, height);
+  if (hdrRecTex_ && hdrRecWidth_ == width && hdrRecHeight_ == height) return true;
+
+  hdrRecRtv_.Reset();
+  hdrRecTex_.Reset();
+  for (int i = 0; i < kReadbackSlots; ++i) hdrReadbackTex_[i].Reset();
+  hdrReadWrite_ = 0;
+  hdrReadQueued_ = 0;
+  hdrReadMapped_ = -1;
+
+  ID3D11Device* dev = ctx_->device();
+
+  D3D11_TEXTURE2D_DESC td = {};
+  td.Width = (UINT)width;
+  td.Height = (UINT)height;
+  td.MipLevels = 1;
+  td.ArraySize = 1;
+  td.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+  td.SampleDesc.Count = 1;
+  td.Usage = D3D11_USAGE_DEFAULT;
+  td.BindFlags = D3D11_BIND_RENDER_TARGET;
+  if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &hdrRecTex_)))) return false;
+  if (FAILED(CAP_HR(dev->CreateRenderTargetView(hdrRecTex_.Get(), nullptr, &hdrRecRtv_)))) {
+    return false;
+  }
+
+  td.Usage = D3D11_USAGE_STAGING;
+  td.BindFlags = 0;
+  td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+  for (int i = 0; i < kReadbackSlots; ++i) {
+    if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &hdrReadbackTex_[i])))) return false;
+  }
+
+  hdrRecWidth_ = width;
+  hdrRecHeight_ = height;
+  return true;
+}
+
+void VideoRenderer::QueueHdrReadback() {
+  if (!hdrWideActive() || !intermediate_ || !ctx_) return;
+  if (!EnsureHdrRecord(intermediateWidth_, intermediateHeight_)) return;
+  if (hdrReadWrite_ == hdrReadMapped_) return;
+
+  ID3D11DeviceContext* dc = ctx_->context();
+
+  D3D11_MAPPED_SUBRESOURCE mapped = {};
+  if (SUCCEEDED(dc->Map(cbRecord_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+    const float value[4] = {paperWhiteNits_, 0.0f, 0.0f, 0.0f};
+    memcpy(mapped.pData, value, sizeof(value));
+    dc->Unmap(cbRecord_.Get(), 0);
+  }
+
+  ID3D11RenderTargetView* rtv[] = {hdrRecRtv_.Get()};
+  dc->OMSetRenderTargets(1, rtv, nullptr);
+
+  D3D11_VIEWPORT vp = {};
+  vp.Width = (float)hdrRecWidth_;
+  vp.Height = (float)hdrRecHeight_;
+  vp.MaxDepth = 1.0f;
+  dc->RSSetViewports(1, &vp);
+
+  dc->IASetInputLayout(nullptr);
+  dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  dc->VSSetShader(vs_.Get(), nullptr, 0);
+  dc->PSSetShader(psHdrRecord_.Get(), nullptr, 0);
+  ID3D11ShaderResourceView* srv[] = {intermediateSrv_.Get()};
+  dc->PSSetShaderResources(0, 1, srv);
+  ID3D11SamplerState* samp[] = {sampPoint_.Get()};
+  dc->PSSetSamplers(0, 1, samp);
+  ID3D11Buffer* cbs[] = {cbRecord_.Get()};
+  dc->PSSetConstantBuffers(0, 1, cbs);
+  dc->RSSetState(raster_.Get());
+  dc->Draw(3, 0);
+
+  ID3D11ShaderResourceView* none[] = {nullptr};
+  dc->PSSetShaderResources(0, 1, none);
+
+  dc->CopyResource(hdrReadbackTex_[hdrReadWrite_].Get(), hdrRecTex_.Get());
+  hdrReadWrite_ = (hdrReadWrite_ + 1) % kReadbackSlots;
+  if (hdrReadQueued_ < kReadbackSlots) ++hdrReadQueued_;
+}
+
+bool VideoRenderer::FetchHdrReadback(ReadbackFrame* out) {
+  if (!hdrWideActive() || !ctx_ || hdrReadQueued_ < kReadbackSlots) return false;
+  if (hdrReadMapped_ >= 0) return false;
+
+  const int slot = hdrReadWrite_;  // oldest: two copies are queued behind it
+  D3D11_MAPPED_SUBRESOURCE mapped = {};
+  if (FAILED(ctx_->context()->Map(hdrReadbackTex_[slot].Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+    return false;
+  }
+  hdrReadMapped_ = slot;
+  out->data = static_cast<const uint8_t*>(mapped.pData);
+  out->stride = (int)mapped.RowPitch;
+  out->width = hdrRecWidth_;
+  out->height = hdrRecHeight_;
+  out->size = (size_t)mapped.RowPitch * hdrRecHeight_;
+  return true;
+}
+
+void VideoRenderer::ReleaseHdrReadback() {
+  if (hdrReadMapped_ < 0) return;
+  ctx_->context()->Unmap(hdrReadbackTex_[hdrReadMapped_].Get(), 0);
+  hdrReadMapped_ = -1;
+}
+
 bool VideoRenderer::EnsureSdrCopy(int width, int height) {
   width = std::max(1, width);
   height = std::max(1, height);
@@ -1439,6 +1593,7 @@ void VideoRenderer::QueueReadback() {
     from = sdrCopy_.Get();
   }
   ctx_->context()->CopyResource(readbackTex_[readbackWrite_].Get(), from);
+  QueueHdrReadback();
   readbackWrite_ = (readbackWrite_ + 1) % kReadbackSlots;
   if (readbackQueued_ < kReadbackSlots) ++readbackQueued_;
 }

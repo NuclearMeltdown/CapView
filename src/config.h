@@ -85,7 +85,9 @@ enum class RecordContainer { Mkv, Mp4 };
 
 // PNG is lossless and the sane default for a capture card: the point of a still
 // is usually to look at it closely. JPEG is there for whoever takes hundreds.
-enum class ScreenshotFormat { Png, Jpeg };
+// Jxr is not a choice in the format list -- it is what an HDR screenshot comes
+// out as, because it is the one container Windows can write half floats into.
+enum class ScreenshotFormat { Png, Jpeg, Jxr };
 
 // Which encoder ffmpeg is asked for. Auto picks the best one that survived the
 // test encode, preferring hardware. The AV1 entries need recent hardware
@@ -326,6 +328,15 @@ struct AppSettings {
   // assuming ten thousand where the content only reaches a thousand drags the
   // whole picture down by a third when tone mapping to an ordinary screen.
   float sourcePeakNits = 1000.0f;
+  // Keep the range when recording, rather than writing what an ordinary screen
+  // would have shown. Costs a ten bit encoder and a player that understands PQ.
+  bool recordHdr = false;
+  // Screenshots that keep the range, written as JPEG XR rather than PNG.
+  bool screenshotHdr = false;
+  // Offer the virtual camera in ten bit PQ as well as the ordinary eight bit.
+  // Off by default, and deliberately: almost nothing on the other end knows
+  // what to do with an HDR webcam yet.
+  bool cameraHdr = false;
   StatsDetail statsDetail = StatsDetail::Compact;
   bool logToFile = false;
 

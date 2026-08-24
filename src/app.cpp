@@ -810,6 +810,14 @@ void App::StartRecording() {
     micTrack.pull = [this](float* out, size_t frames) { return mic_.Read(out, frames); };
   }
 
+  // Which picture the writer will be fed, decided before it starts: the wide
+  // path only exists while the source is HDR and the setting asks for it.
+  renderer_.SetHdrWideWanted(config_.app.recordHdr, virtualCamera_.wantsWide());
+  const bool wideRecording = config_.app.recordHdr && renderer_.hdrWideActive();
+  recorder_.SetPixelFormat(wideRecording ? VideoRenderer::kHdrReadbackPixelFormat
+                                         : VideoRenderer::kReadbackPixelFormat,
+                           wideRecording);
+
   const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.outputWidth(),
                                   renderer_.outputHeight(), format.fps, mainTrack, micTrack,
                                   config_.active().audio.micTrackMode, &error);
@@ -931,18 +939,32 @@ void App::DrawToolbarStrip() {
 }
 
 void App::WriteScreenshot() {
+  RecordSettings& rec = config_.record;
+
+  // Keeping the range only means anything when there is a range to keep, so the
+  // setting and the source both have to say so. Otherwise this is an ordinary
+  // screenshot and takes the ordinary path.
+  const bool wide = config_.app.screenshotHdr &&
+                    renderer_.hdrTransfer() != VideoRenderer::Transfer::Sdr;
+
   std::vector<uint8_t> pixels;
-  int width = 0, height = 0;
-  if (!renderer_.GrabStill(&pixels, &width, &height)) {
+  std::vector<uint16_t> halfPixels;
+  int width = 0, height = 0, halfStride = 0;
+  if (wide) {
+    if (!renderer_.GrabStillHalf(&halfPixels, &width, &height, &halfStride)) {
+      Toast(T("Kein Bild zum Speichern.", "No picture to save."));
+      return;
+    }
+  } else if (!renderer_.GrabStill(&pixels, &width, &height)) {
     Toast(T("Kein Bild zum Speichern.", "No picture to save."));
     return;
   }
 
-  RecordSettings& rec = config_.record;
+  const ScreenshotFormat format = wide ? ScreenshotFormat::Jxr : rec.screenshotFormat;
   const std::wstring folder =
       ResolveOutputFolder(&rec.screenshotFolder, DefaultScreenshotFolder());
   const std::wstring path =
-      folder.empty() ? std::wstring() : MakeScreenshotPath(folder, rec.screenshotFormat);
+      folder.empty() ? std::wstring() : MakeScreenshotPath(folder, format);
   if (path.empty()) {
     Toast(T("Zielordner nicht verfügbar.", "Folder not available."));
     CAP_ERR("Screenshot: Ordner nicht verfügbar: %s", ToUtf8(folder).c_str());
@@ -950,8 +972,11 @@ void App::WriteScreenshot() {
   }
 
   std::string error;
-  if (!SaveScreenshot(path, pixels.data(), width, height, rec.screenshotFormat, rec.jpegQuality,
-                      &error)) {
+  const bool ok = wide
+      ? SaveScreenshotHdr(path, halfPixels.data(), width, height, halfStride,
+                          config_.app.paperWhiteNits, &error)
+      : SaveScreenshot(path, pixels.data(), width, height, format, rec.jpegQuality, &error);
+  if (!ok) {
     Toast(T("Screenshot fehlgeschlagen: ", "Screenshot failed: ") + error);
     CAP_ERR("Screenshot fehlgeschlagen: %s", error.c_str());
     return;
@@ -1579,13 +1604,33 @@ void App::FeedFrameConsumers() {
   // Only while something is actually watching. An idle camera costs a flag.
   const bool wantCamera = virtualCamera_.running() && virtualCamera_.consumed();
 
+  renderer_.SetHdrWideWanted(wantRecorder && config_.app.recordHdr,
+                             wantCamera && virtualCamera_.wantsWide());
   renderer_.SetReadbackEnabled(wantRecorder || wantCamera);
   if (!wantRecorder && !wantCamera) return;
 
+  // Either of the two can be on the wide path while the other is not, so both
+  // rings can be live at once. They are read in one place so a frame is never
+  // fetched twice and never half handed out.
+  const bool wide = renderer_.hdrWideActive();
+  const bool recordWide = wantRecorder && wide && config_.app.recordHdr;
+  const bool cameraWide = wantCamera && wide && virtualCamera_.wantsWide();
+
+  if (recordWide || cameraWide) {
+    VideoRenderer::ReadbackFrame w;
+    if (renderer_.FetchHdrReadback(&w)) {
+      if (recordWide) recorder_.PushVideo(w.data, w.stride);
+      if (cameraWide) virtualCamera_.PushFrameWide(w.data, w.stride, w.width, w.height);
+      renderer_.ReleaseHdrReadback();
+    }
+  }
+
+  if (!(wantCamera && !cameraWide) && !(wantRecorder && !recordWide)) return;
+
   VideoRenderer::ReadbackFrame frame;
   if (!renderer_.FetchReadback(&frame)) return;
-  if (wantRecorder) recorder_.PushVideo(frame.data, frame.stride);
-  if (wantCamera) {
+  if (wantRecorder && !recordWide) recorder_.PushVideo(frame.data, frame.stride);
+  if (wantCamera && !cameraWide) {
     virtualCamera_.PushFrame(frame.data, frame.stride, frame.width, frame.height);
   }
   renderer_.ReleaseReadback();
@@ -1612,17 +1657,26 @@ void App::UpdateVirtualCamera() {
     }
   }
 
+  // Written where it is cheap to notice a change; the media source reads it
+  // when a consumer next opens the camera.
+  if (config_.app.cameraHdr != cameraHdrOffered_) {
+    cameraHdrOffered_ = config_.app.cameraHdr;
+    VirtualCamera::SetWideOffered(cameraHdrOffered_);
+  }
+
   const bool want = config_.app.virtualCamera;
-  if (want && !virtualCamera_.running()) {
-    std::string error;
-    if (!virtualCamera_.Start(&error)) {
-      // Turning the switch back off rather than leaving it on and doing
-      // nothing, so the tab does not claim a camera that is not there.
-      config_.app.virtualCamera = false;
-      Toast(error);
-    }
-  } else if (!want && virtualCamera_.running()) {
+  if (want && !virtualCamera_.running() && !virtualCamera_.starting()) {
+    virtualCamera_.StartAsync();
+  } else if (!want && (virtualCamera_.running() || virtualCamera_.starting())) {
     virtualCamera_.Stop();
+  }
+
+  std::string startError;
+  if (virtualCamera_.takeError(&startError)) {
+    // Turning the switch back off rather than leaving it on and doing nothing,
+    // so the tab does not claim a camera that is not there.
+    config_.app.virtualCamera = false;
+    Toast(startError);
   }
 
   // Said once, not once a frame.

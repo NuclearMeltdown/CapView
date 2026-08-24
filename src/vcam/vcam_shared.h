@@ -28,6 +28,15 @@ inline constexpr wchar_t kSectionName[] = L"Global\\CapViewVirtualCameraFrames";
 // it simply serves the previous picture.
 inline constexpr wchar_t kFrameEventName[] = L"Global\\CapViewVirtualCameraFrame";
 
+// Whether the camera should also offer its ten bit form. The two halves cannot
+// share a setting the ordinary way -- one is a program in the user's session,
+// the other a DLL inside a service -- and the media source has to know before
+// the shared section exists, since it builds its list of formats at creation.
+// So it is the plainest thing that works across that boundary: a file that is
+// either there or not. ProgramData because both accounts can reach it.
+inline constexpr wchar_t kWideMarkerFolder[] = L"CapView";
+inline constexpr wchar_t kWideMarkerFile[] = L"virtual-camera-hdr";
+
 // The media source, carried inside CapView.exe as a plain binary resource.
 inline constexpr int kMediaSourceResourceId = 101;
 
@@ -39,7 +48,7 @@ inline constexpr uint32_t kMagic = 0x43565643u;  // 'CVVC'
 // produces a black picture and no explanation, which is the worst kind of
 // failure; detected, it is one sentence telling the user to install the camera
 // again.
-inline constexpr uint32_t kVersion = 2u;
+inline constexpr uint32_t kVersion = 3u;
 
 // Three slots is enough to keep a reader from ever waiting on the writer: one
 // being written, one being read, one spare.
@@ -48,7 +57,7 @@ inline constexpr uint32_t kSlotCount = 3u;
 // The largest picture the camera offers. Sized for the media type list below.
 inline constexpr uint32_t kMaxWidth = 1920u;
 inline constexpr uint32_t kMaxHeight = 1080u;
-inline constexpr uint32_t kSlotBytes = kMaxWidth * kMaxHeight * 3u / 2u;  // NV12
+inline constexpr uint32_t kSlotBytes = kMaxWidth * kMaxHeight * 3u;  // enough for P010 too
 
 // The formats the camera advertises. NV12 throughout, because that is what the
 // frame server and nearly every consumer want, and offering one layout means
@@ -64,6 +73,15 @@ inline constexpr CameraFormat kFormats[] = {
     {1280, 720, 30},
     {640, 480, 30},
 };
+
+// What a slot holds. NV12 is the ordinary eight bit picture every consumer
+// understands; P010 is ten bit on the PQ curve with BT.2020 primaries, offered
+// only when asked for because almost nothing on the other end knows what to do
+// with an HDR webcam yet.
+enum : uint32_t { kPixelNv12 = 0u, kPixelP010 = 1u };
+
+// P010 is twice the size of NV12 for the same picture.
+inline constexpr uint32_t kSlotBytesP010 = kMaxWidth * kMaxHeight * 3u;
 inline constexpr uint32_t kFormatCount = sizeof(kFormats) / sizeof(kFormats[0]);
 
 // One published picture. `sequence` is a seqlock: odd while the slot is being
@@ -74,6 +92,7 @@ struct alignas(64) SlotHeader {
   uint32_t width;
   uint32_t height;
   uint32_t bytes;
+  uint32_t pixel;  // which of the two layouts above
   int64_t timestamp100ns;
 };
 
@@ -87,6 +106,7 @@ struct SharedState {
   volatile uint32_t wantWidth;
   volatile uint32_t wantHeight;
   volatile uint32_t wantFps;
+  volatile uint32_t wantPixel;  // kPixelNv12 or kPixelP010
   volatile uint32_t consumers;
 
   // Written by CapView, read by the media source.

@@ -1270,6 +1270,55 @@ void SettingsWindow::DrawHdrBlock() {
                "source only reaches 1000 and paper white lands at 63 instead of 88 out of "
                "100 nits on an SDR monitor, darkening the whole picture. 1000 suits "
                "consoles."));
+
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Was den Umfang behält", "What keeps the range"));
+
+  // Only meaningful when the source has a range to keep. Shown either way, so
+  // it is clear the settings exist and why they are doing nothing.
+  const bool sourceIsHdr = hdrSourceTransfer_ != 0;
+  ImGui::BeginDisabled(!sourceIsHdr);
+
+  ImGui::Checkbox(T("Aufnahme", "Recording"), &app.recordHdr);
+  ImGui::SameLine();
+  HelpMarker(T("Nimmt in zehn Bit auf der PQ-Kurve auf, mit BT.2020 und den Farbangaben, "
+               "die eine Datei als HDR lesbar machen. Braucht einen Encoder, der zehn Bit "
+               "kann -- bei HEVC und AV1 üblich, bei H.264 selten -- und einen Player, der "
+               "PQ versteht. Ohne den Haken wird das heruntergerechnete Bild aufgenommen, "
+               "das überall läuft.",
+               "Records in ten bits on the PQ curve, BT.2020, with the colour description "
+               "that makes a file readable as HDR. Needs an encoder that does ten bits -- "
+               "usual for HEVC and AV1, rare for H.264 -- and a player that understands PQ. "
+               "Without it the tone mapped picture is recorded, which plays anywhere."));
+
+  ImGui::Checkbox(T("Screenshots", "Screenshots"), &app.screenshotHdr);
+  ImGui::SameLine();
+  HelpMarker(T("Speichert als JPEG XR (.jxr) statt PNG, weil das das einzige Format ist, "
+               "für das Windows einen Encoder mitbringt, der Halbfloats hält -- und weil "
+               "die Fotos-App es als HDR erkennt. Das eingestellte Bildformat wird dabei "
+               "übergangen.",
+               "Saves as JPEG XR (.jxr) rather than PNG, that being the one format Windows "
+               "ships an encoder for that holds half floats -- and the one the Photos app "
+               "recognises as HDR. The chosen picture format is bypassed."));
+
+  ImGui::Checkbox(T("Virtuelle Kamera", "Virtual camera"), &app.cameraHdr);
+  ImGui::SameLine();
+  HelpMarker(T("Bietet die Kamera zusätzlich in zehn Bit an; das Programm am anderen Ende "
+               "wählt. Standardmäßig aus, und das mit Absicht: kaum ein Programm weiß "
+               "heute etwas mit einer HDR-Webcam anzufangen, und eines, das die zehn Bit "
+               "nimmt ohne sie zu verstehen, zeigt ein falsches Bild. Wirkt erst, wenn die "
+               "Kamera das nächste Mal geöffnet wird.",
+               "Offers the camera in ten bits as well; the program at the other end picks. "
+               "Off by default, deliberately: almost nothing today knows what to do with an "
+               "HDR webcam, and something that takes the ten bits without understanding "
+               "them shows a wrong picture. Takes effect the next time the camera is "
+               "opened."));
+
+  ImGui::EndDisabled();
+  if (!sourceIsHdr) {
+    ImGui::TextDisabled("%s", T("Die Quelle ist SDR -- es gibt nichts zu behalten.",
+                                "The source is SDR -- there is nothing to keep."));
+  }
 }
 
 void SettingsWindow::DrawDisplayTab() {

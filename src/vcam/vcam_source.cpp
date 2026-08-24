@@ -7,6 +7,7 @@
 #include <mferror.h>
 #include <mfobjects.h>
 #include <sddl.h>
+#include <shlobj.h>
 
 #include <atomic>
 #include <mutex>
@@ -99,11 +100,12 @@ class SharedFrames {
   SharedState* state() { return view_; }
 
   // Announces what the consumer settled on, so CapView can produce it.
-  void Announce(uint32_t w, uint32_t h, uint32_t fps, bool streaming) {
+  void Announce(uint32_t w, uint32_t h, uint32_t fps, uint32_t pixel, bool streaming) {
     if (!view_) return;
     view_->wantWidth = w;
     view_->wantHeight = h;
     view_->wantFps = fps;
+    view_->wantPixel = pixel;
     if (streaming) {
       ::InterlockedIncrement((volatile LONG*)&view_->sourceStarted);
       ::InterlockedIncrement((volatile LONG*)&view_->consumers);
@@ -114,7 +116,8 @@ class SharedFrames {
 
   // Copies the newest whole picture. False when CapView has published nothing
   // yet, or when what is there does not match what we are handing out.
-  bool ReadNewest(uint8_t* dst, uint32_t width, uint32_t height, uint32_t* lastIndex) {
+  bool ReadNewest(uint8_t* dst, uint32_t width, uint32_t height, uint32_t pixel,
+                  uint32_t* lastIndex) {
     if (!view_ || view_->magic != kMagic || view_->version != kVersion ||
         view_->stateBytes != sizeof(SharedState)) {
       return false;
@@ -129,7 +132,7 @@ class SharedFrames {
     // this slot; a changed value means it got there while we were copying.
     const uint32_t before = head.sequence;
     if (before & 1u) return false;
-    if (head.width != width || head.height != height) return false;
+    if (head.width != width || head.height != height || head.pixel != pixel) return false;
     const uint32_t bytes = head.bytes;
     if (bytes == 0 || bytes > kSlotBytes) return false;
 
@@ -147,24 +150,63 @@ class SharedFrames {
   SharedState* view_ = nullptr;
 };
 
+// Where both halves can see it. Returns an empty string when even ProgramData
+// cannot be resolved, which would be a broken Windows rather than a case worth
+// handling.
+std::wstring WideMarkerPath() {
+  PWSTR base = nullptr;
+  std::wstring path;
+  if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_ProgramData, 0, nullptr, &base)) && base) {
+    path = base;
+    ::CoTaskMemFree(base);
+  }
+  if (path.empty()) return path;
+  if (path.back() != L'\\') path += L'\\';
+  path += kWideMarkerFolder;
+  path += L'\\';
+  path += kWideMarkerFile;
+  return path;
+}
+
+bool WideOffered() {
+  const std::wstring path = WideMarkerPath();
+  if (path.empty()) return false;
+  const DWORD attr = ::GetFileAttributesW(path.c_str());
+  return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+}
+
 // ---------------------------------------------------------------------------
 // Media types
 // ---------------------------------------------------------------------------
-HRESULT MakeType(const CameraFormat& fmt, IMFMediaType** out) {
+HRESULT MakeType(const CameraFormat& fmt, bool wide, IMFMediaType** out) {
   *out = nullptr;
   IMFMediaType* type = nullptr;
   HRESULT hr = ::MFCreateMediaType(&type);
   if (FAILED(hr)) return hr;
 
   hr = type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-  if (SUCCEEDED(hr)) hr = type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
+  if (SUCCEEDED(hr)) {
+    hr = type->SetGUID(MF_MT_SUBTYPE, wide ? MFVideoFormat_P010 : MFVideoFormat_NV12);
+  }
+  if (SUCCEEDED(hr) && wide) {
+    // Saying what the numbers mean. Without these a consumer treats ten bit PQ
+    // as ordinary video and shows something grey and flat.
+    type->SetUINT32(MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT2020);
+    type->SetUINT32(MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_2084);
+    type->SetUINT32(MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT2020_10);
+    type->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235);
+  }
   if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
   if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
   if (SUCCEEDED(hr)) hr = ::MFSetAttributeSize(type, MF_MT_FRAME_SIZE, fmt.width, fmt.height);
   if (SUCCEEDED(hr)) hr = ::MFSetAttributeRatio(type, MF_MT_FRAME_RATE, fmt.fps, 1);
   if (SUCCEEDED(hr)) hr = ::MFSetAttributeRatio(type, MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
-  if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_DEFAULT_STRIDE, (UINT32)fmt.width);
-  if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_SAMPLE_SIZE, fmt.width * fmt.height * 3 / 2);
+  if (SUCCEEDED(hr)) {
+    hr = type->SetUINT32(MF_MT_DEFAULT_STRIDE, (UINT32)fmt.width * (wide ? 2 : 1));
+  }
+  if (SUCCEEDED(hr)) {
+    hr = type->SetUINT32(MF_MT_SAMPLE_SIZE, fmt.width * fmt.height * 3 / 2 * (wide ? 2 : 1));
+  }
   if (FAILED(hr)) {
     type->Release();
     return hr;
@@ -257,7 +299,13 @@ class VCamStream : public IMFMediaStream2 {
   HRESULT Start();
   HRESULT Stop();
   HRESULT Shutdown();
-  void SetFormat(const CameraFormat& fmt) { format_ = fmt; }
+  void SetFormat(const CameraFormat& fmt, bool wide) {
+    format_ = fmt;
+    wide_ = wide;
+  }
+  size_t FrameBytes() const {
+    return (size_t)format_.width * format_.height * 3 / 2 * (wide_ ? 2 : 1);
+  }
 
  private:
   ~VCamStream();
@@ -273,6 +321,7 @@ class VCamStream : public IMFMediaStream2 {
   IMFMediaEventQueue* queue_ = nullptr;
 
   CameraFormat format_ = kFormats[0];
+  bool wide_ = false;  // ten bit PQ rather than eight bit
   SharedFrames frames_;
   uint32_t lastIndex_ = 0;
   std::vector<uint8_t> picture_;  // the last whole picture, repeated if need be
@@ -562,13 +611,23 @@ HRESULT VCamStream::Start() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (shutdown_) return MF_E_SHUTDOWN;
   frames_.Open();
-  frames_.Announce(format_.width, format_.height, format_.fps, true);
-  picture_.assign((size_t)format_.width * format_.height * 3 / 2, 0);
-  // Mid grey in Y and neutral chroma, so a consumer that connects before
-  // CapView has published anything sees a blank picture rather than noise.
-  ::memset(picture_.data(), 16, (size_t)format_.width * format_.height);
-  ::memset(picture_.data() + (size_t)format_.width * format_.height, 128,
-           (size_t)format_.width * format_.height / 2);
+  frames_.Announce(format_.width, format_.height, format_.fps,
+                   wide_ ? kPixelP010 : kPixelNv12, true);
+  picture_.assign(FrameBytes(), 0);
+  // Black with neutral colour, so a consumer that connects before CapView has
+  // published anything sees a blank picture rather than noise. Both layouts use
+  // limited range, so black is 16 rather than 0 -- and in the ten bit form
+  // every value sits in the top of a sixteen bit container.
+  const size_t lumaCount = (size_t)format_.width * format_.height;
+  if (wide_) {
+    uint16_t* luma = reinterpret_cast<uint16_t*>(picture_.data());
+    for (size_t i = 0; i < lumaCount; ++i) luma[i] = (uint16_t)(64u << 6);
+    uint16_t* chroma = luma + lumaCount;
+    for (size_t i = 0; i < lumaCount / 2; ++i) chroma[i] = (uint16_t)(512u << 6);
+  } else {
+    ::memset(picture_.data(), 16, lumaCount);
+    ::memset(picture_.data() + lumaCount, 128, lumaCount / 2);
+  }
   havePicture_ = false;
   lastIndex_ = 0;
   nextTime_ = 0;
@@ -579,7 +638,7 @@ HRESULT VCamStream::Start() {
 HRESULT VCamStream::Stop() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (shutdown_) return MF_E_SHUTDOWN;
-  if (state_ == MF_STREAM_STATE_RUNNING) frames_.Announce(0, 0, 0, false);
+  if (state_ == MF_STREAM_STATE_RUNNING) frames_.Announce(0, 0, 0, 0, false);
   state_ = MF_STREAM_STATE_STOPPED;
   return queue_->QueueEventParamVar(MEStreamStopped, GUID_NULL, S_OK, nullptr);
 }
@@ -587,7 +646,7 @@ HRESULT VCamStream::Stop() {
 HRESULT VCamStream::Shutdown() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (shutdown_) return MF_E_SHUTDOWN;
-  if (state_ == MF_STREAM_STATE_RUNNING) frames_.Announce(0, 0, 0, false);
+  if (state_ == MF_STREAM_STATE_RUNNING) frames_.Announce(0, 0, 0, 0, false);
   shutdown_ = true;
   state_ = MF_STREAM_STATE_STOPPED;
   if (queue_) queue_->Shutdown();
@@ -610,7 +669,7 @@ HRESULT VCamStream::SetStreamState(MF_STREAM_STATE state) {
 
 HRESULT VCamStream::ProduceSample(IMFSample** out) {
   *out = nullptr;
-  const size_t bytes = (size_t)format_.width * format_.height * 3 / 2;
+  const size_t bytes = FrameBytes();
 
   // Nothing new is not a failure. A camera that stops answering stalls the
   // consumer; one that repeats its last picture merely looks frozen, which is
@@ -618,7 +677,8 @@ HRESULT VCamStream::ProduceSample(IMFSample** out) {
   if (SharedState* shared = frames_.state()) {
     ::InterlockedIncrement((volatile LONG*)&shared->samplesServed);
   }
-  if (frames_.ReadNewest(picture_.data(), format_.width, format_.height, &lastIndex_)) {
+  if (frames_.ReadNewest(picture_.data(), format_.width, format_.height,
+                         wide_ ? kPixelP010 : kPixelNv12, &lastIndex_)) {
     havePicture_ = true;
     if (SharedState* shared = frames_.state()) {
       ::InterlockedIncrement((volatile LONG*)&shared->framesTaken);
@@ -705,12 +765,22 @@ HRESULT VCamSource::Init() {
   attributes_->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
                        MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
 
+  // Eight bit first, so a consumer that simply takes the first thing offered
+  // gets the one everything understands.
   std::vector<IMFMediaType*> types;
   for (uint32_t i = 0; i < kFormatCount; ++i) {
     IMFMediaType* type = nullptr;
-    hr = MakeType(kFormats[i], &type);
+    hr = MakeType(kFormats[i], false, &type);
     if (FAILED(hr)) break;
     types.push_back(type);
+  }
+  if (SUCCEEDED(hr) && WideOffered()) {
+    for (uint32_t i = 0; i < kFormatCount; ++i) {
+      IMFMediaType* type = nullptr;
+      hr = MakeType(kFormats[i], true, &type);
+      if (FAILED(hr)) break;
+      types.push_back(type);
+    }
   }
 
   if (SUCCEEDED(hr)) {
@@ -766,6 +836,7 @@ STDMETHODIMP VCamSource::Start(IMFPresentationDescriptor* pd, const GUID* timeFo
 
   VCamStream* stream = nullptr;
   CameraFormat chosen = kFormats[0];
+  bool chosenWide = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (shutdown_) return MF_E_SHUTDOWN;
@@ -787,6 +858,10 @@ STDMETHODIMP VCamSource::Start(IMFPresentationDescriptor* pd, const GUID* timeFo
             chosen.height = h;
             chosen.fps = den ? num / den : 30;
           }
+          GUID subtype = GUID_NULL;
+          if (SUCCEEDED(current->GetGUID(MF_MT_SUBTYPE, &subtype))) {
+            chosenWide = subtype == MFVideoFormat_P010;
+          }
           current->Release();
         }
         handler->Release();
@@ -794,7 +869,7 @@ STDMETHODIMP VCamSource::Start(IMFPresentationDescriptor* pd, const GUID* timeFo
       sd->Release();
     }
 
-    stream_->SetFormat(chosen);
+    stream_->SetFormat(chosen, chosenWide);
     stream = stream_;
     stream->AddRef();
   }

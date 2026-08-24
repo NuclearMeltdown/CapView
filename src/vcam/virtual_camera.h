@@ -55,12 +55,37 @@ class VirtualCamera {
   // Deletes the copies left behind by earlier installs. Called once at start,
   // when whatever had them open has usually let go.
   static void CleanUpOldSources();
+
+  // Whether the camera should advertise its ten bit form at all. This has to
+  // reach a DLL living inside a service, so it is a file in ProgramData rather
+  // than a setting -- see vcam_shared.h. Takes effect when a consumer next
+  // opens the camera, not the moment it is switched.
+  static void SetWideOffered(bool offered);
+
+  // Which of the two the consumer settled on. The caller feeds whichever ring
+  // matches; there is no converting between them after the fact.
+  bool wantsWide() const { return wantsWide_.load(std::memory_order_relaxed); }
+
+  // The ten bit path. `packed` is one uint32 per pixel as DXGI writes
+  // R10G10B10A2 -- already PQ encoded and already BT.2020, because the shader
+  // that produced it for the recorder had to do that anyway.
+  void PushFrameWide(const uint8_t* packed, int stride, int width, int height);
   static bool UninstallSource(std::string* error);
 
-  // Turning the camera on and off. Start fails if the source is not installed.
-  bool Start(std::string* error);
+  // Turning the camera on and off.
+  //
+  // Starting returns at once and finishes on a thread of its own. It has to:
+  // MFCreateVirtualCamera hands the work to the frame server, which loads the
+  // media source, and that is a service starting a DLL -- measured in hundreds
+  // of milliseconds on a good day and seconds when Windows is having a think.
+  // On the render thread that is a visible freeze.
+  void StartAsync();
   void Stop();
   bool running() const { return running_.load(std::memory_order_relaxed); }
+  bool starting() const { return starting_.load(std::memory_order_relaxed); }
+
+  // Takes the reason the last start failed, once. Empty means it did not.
+  bool takeError(std::string* out);
 
   // True while an application is actually reading the camera. Until then
   // pushing frames costs nothing, so callers need not check first.
@@ -82,9 +107,11 @@ class VirtualCamera {
 
  private:
   void WorkerLoop();
+  bool StartBlocking(std::string* error);
   bool AttachShared();
   void DetachShared();
   void Publish(const uint8_t* rgba, int stride, int width, int height);
+  void PublishWide(const uint8_t* packed, int stride, int width, int height);
 
   IMFVirtualCamera* camera_ = nullptr;
   bool mfStarted_ = false;
@@ -92,7 +119,12 @@ class VirtualCamera {
   std::atomic<bool> running_{false};
   std::atomic<bool> consumed_{false};
   std::atomic<bool> outdated_{false};
+  std::atomic<bool> wantsWide_{false};
   std::atomic<bool> quit_{false};
+  std::atomic<bool> starting_{false};
+  std::thread starter_;
+  std::mutex errorMutex_;
+  std::string startError_;
 
   std::thread worker_;
   HANDLE wake_ = nullptr;

@@ -68,7 +68,7 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
   // here: these two have to agree byte for byte, and a literal in this file is
   // exactly how they came apart once already.
   cmd += L" -f rawvideo -pix_fmt ";
-  cmd += ToWide(VideoRenderer::kReadbackPixelFormat);
+  cmd += ToWide(pixelFormat_);
   cmd += L" -s " + std::to_wstring(width_) + L"x" + std::to_wstring(height_);
   cmd += L" -r " + ToWide(Format("%.6f", fps_));
   cmd += L" -i pipe:0";
@@ -121,9 +121,19 @@ std::wstring Recorder::BuildCommandLine(const RecordSettings& settings,
   }
 
   cmd += L" -c:v " + ToWide(encoder.ffmpegName);
-  // 4:2:0 eight bit: the one format every hardware encoder and every player
-  // agrees on. Anything wider would exclude the very cards this is meant for.
-  cmd += L" -pix_fmt nv12";
+  if (hdr_) {
+    // Ten bit 4:2:0 and the three pieces of colour description that make a file
+    // playable as HDR rather than as a washed out mess. They are not optional:
+    // nothing else in the file says the picture is on the PQ curve, and a player
+    // that is not told will assume it is not.
+    cmd += L" -pix_fmt p010le";
+    cmd += L" -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc";
+    cmd += L" -color_range tv";
+  } else {
+    // 4:2:0 eight bit: the one format every hardware encoder and every player
+    // agrees on. Anything wider would exclude the very cards this is meant for.
+    cmd += L" -pix_fmt nv12";
+  }
   cmd += L" -b:v " + std::to_wstring(settings.bitrateKbps) + L"k";
   cmd += L" -maxrate " + std::to_wstring(settings.bitrateKbps) + L"k";
   cmd += L" -bufsize " + std::to_wstring(settings.bitrateKbps * 2) + L"k";

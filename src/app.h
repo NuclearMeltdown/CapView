@@ -285,6 +285,7 @@ class App {
   Updater updater_;
   VirtualCamera virtualCamera_;
   bool virtualCameraMismatchSaid_ = false;
+  bool cameraHdrOffered_ = false;
   int hdrDisplayPoll_ = 0;
   bool updatePromptQueued_ = false;   // waiting to be opened
   bool updatePromptRaised_ = false;   // already shown once this session

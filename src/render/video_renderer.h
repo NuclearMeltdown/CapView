@@ -122,6 +122,13 @@ class VideoRenderer {
   // blue.
   static constexpr const char* kReadbackPixelFormat = "rgba";
 
+  // The same picture for a recording that keeps the range: ten bits per
+  // component, PQ encoded, BT.2020. DXGI packs R10G10B10A2 with red in the low
+  // bits, which is what ffmpeg calls x2bgr10le -- the name looks wrong until
+  // you remember it describes the bytes, not the order they are written in.
+  static constexpr const char* kHdrReadbackPixelFormat = "x2bgr10le";
+
+
   struct ReadbackFrame {
     const uint8_t* data = nullptr;  // kReadbackPixelFormat, valid until ReleaseReadback
     size_t size = 0;
@@ -134,6 +141,24 @@ class VideoRenderer {
   // Returns true when a frame was mapped; call ReleaseReadback when done with it.
   bool FetchReadback(ReadbackFrame* out);
   void ReleaseReadback();
+  // Ask for the wide path. Two askers -- the recorder and the virtual camera --
+  // and one ring between them, because they want the same bytes. Ignored unless
+  // the source is actually HDR; there is nothing to keep otherwise.
+  void SetHdrWideWanted(bool recorder, bool camera) {
+    hdrRecordWanted_ = recorder;
+    hdrCameraWanted_ = camera;
+  }
+  bool hdrWideActive() const {
+    return (hdrRecordWanted_ || hdrCameraWanted_) && hdrTransfer_ != Transfer::Sdr;
+  }
+  bool FetchHdrReadback(ReadbackFrame* out);
+
+  // The picture as linear light, four half floats per pixel, 1.0 being diffuse
+  // white. For a screenshot that keeps the range. Blocks on the GPU, which a
+  // still is allowed to do -- it happens when somebody presses a key, not sixty
+  // times a second.
+  bool GrabStillHalf(std::vector<uint16_t>* out, int* width, int* height, int* strideBytes);
+  void ReleaseHdrReadback();
 
   // ---- automatic level detection ----
   //
@@ -192,6 +217,8 @@ class VideoRenderer {
 
  private:
   void QueueReadback();
+  void QueueHdrReadback();
+  bool EnsureHdrRecord(int width, int height);
   void ReleaseReadbackResources();
 
  public:
@@ -317,6 +344,22 @@ class VideoRenderer {
   // in flight, one old enough to map without stalling.
   static const int kReadbackSlots = 3;
   ComPtr<ID3D11Texture2D> readbackTex_[kReadbackSlots];
+
+  // The recording path when the range is being kept. A ring of its own rather
+  // than a mode on the one above: the camera and the screenshots still want an
+  // ordinary eight bit picture at the same moment.
+  bool hdrRecordWanted_ = false;
+  bool hdrCameraWanted_ = false;
+  ComPtr<ID3D11PixelShader> psHdrRecord_;
+  ComPtr<ID3D11Buffer> cbRecord_;
+  ComPtr<ID3D11Texture2D> hdrRecTex_;
+  ComPtr<ID3D11RenderTargetView> hdrRecRtv_;
+  ComPtr<ID3D11Texture2D> hdrReadbackTex_[kReadbackSlots];
+  int hdrRecWidth_ = 0;
+  int hdrRecHeight_ = 0;
+  int hdrReadWrite_ = 0;
+  int hdrReadQueued_ = 0;
+  int hdrReadMapped_ = -1;
   int readbackWidth_ = 0;
   int readbackHeight_ = 0;
   int readbackWrite_ = 0;
