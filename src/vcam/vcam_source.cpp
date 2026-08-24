@@ -327,6 +327,7 @@ class VCamStream : public IMFMediaStream2 {
   std::vector<uint8_t> picture_;  // the last whole picture, repeated if need be
   bool havePicture_ = false;
   LONGLONG nextTime_ = 0;
+  DWORD nextDue_ = 0;  // when the next sample is owed, in ticks
 };
 
 // ---------------------------------------------------------------------------
@@ -631,6 +632,7 @@ HRESULT VCamStream::Start() {
   havePicture_ = false;
   lastIndex_ = 0;
   nextTime_ = 0;
+  nextDue_ = 0;
   state_ = MF_STREAM_STATE_RUNNING;
   return queue_->QueueEventParamVar(MEStreamStarted, GUID_NULL, S_OK, nullptr);
 }
@@ -674,7 +676,19 @@ HRESULT VCamStream::ProduceSample(IMFSample** out) {
   // Nothing new is not a failure. A camera that stops answering stalls the
   // consumer; one that repeats its last picture merely looks frozen, which is
   // the truth of the matter.
+  // Said again with every sample rather than once at the start.
+  //
+  // What is wanted cannot be announced once and left: the frame server creates
+  // and discards media sources on its own schedule, and any of them going away
+  // used to zero the announcement while another was still streaming -- measured,
+  // a hundred and twenty milliseconds after it was made. A statement that is
+  // repeated cannot be left stale by somebody else's shutdown, and the count of
+  // samples doubles as the sign of life the other end waits for.
   if (SharedState* shared = frames_.state()) {
+    shared->wantWidth = format_.width;
+    shared->wantHeight = format_.height;
+    shared->wantFps = format_.fps;
+    shared->wantPixel = wide_ ? kPixelP010 : kPixelNv12;
     ::InterlockedIncrement((volatile LONG*)&shared->samplesServed);
   }
   if (frames_.ReadNewest(picture_.data(), format_.width, format_.height,
@@ -718,6 +732,36 @@ HRESULT VCamStream::ProduceSample(IMFSample** out) {
 }
 
 STDMETHODIMP VCamStream::RequestSample(IUnknown* token) {
+  // Kept to the declared rate, before anything else happens.
+  //
+  // A live source that answers the moment it is asked gets asked again the
+  // moment it answers. Measured before this was here: three hundred and eighty
+  // samples in a hundred and eighty milliseconds, better than two thousand a
+  // second, with the consumer's buffers overflowing and the pipeline tearing
+  // the stream down and rebuilding it underneath. The frame rate in the media
+  // type is a promise about spacing, not only about numbers.
+  //
+  // The wait is worked out before the lock and taken outside it, so nothing
+  // else about the stream is held up by it.
+  DWORD sleepFor = 0;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (shutdown_) return MF_E_SHUTDOWN;
+    if (state_ != MF_STREAM_STATE_RUNNING) return MF_E_INVALIDREQUEST;
+    const DWORD period = 1000 / (format_.fps ? format_.fps : 30);
+    const DWORD now = ::GetTickCount();
+    if (nextDue_ == 0) {
+      nextDue_ = now;
+    } else if ((int)(nextDue_ - now) > 0) {
+      // Capped: a consumer that stalls and comes back must not find this
+      // thread asleep for a second.
+      sleepFor = (DWORD)((int)(nextDue_ - now));
+      if (sleepFor > 250) sleepFor = 250;
+    }
+    nextDue_ = now + period;
+  }
+  if (sleepFor > 0) ::Sleep(sleepFor);
+
   std::lock_guard<std::mutex> lock(mutex_);
   if (shutdown_) return MF_E_SHUTDOWN;
   if (state_ != MF_STREAM_STATE_RUNNING) return MF_E_INVALIDREQUEST;

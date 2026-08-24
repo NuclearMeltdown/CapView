@@ -141,6 +141,11 @@ class VirtualCamera {
   void* view_ = nullptr;
   std::vector<uint8_t> scratch_;
   unsigned long lastReport_ = 0;
+  // The sign of life from the other side: how many samples it had served when
+  // last looked, and when that number last moved. A count that stands still is
+  // a camera nobody is reading.
+  uint32_t lastServed_ = 0;
+  unsigned long lastServedTick_ = 0;
 };
 
 }  // namespace cap

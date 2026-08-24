@@ -44,6 +44,37 @@ LONG WriteValue(HKEY root, const std::wstring& subKey, const wchar_t* name,
 
 }  // namespace
 
+// Persuades the frame server to let go of whatever media source it has mapped.
+//
+// This lives here rather than in CapView for one reason: regsvr32 is already
+// running elevated when it calls into this file, and stopping a service needs
+// exactly those rights. CapView has none and cannot get them without asking a
+// second time.
+//
+// It is needed because a service does not reread a DLL it already has open.
+// Naming each build differently stops two of them being mistaken for one
+// another, but the service still has to be made to go and look -- and the only
+// thing that reliably does that is starting it over. It comes back by itself
+// the moment an application next asks for a camera, so there is nothing to
+// start here.
+void StopFrameServer() {
+  SC_HANDLE manager = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
+  if (!manager) return;
+  SC_HANDLE service =
+      ::OpenServiceW(manager, L"FrameServer", SERVICE_STOP | SERVICE_QUERY_STATUS);
+  if (service) {
+    SERVICE_STATUS status = {};
+    ::ControlService(service, SERVICE_CONTROL_STOP, &status);
+    for (int i = 0; i < 40; ++i) {
+      if (!::QueryServiceStatus(service, &status)) break;
+      if (status.dwCurrentState == SERVICE_STOPPED) break;
+      ::Sleep(100);
+    }
+    ::CloseServiceHandle(service);
+  }
+  ::CloseServiceHandle(manager);
+}
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
   if (reason == DLL_PROCESS_ATTACH) {
     g_module = instance;
@@ -76,7 +107,9 @@ STDAPI DllRegisterServer() {
                         L"Both");
   }
   if (status == ERROR_ACCESS_DENIED) return E_ACCESSDENIED;
-  return status == ERROR_SUCCESS ? S_OK : SELFREG_E_CLASS;
+  if (status != ERROR_SUCCESS) return SELFREG_E_CLASS;
+  StopFrameServer();
+  return S_OK;
 }
 
 STDAPI DllUnregisterServer() {
@@ -91,6 +124,7 @@ STDAPI DllUnregisterServer() {
   // Already gone counts as removed -- uninstalling twice is not a failure.
   if ((inner == ERROR_SUCCESS || inner == ERROR_FILE_NOT_FOUND) &&
       (outer == ERROR_SUCCESS || outer == ERROR_FILE_NOT_FOUND)) {
+    StopFrameServer();
     return S_OK;
   }
   return SELFREG_E_CLASS;

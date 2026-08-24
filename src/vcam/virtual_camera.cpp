@@ -173,6 +173,8 @@ bool RunRegsvr(bool remove, std::string* error) {
 
   if (!::ShellExecuteExW(&info) || !info.hProcess) {
     const DWORD err = ::GetLastError();
+    CAP_ERR("Kamera: ShellExecuteEx(runas, regsvr32) fehlgeschlagen, Fehler %lu",
+            (unsigned long)err);
     if (error) {
       *error = err == ERROR_CANCELLED
                    ? T("Abgebrochen -- ohne Administratorrechte geht es nicht.",
@@ -187,11 +189,21 @@ bool RunRegsvr(bool remove, std::string* error) {
   ::GetExitCodeProcess(info.hProcess, &code);
   ::CloseHandle(info.hProcess);
 
+  CAP_LOG("Kamera: regsvr32 %s beendet mit %lu", remove ? "/u" : "", (unsigned long)code);
+
   if (code != 0) {
     if (error) {
-      *error = remove ? T("Die Registrierung ließ sich nicht entfernen.",
-                          "The registration could not be removed.")
-                      : T("Die Registrierung ist fehlgeschlagen.", "Registration failed.");
+      // regsvr32's own numbering, said plainly. "It failed" is what made this
+      // take three rounds to understand, so the number goes in the message.
+      const char* why =
+          code == 3   ? T("die DLL ließ sich nicht laden", "the DLL would not load")
+          : code == 4 ? T("der Einstiegspunkt fehlt", "the entry point is missing")
+          : code == 5 ? T("abgelehnt -- vermutlich fehlen Administratorrechte",
+                          "refused -- probably missing administrator rights")
+                      : T("unbekannter Grund", "reason unknown");
+      *error = std::string(remove ? T("Entfernen fehlgeschlagen (", "Removing failed (")
+                                  : T("Registrierung fehlgeschlagen (", "Registration failed (")) +
+               why + ", regsvr32 " + std::to_string((int)code) + ").";
     }
     return false;
   }
@@ -398,7 +410,11 @@ bool VirtualCamera::InstallSource(std::string* error) {
   // entry; pointing it at a stale file again would change nothing, which is
   // exactly the loop this used to sit in.
   if (!WriteMediaSource(error)) return false;
-  return RunRegsvr(false, error);
+  if (!RunRegsvr(false, error)) return false;
+  // The registration stopped the frame server on its way through, so whatever
+  // it had mapped is gone and these can go too.
+  CleanUpOldSources();
+  return true;
 }
 
 void VirtualCamera::CleanUpOldSources() {
@@ -710,8 +726,21 @@ void VirtualCamera::WorkerLoop() {
     }
     outdated_ = false;
 
-    const bool live = state->consumers > 0 && state->wantWidth > 0;
-    consumed_ = live;
+    // Whether anybody is reading is judged by whether samples are still being
+    // asked for, not by a counter somebody else can zero. A second of silence
+    // is several frames at any rate worth serving.
+    const DWORD tick = ::GetTickCount();
+    const uint32_t served = state->samplesServed;
+    if (served != lastServed_) {
+      lastServed_ = served;
+      lastServedTick_ = tick;
+    }
+    const bool live = state->wantWidth > 0 && lastServedTick_ != 0 &&
+                      (tick - lastServedTick_) < 1000;
+    if (consumed_.exchange(live) != live) {
+      CAP_LOG("Virtuelle Kamera: Leser %s (%ux%u, Proben %u)", live ? "da" : "weg",
+              state->wantWidth, state->wantHeight, served);
+    }
     wantsWide_ = live && state->wantPixel == vcam::kPixelP010;
     if (!live) continue;
 
