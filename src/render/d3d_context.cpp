@@ -38,6 +38,10 @@ std::string GraphicsAdapterSignature() {
 namespace {
 
 const DXGI_FORMAT kBackBufferFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+// Half float, linear, BT.709 primaries, 1.0 = 80 nits. Values above one are
+// what makes it HDR; values below zero are legal too and hold colours outside
+// BT.709.
+const DXGI_FORMAT kHdrBackBufferFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
 
 bool QueryTearingSupport(IDXGIFactory2* factory) {
   ComPtr<IDXGIFactory5> factory5;
@@ -125,7 +129,7 @@ bool D3DContext::Initialize(HWND hwnd, std::string* error) {
   DXGI_SWAP_CHAIN_DESC1 desc = {};
   desc.Width = (UINT)width_;
   desc.Height = (UINT)height_;
-  desc.Format = kBackBufferFormat;
+  desc.Format = hdrOutput_ ? kHdrBackBufferFormat : kBackBufferFormat;
   desc.Stereo = FALSE;
   desc.SampleDesc.Count = 1;
   desc.SampleDesc.Quality = 0;
@@ -146,6 +150,8 @@ bool D3DContext::Initialize(HWND hwnd, std::string* error) {
   // We handle fullscreen ourselves with a borderless window, so DXGI must keep
   // its hands off Alt+Enter and off resizing the window.
   factory->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_WINDOW_CHANGES);
+
+  RefreshDisplayCapability();
 
   if (!CreateRenderTarget()) {
     if (error) *error = T("Rendertarget konnte nicht erstellt werden",
@@ -239,6 +245,81 @@ void D3DContext::EndFrame(bool vsync) {
     CAP_ERR("Grafikgerät verloren: %s",
             HrToString(device_ ? device_->GetDeviceRemovedReason() : hr).c_str());
   }
+}
+
+
+void D3DContext::RefreshDisplayCapability() {
+  display_ = DisplayCapability();
+  if (!swapchain_) return;
+
+  // The output the window mostly sits on. Asking the swapchain rather than
+  // enumerating outputs is what makes this follow the window across screens.
+  ComPtr<IDXGIOutput> output;
+  if (FAILED(swapchain_->GetContainingOutput(&output)) || !output) return;
+
+  ComPtr<IDXGIOutput6> output6;
+  if (FAILED(output.As(&output6)) || !output6) return;
+
+  DXGI_OUTPUT_DESC1 desc = {};
+  if (FAILED(output6->GetDesc1(&desc))) return;
+
+  display_.hdr = desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+  display_.peakNits = desc.MaxLuminance > 0.0f ? desc.MaxLuminance : 100.0f;
+  display_.minNits = desc.MinLuminance;
+}
+
+bool D3DContext::SetHdrOutput(bool enabled, std::string* error) {
+  if (enabled == hdrOutput_) return true;
+  if (!swapchain_ || !device_) return false;
+
+  // Everything pointing at the old buffers has to let go first; ResizeBuffers
+  // refuses while a view is outstanding.
+  rtv_.Reset();
+  context_->OMSetRenderTargets(0, nullptr, nullptr);
+  context_->Flush();
+
+  const DXGI_FORMAT format = enabled ? kHdrBackBufferFormat : kBackBufferFormat;
+  HRESULT hr = swapchain_->ResizeBuffers(0, (UINT)width_, (UINT)height_, format, swapchainFlags_);
+  if (FAILED(hr)) {
+    if (error) {
+      *error = T("Die Anzeige ließ sich nicht auf HDR umstellen: ",
+                 "The display could not be switched to HDR: ") + HrToString(hr);
+    }
+    swapchain_->ResizeBuffers(0, (UINT)width_, (UINT)height_,
+                              hdrOutput_ ? kHdrBackBufferFormat : kBackBufferFormat,
+                              swapchainFlags_);
+    CreateRenderTarget();
+    return false;
+  }
+
+  // Telling Windows what the numbers in that buffer mean. Without this the
+  // compositor treats them as ordinary sRGB and the picture comes out wrong in
+  // a way that looks like a bug in the tone mapping.
+  ComPtr<IDXGISwapChain3> swapchain3;
+  if (SUCCEEDED(swapchain_.As(&swapchain3)) && swapchain3) {
+    const DXGI_COLOR_SPACE_TYPE space = enabled
+        ? DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709      // scRGB
+        : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;     // ordinary sRGB
+    UINT support = 0;
+    if (SUCCEEDED(swapchain3->CheckColorSpaceSupport(space, &support)) &&
+        (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT)) {
+      swapchain3->SetColorSpace1(space);
+    } else if (enabled) {
+      if (error) {
+        *error = T("Diese Anzeige nimmt kein scRGB entgegen.",
+                   "This display will not take scRGB.");
+      }
+      swapchain_->ResizeBuffers(0, (UINT)width_, (UINT)height_, kBackBufferFormat,
+                                swapchainFlags_);
+      CreateRenderTarget();
+      return false;
+    }
+  }
+
+  hdrOutput_ = enabled;
+  CreateRenderTarget();
+  CAP_LOG("Anzeige auf %s umgestellt", enabled ? "scRGB (HDR)" : "sRGB");
+  return true;
 }
 
 }  // namespace cap

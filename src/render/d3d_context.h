@@ -33,6 +33,24 @@ class D3DContext {
   // call on every resize message.
   void Resize();
 
+  // What the screen this window is on can actually do. Asked of DXGI rather
+  // than of a setting, and re-asked when the window moves: dragging a window
+  // from an HDR screen to an ordinary one has to change what is sent to it.
+  struct DisplayCapability {
+    bool hdr = false;      // the output is in HDR10 mode right now
+    float peakNits = 100.0f;
+    float minNits = 0.0f;
+  };
+  DisplayCapability displayCapability() const { return display_; }
+  void RefreshDisplayCapability();
+
+  // Switches the swapchain between eight bit sRGB and half float scRGB. scRGB
+  // is linear with 1.0 fixed at eighty nits, so highlights simply carry on past
+  // one -- which is why it suits a pipeline that already works in float.
+  // Returns false and stays where it was if the switch could not be made.
+  bool SetHdrOutput(bool enabled, std::string* error);
+  bool hdrOutput() const { return hdrOutput_; }
+
   // Binds the back buffer and clears it. Returns false when the window is
   // occluded or has no area, in which case the frame should be skipped.
   bool BeginFrame(const float clearColor[4]);
@@ -58,6 +76,8 @@ class D3DContext {
   ComPtr<ID3D11Device> device_;
   ComPtr<ID3D11DeviceContext> context_;
   ComPtr<IDXGISwapChain1> swapchain_;
+  DisplayCapability display_;
+  bool hdrOutput_ = false;
   ComPtr<ID3D11RenderTargetView> rtv_;
 
   int width_ = 0;

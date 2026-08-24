@@ -106,6 +106,12 @@ class SettingsWindow {
   // What the app knows and the settings cannot see for themselves.
   void SetVirtualCameraState(bool running, bool consumed, int width, int height, int fps,
                              bool sourceOutdated);
+  void SetHdrState(bool displayCapable, bool outputActive, float displayPeak, int sourceTransfer) {
+    hdrDisplayCapable_ = displayCapable;
+    hdrOutputActive_ = outputActive;
+    hdrDisplayPeak_ = displayPeak;
+    hdrSourceTransfer_ = sourceTransfer;
+  }
 
   // True while the binding editor is waiting for a key press. The app routes
   // key messages here instead of acting on them.
@@ -122,6 +128,7 @@ class SettingsWindow {
   void DrawImageTab();
   void DrawAudioTab();
   void DrawDisplayTab();
+  void DrawHdrBlock();
   void DrawRecordTab(FfmpegInfo* ffmpeg);
   void DrawFfmpegBlock(FfmpegInfo* ffmpeg);
   void DrawToolsTab(FfmpegInfo* ffmpeg);
@@ -206,6 +213,12 @@ class SettingsWindow {
   bool vcamRunning_ = false;
   bool vcamConsumed_ = false;
   bool vcamOutdated_ = false;
+  // What the app knows about the screen and the source; the settings cannot
+  // ask DXGI themselves.
+  bool hdrDisplayCapable_ = false;
+  bool hdrOutputActive_ = false;
+  float hdrDisplayPeak_ = 100.0f;
+  int hdrSourceTransfer_ = 0;  // 0 SDR, 1 PQ, 2 HLG
   int vcamWidth_ = 0;
   int vcamHeight_ = 0;
   int vcamFps_ = 0;

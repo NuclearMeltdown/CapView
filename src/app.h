@@ -177,6 +177,10 @@ class App {
   // fetching it twice would give each of them every second one.
   void FeedFrameConsumers();
   void UpdateVirtualCamera();
+  // Decides what curve the picture is in and what the screen should be given.
+  // Runs every frame because both ends can change underneath it: a console
+  // switches to HDR, or the window is dragged onto another screen.
+  void UpdateHdr();
 
   void Toast(const std::string& text);
   void UpdatePowerRequest();
@@ -281,6 +285,7 @@ class App {
   Updater updater_;
   VirtualCamera virtualCamera_;
   bool virtualCameraMismatchSaid_ = false;
+  int hdrDisplayPoll_ = 0;
   bool updatePromptQueued_ = false;   // waiting to be opened
   bool updatePromptRaised_ = false;   // already shown once this session
   bool devicePagesWereBusy_ = false;

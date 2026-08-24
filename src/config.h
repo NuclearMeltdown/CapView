@@ -69,6 +69,18 @@ enum class MicTrackMode { Both, Mixed, Separate };
 // to read while playing, so the useful numbers come first and the rest is opt in.
 enum class StatsDetail { Compact, Normal, Full };
 
+// What curve the source is encoded against. Automatic believes what the driver
+// put in the media type, which is right when it is there at all and absent on
+// most cards -- hence the override.
+enum class HdrInput { Auto, Sdr, Pq, Hlg };
+inline constexpr int kHdrInputCount = 4;
+
+// Whether to hand the screen high dynamic range. Automatic does it only when
+// the screen is in HDR mode *and* the source actually is HDR, which avoids
+// putting an ordinary picture through a conversion it does not need.
+enum class HdrOutput { Off, Auto, Always };
+inline constexpr int kHdrOutputCount = 3;
+
 enum class RecordContainer { Mkv, Mp4 };
 
 // PNG is lossless and the sane default for a capture card: the point of a still
@@ -301,6 +313,19 @@ struct AppSettings {
   // Offer the picture to other programs as a webcam. Remembered, so it comes
   // back with CapView -- the camera itself only exists while CapView runs.
   bool virtualCamera = false;
+
+  // ---- high dynamic range ----
+  HdrInput hdrInput = HdrInput::Auto;
+  HdrOutput hdrOutput = HdrOutput::Auto;
+  // Diffuse white -- the brightness of a sheet of paper in the picture, and the
+  // level ordinary content is anchored to. 203 nits is what BT.2408 recommends
+  // and what most HDR material is graded against.
+  float paperWhiteNits = 203.0f;
+  // How bright the source is assumed to get. DirectShow carries no mastering
+  // metadata at all, so there is nothing to read this from -- and it matters:
+  // assuming ten thousand where the content only reaches a thousand drags the
+  // whole picture down by a third when tone mapping to an ordinary screen.
+  float sourcePeakNits = 1000.0f;
   StatsDetail statsDetail = StatsDetail::Compact;
   bool logToFile = false;
 

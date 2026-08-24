@@ -62,6 +62,34 @@ class VideoRenderer {
   void SetCarrierSamples(double samples) { carrierSamples_ = samples; }
 
   const VideoFormatInfo& sourceFormat() const { return source_; }
+  // What curve the incoming picture is encoded against. Kept apart from the
+  // format: a card can send eight bit PQ, and ten bit says nothing about HDR.
+  enum class Transfer { Sdr = 0, Pq = 1, Hlg = 2 };
+
+  // Told rather than guessed, because a DirectShow media type mostly does not
+  // carry this and when it does it is worth believing. `wideGamut` says the
+  // primaries are BT.2020 and want bringing back to BT.709.
+  void SetHdrInput(Transfer transfer, bool wideGamut) {
+    hdrTransfer_ = transfer;
+    hdrWideGamut_ = wideGamut;
+  }
+  Transfer hdrTransfer() const { return hdrTransfer_; }
+
+  // The interface, when the swapchain is scRGB. Between these two calls the
+  // interface draws into a buffer of its own; the second brings it back over
+  // the picture in linear light. Both do nothing at all in SDR.
+  bool BeginUiLayer();
+  void CompositeUiLayer();
+
+  // Where the picture is going. Nits, because that is the only unit in which
+  // the two ends of this can be compared at all.
+  void SetHdrOutput(bool scRgbOutput, float paperWhiteNits, float sourcePeakNits,
+                    float displayPeakNits) {
+    hdrOutput_ = scRgbOutput;
+    paperWhiteNits_ = paperWhiteNits;
+    sourcePeakNits_ = sourcePeakNits;
+    displayPeakNits_ = displayPeakNits;
+  }
 
   // True when the current source is interlaced according to its media type.
   bool sourceInterlaced() const { return source_.interlaced; }
@@ -169,7 +197,12 @@ class VideoRenderer {
  public:
 
  private:
-  enum class FormatKind { Yuy2 = 0, Uyvy = 1, Yvyu = 2, Nv12 = 3, Planar420 = 4, Rgb = 6 };
+  // 7 is NV12's arrangement in sixteen bit containers -- P010 and P016, which
+  // is what an HDR capable card hands over.
+  enum class FormatKind {
+    Yuy2 = 0, Uyvy = 1, Yvyu = 2, Nv12 = 3, Planar420 = 4, Rgb = 6, P010 = 7
+  };
+
 
   bool CreateShaders(std::string* error);
   bool CreateStates(std::string* error);
@@ -179,6 +212,8 @@ class VideoRenderer {
 
   bool UploadPacked(const FrameView& frame);
   bool UploadNv12(const FrameView& frame);
+  bool UploadP010(const FrameView& frame);
+  bool EnsureUiLayer(int width, int height);
   bool UploadPlanar(const FrameView& frame);
   bool UploadRgb24(const FrameView& frame);
   bool UploadRgb32(const FrameView& frame);
@@ -192,6 +227,14 @@ class VideoRenderer {
   ComPtr<ID3D11PixelShader> psClean_;
   ComPtr<ID3D11PixelShader> psConvert_;
   ComPtr<ID3D11PixelShader> psScale_;
+  ComPtr<ID3D11PixelShader> psUiComposite_;
+  ComPtr<ID3D11Texture2D> uiTex_;
+  ComPtr<ID3D11RenderTargetView> uiRtv_;
+  ComPtr<ID3D11ShaderResourceView> uiSrv_;
+  ComPtr<ID3D11Buffer> cbUi_;
+  ComPtr<ID3D11BlendState> blendPremultiplied_;
+  int uiWidth_ = 0;
+  int uiHeight_ = 0;
   ComPtr<ID3D11Buffer> cbConvert_;
   ComPtr<ID3D11Buffer> cbScale_;
   ComPtr<ID3D11SamplerState> sampPoint_;
@@ -241,6 +284,13 @@ class VideoRenderer {
   int intermediateHeight_ = 0;
 
   VideoFormatInfo source_;
+  bool tenBitContainer_ = false;
+  Transfer hdrTransfer_ = Transfer::Sdr;
+  bool hdrWideGamut_ = false;
+  bool hdrOutput_ = false;
+  float paperWhiteNits_ = 203.0f;
+  float sourcePeakNits_ = 1000.0f;
+  float displayPeakNits_ = 100.0f;
   FormatKind kind_ = FormatKind::Rgb;
   bool planarUvSwapped_ = false;  // YV12 stores V before U
   bool hasFrame_ = false;
