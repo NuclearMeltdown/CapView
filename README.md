@@ -457,15 +457,42 @@ The settings can be drawn over the picture or given a window of their own, which
 can then be moved to a second monitor or set beside the preview. The switch is
 under *Settings → Display*.
 
-That second window shares one Direct3D device with the preview, and two things
-about it were wrong for longer than they should have been. Its frame used to be
-drawn and presented from inside the preview's own frame — and presenting a
-second swapchain part-way through another window's frame flushes everything
-already queued for it, sixty times a second. It runs after the preview has gone
-to the screen now. And it was created owned but without `WS_EX_APPWINDOW`, which
-is how Windows is asked for a taskbar button: without one, a window has nowhere
-to go when it is minimised, and lands as a stub in a corner of the screen the
-way windows did before there was a taskbar.
+That second window shares one Direct3D device with the preview, and sharing a
+device turned out to be the whole story behind a stutter that reached the
+desktop's own mouse cursor. Three things were wrong, and each hid the next:
+
+- Its frame was drawn *and presented* from inside the preview's own frame.
+  Presenting a second swapchain part-way through another window's frame flushes
+  everything already queued for it. It runs after the preview's present now.
+- The preview redrew on every wake-up of the message loop, and a second window
+  on screen produces a steady stream of messages. Measured: the whole pipeline —
+  video shaders, colour work, readbacks for the recorder and the camera, a
+  present — ran **235 times a second** to show a source delivering 25. Drawing
+  is paced by the picture now: a new frame, a field falling due, or a floor of
+  thirty a second so meters and toasts keep moving.
+- And the one that actually cost the milliseconds: `SetMaximumFrameLatency(1)`,
+  which is what makes the preview's latency as short as it is, applies to the
+  **device**, not to a swapchain. With one frame of queue and two swapchains,
+  each present waited for the other's frame to retire. Measured, the dialog's
+  present cost 8–14 ms and the preview's 3 ms; at a queue of three both are
+  under a millisecond. The queue is raised only while the dialog is on screen,
+  because the rest of the time the short queue is the point.
+
+One thing is left, and it is worth naming rather than hiding: dragging the
+settings window **across the preview** still hitches slightly. That one is not
+CapView's to fix. Measured during a drag, a preview frame costs 0.6 to 0.8
+milliseconds and the window keeps running at better than thirty a second -- the
+work is not the problem. Two overlapping windows have to be composed together by
+the desktop, and one of them is repainting thirty times a second. Dragging the
+dialog onto another monitor, or off the preview, makes it go away. Windows' own
+modal drag loop is also why the preview needed rescuing here at all: it does not
+return until the mouse is released, so a window being dragged takes the whole
+program with it unless something inside that loop draws.
+
+It was also created owned but without `WS_EX_APPWINDOW`, which is how Windows is
+asked for a taskbar button: without one, a window has nowhere to go when it is
+minimised, and lands as a stub in a corner of the screen the way windows did
+before there was a taskbar.
 
 Sharing the font atlas between the two windows had a sting in it as well. The
 DX11 backend stores the atlas's texture id *in the atlas*, so closing the second

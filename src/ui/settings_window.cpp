@@ -352,63 +352,98 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
   const ImGuiStyle& style = ImGui::GetStyle();
   const float footer = ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.y * 2.0f;
 
+  // Which tab is open is state ImGui keeps per *context*, and the settings are
+  // drawn into a different context depending on whether they live in a window
+  // of their own -- so switching between the two always landed back on the
+  // first tab. Remembered here instead, and asked for once whenever the context
+  // underneath changes.
+  ImGuiContext* nowContext = ImGui::GetCurrentContext();
+  if (nowContext != tabContext_) {
+    tabContext_ = nowContext;
+    wantTab_ = activeTab_;
+  }
+  int tabIndex = 0;
+  auto tabFlags = [&]() {
+    const bool select = wantTab_ == tabIndex;
+    return select ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+  };
+
   if (ImGui::BeginTabBar("settings_tabs", ImGuiTabBarFlags_None)) {
-    if (ImGui::BeginTabItem(T("Quelle###source", "Source###source"))) {
+    if (ImGui::BeginTabItem(T("Quelle###source", "Source###source"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_source", ImVec2(0, -footer));
       DrawSourceTab(caps);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Bild###picture", "Picture###picture"))) {
+    ++tabIndex;
+    if (ImGui::BeginTabItem(T("Bild###picture", "Picture###picture"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_image", ImVec2(0, -footer));
       DrawImageTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Ton###audio", "Audio###audio"))) {
+    ++tabIndex;
+    if (ImGui::BeginTabItem(T("Ton###audio", "Audio###audio"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_audio", ImVec2(0, -footer));
       DrawAudioTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Anzeige###display", "Display###display"))) {
+    ++tabIndex;
+    if (ImGui::BeginTabItem(T("Anzeige###display", "Display###display"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_display", ImVec2(0, -footer));
       DrawDisplayTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Aufnahme###recording", "Recording###recording"))) {
+    ++tabIndex;
+    if (ImGui::BeginTabItem(T("Aufnahme###recording", "Recording###recording"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_record", ImVec2(0, -footer));
       DrawRecordTab(ffmpeg);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Werkzeuge###tools", "Tools###tools"))) {
+    ++tabIndex;
+    if (ImGui::BeginTabItem(T("Werkzeuge###tools", "Tools###tools"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_tools", ImVec2(0, -footer));
       DrawToolsTab(ffmpeg);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Tasten###keys", "Keys###keys"))) {
+    ++tabIndex;
+    if (ImGui::BeginTabItem(T("Tasten###keys", "Keys###keys"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_keys", ImVec2(0, -footer));
       DrawHotkeysTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Profile###profiles", "Profiles###profiles"))) {
+    ++tabIndex;
+    if (ImGui::BeginTabItem(T("Profile###profiles", "Profiles###profiles"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_profiles", ImVec2(0, -footer));
       DrawProfilesTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    if (ImGui::BeginTabItem(T("Updates###updates", "Updates###updates"))) {
+    ++tabIndex;
+    if (ImGui::BeginTabItem(T("Updates###updates", "Updates###updates"), nullptr, tabFlags())) {
+      activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_updates", ImVec2(0, -footer));
       DrawUpdatesTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
+    ++tabIndex;
     ImGui::EndTabBar();
   }
+  wantTab_ = -1;
 
   ImGui::Separator();
   ImGui::TextDisabled(T("Änderungen wirken sofort.", "Changes take effect immediately."));

@@ -186,6 +186,8 @@ class App {
   // Runs every frame because both ends can change underneath it: a console
   // switches to HDR, or the window is dragged onto another screen.
   void UpdateHdr();
+  // Opens the release page for a tag in the browser. Empty tag opens the list.
+  void OpenReleasePage(const std::string& tag);
 
   void Toast(const std::string& text);
   void UpdatePowerRequest();
@@ -291,6 +293,12 @@ class App {
   VirtualCamera virtualCamera_;
   bool virtualCameraMismatchSaid_ = false;
   bool cameraHdrOffered_ = false;
+  // What woke the main loop last time round, and when it last drew. Together
+  // they keep the preview paced by the picture rather than by the message
+  // queue -- see the comment at the call to RenderFrame.
+  unsigned long lastWait_ = 0x00000102ul;  // WAIT_TIMEOUT
+  bool lastWaitHadEvent_ = false;
+  int64_t lastRenderQpc_ = 0;
   int hdrDisplayPoll_ = 0;
   bool updatePromptQueued_ = false;   // waiting to be opened
   bool updatePromptRaised_ = false;   // already shown once this session

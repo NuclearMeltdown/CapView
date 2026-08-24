@@ -183,7 +183,7 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
   // nothing is running from it.
   Updater::CleanUpPreviousBuild();
   VirtualCamera::CleanUpOldSources();
-  if (config_.app.checkUpdatesOnStart) updater_.CheckAsync();
+  if (config_.app.checkUpdatesOnStart) updater_.CheckAsync(true);
 
   running_ = true;
   return true;
@@ -1126,7 +1126,8 @@ void App::DrawSettingsWindowed() {
     // The font atlas is shared rather than rebuilt -- same glyphs, and one copy
     // on the GPU is enough for both windows.
     if (!settingsHost_.Create(instance_, hwnd_, d3d_.device(), d3d_.context(),
-                              ImGui::GetIO().Fonts, uiScale_, &error)) {
+                              ImGui::GetIO().Fonts, uiScale_, d3d_.tearingSupported(),
+                              &error)) {
       CAP_WARN("%s", error.c_str());
       config_.app.settingsSeparateWindow = false;
       Toast(error);
@@ -1135,18 +1136,29 @@ void App::DrawSettingsWindowed() {
     settingsHost_.ApplyTheme(darkMode_, config_.app.accentColor);
     // While its window is being dragged, Windows keeps the loop to itself. The
     // timer inside that loop is what still lets the picture run.
+    // Dragging a window puts Windows into a modal loop of its own that does not
+    // return until the mouse is let go, so the main loop stops running and the
+    // preview stops with it. A timer inside that loop is the only way back in.
+    // It has to do what one turn of the main loop does -- which since the two
+    // were separated means the settings window as well as the preview.
     settingsHost_.SetFrameCallback([this]() {
       if (inModalFrame_) return;
       inModalFrame_ = true;
       Tick();
+      // The preview only. The dialog's *content* does not change while its
+      // frame is being dragged, and redrawing it here means a second present
+      // between every mouse movement and the window catching up with it --
+      // which turns a frozen preview into a window that lags the cursor.
       RenderFrame();
       inModalFrame_ = false;
     });
   }
 
   if (!wanted) {
-    // Switched off again: put the panel back inside the picture.
+    // Switched off again: put the panel back inside the picture, and give the
+    // preview its shortest queue back.
     settingsHost_.Destroy();
+    d3d_.SetFrameLatency(1);
     return;
   }
 
@@ -1161,6 +1173,15 @@ void App::DrawSettingsWindowed() {
     }
   }
 
+  // Two swapchains on one device need somewhere to queue. Measured: at a depth
+  // of one the dialog's present cost eight to fourteen milliseconds because it
+  // was waiting for the preview's frame to retire, and the preview's cost three
+  // because it was waiting for the dialog's. At three, both are under a
+  // millisecond. Only while the dialog is actually on screen -- the preview
+  // wants the shortest queue there is the rest of the time, and that is the
+  // single biggest lever on its latency.
+  d3d_.SetFrameLatency(settingsHost_.visible() ? 3 : 1);
+
   if (!settingsHost_.BeginFrame(darkMode_, config_.app.accentColor)) return;
 
   settings_.SetFillsWindow(true);
@@ -1173,6 +1194,12 @@ void App::DrawSettingsWindowed() {
 
   // Closing is closing, whether it was the footer button or the window's own.
   if (result == SettingsWindow::Result::Close) settings_.Close();
+}
+
+void App::OpenReleasePage(const std::string& tag) {
+  std::wstring url = L"https://github.com/NuclearMeltdown/CapView/releases";
+  if (!tag.empty()) url += L"/tag/" + ToWide(tag);
+  ::ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 void App::UpdateHdr() {
@@ -1249,7 +1276,7 @@ void App::DrawUpdatePrompt() {
   // The startup check runs on its own thread, so the result turns up a second or
   // two in. Raised once per session and never again, whatever the user does with
   // it -- a notice that keeps coming back is an advertisement.
-  if (!updatePromptRaised_ && config_.app.checkUpdatesOnStart &&
+  if (!updatePromptRaised_ && updater_.status().announce &&
       updater_.status().state == UpdateStatus::State::Available) {
     updatePromptRaised_ = true;
     updatePromptQueued_ = true;
@@ -1316,7 +1343,10 @@ void App::DrawUpdatePrompt() {
   if (ImGui::Button(T("Später", "Later"), ImVec2(buttonWidth, 0))) ImGui::CloseCurrentPopup();
   ImGui::SameLine();
   if (ImGui::Button(T("Was ist neu", "What is new"), ImVec2(buttonWidth, 0))) {
-    OpenSettings({});
+    // The release page, not the Updates tab. The tab shows the notes trimmed to
+    // something that fits; the page has the whole of them, the file, and the
+    // history above it.
+    OpenReleasePage(st.latestVersion);
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
@@ -1727,7 +1757,35 @@ int App::Run() {
       continue;
     }
 
-    RenderFrame();
+    // The preview is drawn when there is a new picture to draw, and at no
+    // other time.
+    //
+    // This is the second attempt at pacing it and the first was wrong in a way
+    // worth recording. Waking on any message and redrawing was clearly wrong --
+    // measured, the whole pipeline ran 235 times a second for a source
+    // delivering 25. But replacing it with a clock was no better: at a fixed
+    // 33 ms against a 25 fps source the two beat against each other, which is
+    // judder of exactly the kind the change was meant to remove. A source has a
+    // cadence; anything that is not that cadence is wrong.
+    //
+    // So: the frame event, a second field falling due, and a slow floor that
+    // only matters when no pictures are arriving at all -- with a source
+    // running, everything on screen animates at the source's rate anyway.
+    const int64_t nowQpc = QpcNow();
+    const double sinceRenderMs =
+        lastRenderQpc_ == 0 ? 1e9 : QpcToSeconds(nowQpc - lastRenderQpc_) * 1000.0;
+    const bool wokeOnPicture = lastWait_ == WAIT_OBJECT_0 && lastWaitHadEvent_;
+    const bool fieldDue = lastWait_ == WAIT_TIMEOUT && secondFieldPending_;
+    if (wokeOnPicture || fieldDue || sinceRenderMs >= 200.0) {
+      lastRenderQpc_ = nowQpc;
+      RenderFrame();
+    }
+
+    // And the settings window is drawn on its own account, every time round,
+    // with its own throttle inside. It wants to follow the mouse; the preview
+    // wants to follow the capture card. Tying them together made one of them
+    // wrong whichever rate was chosen.
+    DrawSettingsWindowed();
 
     // Wait for the next captured frame, a pending second field, or input.
     // 16, not 8. This is the ceiling on how often the whole preview pipeline
@@ -1736,6 +1794,9 @@ int App::Run() {
     // captured field up to a hundred and twenty-five times a second for the
     // sake of the dialog feeling responsive. The dialog has had a redraw clock
     // of its own since it became a window, so it no longer needs this.
+    // Short while the dialog is open, because that is what keeps *it* smooth;
+    // it no longer costs the preview anything, since a wake-up without a
+    // picture no longer redraws the preview.
     DWORD timeout = settings_.isOpen() ? 16 : 100;
     if (secondFieldPending_) {
       // Rounded up, not truncated. Truncating asks to be woken a fraction of a
@@ -1752,8 +1813,9 @@ int App::Run() {
       waits[0] = capture_.sink()->frameEvent();
       waitCount = 1;
     }
-    ::MsgWaitForMultipleObjectsEx(waitCount, waitCount ? waits : nullptr, timeout, QS_ALLINPUT,
-                                  MWMO_INPUTAVAILABLE);
+    lastWaitHadEvent_ = waitCount > 0;
+    lastWait_ = ::MsgWaitForMultipleObjectsEx(waitCount, waitCount ? waits : nullptr, timeout,
+                                              QS_ALLINPUT, MWMO_INPUTAVAILABLE);
   }
   return 0;
 }
@@ -1954,11 +2016,6 @@ void App::RenderFrame() {
   FeedFrameConsumers();
   d3d_.EndFrame(config_.app.vsync);
 
-  // The settings window, if it is one, gets its frame here: after the preview
-  // has gone to the screen, so its own present cannot cut into the middle of
-  // the preview's.
-  DrawSettingsWindowed();
-
   // ---- present rate ----
   ++presentCount_;
   if (fpsWindowQpc_ == 0) fpsWindowQpc_ = now;
@@ -1967,6 +2024,7 @@ void App::RenderFrame() {
     presentFps_ = presentCount_ / elapsed;
     presentCount_ = 0;
     fpsWindowQpc_ = now;
+
 
     // With logging on, write a line every few seconds. This is what makes a
     // "it stutters" report actionable without having to reproduce it here.

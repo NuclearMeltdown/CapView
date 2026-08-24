@@ -322,4 +322,14 @@ bool D3DContext::SetHdrOutput(bool enabled, std::string* error) {
   return true;
 }
 
+void D3DContext::SetFrameLatency(UINT frames) {
+  if (frames == frameLatency_ || !device_) return;
+  ComPtr<IDXGIDevice1> dxgiDevice;
+  if (FAILED(device_.As(&dxgiDevice)) || !dxgiDevice) return;
+  if (SUCCEEDED(dxgiDevice->SetMaximumFrameLatency(frames))) {
+    frameLatency_ = frames;
+    CAP_LOG("Bildwarteschlange auf %u gesetzt", frames);
+  }
+}
+
 }  // namespace cap
