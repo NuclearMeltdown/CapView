@@ -269,16 +269,37 @@ so there is nothing to read it from. It matters more than it sounds: assume
 88 out of 100 nits on an ordinary screen, darkening everything. 1000 is the
 default because that is where consoles sit.
 
-Recording, screenshots and the virtual camera are all eight bit, and all three
-get the tone mapped picture — not the linear light the display path works in,
-and not what an HDR screen is being sent. That distinction matters: a recording
-made while watching on an HDR monitor should still be a recording anyone can
-play, so the mapping to an ordinary screen is done for them separately rather
-than borrowed from whatever the display happens to be doing. Sharpening is left
-out of it, being a property of viewing rather than of the picture.
+By default recording, screenshots and the virtual camera get the tone mapped
+picture — not the linear light the display path works in, and not what an HDR
+screen is being sent. That distinction matters: a recording made while watching
+on an HDR monitor should still be a recording anyone can play, so the mapping to
+an ordinary screen is done for them separately rather than borrowed from
+whatever the display happens to be doing. Sharpening is left out of it, being a
+property of viewing rather than of the picture.
 
-What is *not* there is an HDR recording: the original range is not written out,
-which would need a ten bit encoder and the colour metadata to go with it.
+Each of the three can be told to keep the range instead:
+
+| | What it writes | What it needs at the other end |
+|---|---|---|
+| Recording | ten bit P010, PQ, BT.2020, with `smpte2084` and `bt2020nc` in the file | an encoder that does ten bits — usual for HEVC and AV1, rare for H.264 — and a player that reads PQ |
+| Screenshots | JPEG XR holding scRGB half floats | the Photos app, or anything that reads .jxr |
+| Virtual camera | ten bit P010 offered alongside the ordinary eight bit | a program that asks for it, which today is almost nothing |
+
+The camera one is off by default and deliberately so: something that takes the
+ten bits without understanding them shows a wrong picture, so it is offered only
+when asked for. That switch has to cross from CapView into a DLL running inside
+a Windows service, and the media source needs to know before the shared memory
+exists, since it builds its list of formats when it is created — so it is the
+plainest thing that works across that boundary, a file in `ProgramData` that is
+either there or not.
+
+Screenshots use JPEG XR because it is the one container Windows ships an encoder
+for that holds half floats, and the one the Photos app recognises as HDR; a
+sixteen bit PNG would be neither.
+
+The recording and the camera share one buffer rather than two, because the
+picture they want is the same: ten bit PQ in BT.2020. The camera only has a
+colour matrix left to apply on top.
 
 ### Virtual camera
 
@@ -337,14 +358,19 @@ it is not a separate *download*: it travels inside `CapView.exe` as a resource
 and is written out when the camera is installed. A release is one file, and the
 executable can only ever install a source that matches itself.
 
-It was two files briefly, and that was a mistake worth recording. Windows keeps
-the DLL locked while the camera is in use — measured, both the frame server and
-CapView itself hold it, and closing CapView does not release it — so replacing
-it quietly failed, a new executable ended up talking to an old source, and every
-frame came out black. Installing now lays down a fresh copy first, moving any
-locked one aside: a loaded module keeps its pages, not its name, so renaming it
-works where overwriting does not. The leftover goes at some later start. Both
-halves still check that they agree about the shape of what they share, as a
+Its file name carries a hash of its own contents, and that is not tidiness — it
+is the whole mechanism. Windows identifies a loaded module inside a process by
+its **file name**, not by its path. The frame server is a service that stays
+running with the source mapped, and a later `LoadLibrary` of a different file
+with that same name hands back the module already loaded rather than reading the
+new one. Renaming the old file out of the way does not help either: the module
+keeps its pages regardless. Between them those two facts made this look
+unfixable from the outside — installing appeared to work, and the old code kept
+answering. A name that changes with the contents cannot be confused with
+anything, and an install becomes idempotent: the file for this build either is
+already there or is not.
+
+Both halves still check that they agree about the shape of what they share, as a
 belt to that brace.
 
 ### Updates

@@ -67,6 +67,13 @@ class Recorder {
   // `main` is the sound you hear, and its sample count is the master clock; a
   // rate of 0 there hands the clock to the wall instead. `mic` is optional and
   // becomes a second track -- never mixed in, so it stays separable later.
+  // The picture the writer will be handed: which ffmpeg pixel format it is in,
+  // and whether it carries the full range on the PQ curve. Set before Start.
+  void SetPixelFormat(const char* ffmpegName, bool hdr) {
+    pixelFormat_ = ffmpegName;
+    hdr_ = hdr;
+  }
+
   bool Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, int width, int height,
              double sourceFps, const AudioSource& main, const AudioSource& mic,
              MicTrackMode micTrackMode, std::string* error);
@@ -98,6 +105,10 @@ class Recorder {
                                 const std::wstring& audioPipe, const std::wstring& micPipe,
                                 const std::wstring& outFile, int audioRate, int micRate) const;
 
+  // Overwritten by SetPixelFormat before every start; the literal is only what
+  // an unconfigured recorder would fall back to.
+  std::string pixelFormat_ = "rgba";
+  bool hdr_ = false;
   std::atomic<bool> running_{false};
   std::atomic<bool> failed_{false};
 

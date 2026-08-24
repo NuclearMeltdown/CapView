@@ -897,6 +897,59 @@ R"HLSL(        // gradient. Vertical detail that is genuinely in the picture rai
 // leaves colour already multiplied by coverage. It has to be undone before the
 // curve and redone after, because a curve applied to a premultiplied colour is
 // not the same thing at all -- half covered black text would come out grey.
+// The picture as a file should keep it: PQ encoded, BT.2020, ten bits.
+//
+// Everything else that leaves this program is eight bit and tone mapped, which
+// is right for a webcam and for a screenshot somebody will paste somewhere. A
+// recording is the one place where throwing the range away is a decision rather
+// than a convenience, so this path does not: it puts the linear light back on
+// the PQ curve and hands it over whole.
+//
+// BT.709 goes back to BT.2020 first. The pipeline works in BT.709 because that
+// is what a screen wants; a PQ file is expected to be BT.2020 and a player will
+// assume so whatever the file says.
+inline const char* kHdrRecordPS = R"HLSL(
+Texture2D<float4> texSrc : register(t0);
+SamplerState sampPoint : register(s0);
+
+cbuffer RecordCB : register(b0) {
+  float gPaperWhite;
+  float3 gRecordPad;
+};
+
+struct VSOut {
+  float4 pos : SV_Position;
+  float2 uv  : TEXCOORD0;
+};
+
+static const float kPqM1 = 0.1593017578125;
+static const float kPqM2 = 78.84375;
+static const float kPqC1 = 0.8359375;
+static const float kPqC2 = 18.8515625;
+static const float kPqC3 = 18.6875;
+
+float NitsToPq(float nits) {
+  float y = saturate(nits / 10000.0);
+  float p = pow(y, kPqM1);
+  return pow((kPqC1 + kPqC2 * p) / (1.0 + kPqC3 * p), kPqM2);
+}
+
+// The inverse of the matrix the clean pass applies, so a picture that never
+// left BT.2020 comes back to exactly where it started.
+float3 Bt709ToBt2020(float3 c) {
+  return float3(
+      dot(c, float3(0.627404, 0.329283, 0.043313)),
+      dot(c, float3(0.069097, 0.919540, 0.011362)),
+      dot(c, float3(0.016391, 0.088013, 0.895595)));
+}
+
+float4 main(VSOut i) : SV_Target {
+  float3 lin = texSrc.SampleLevel(sampPoint, i.uv, 0).rgb;
+  lin = Bt709ToBt2020(max(lin, 0.0)) * gPaperWhite;   // now in nits
+  return float4(NitsToPq(lin.r), NitsToPq(lin.g), NitsToPq(lin.b), 1.0);
+}
+)HLSL";
+
 inline const char* kUiCompositePS = R"HLSL(
 Texture2D<float4> texUi : register(t0);
 SamplerState sampPoint : register(s0);
