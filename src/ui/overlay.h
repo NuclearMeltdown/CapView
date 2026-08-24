@@ -42,6 +42,15 @@ struct OverlayStats {
 
 void DrawStatsPanel(const OverlayStats& stats);
 
+// The empty state: the icon at size, the name under it, and one line saying why
+// there is nothing to show. `icon` is an ImTextureID -- passed as the underlying
+// integer so this header does not have to pull in ImGui -- and may be zero, in
+// which case only the text is drawn.
+//
+// Separate from DrawStatusCard because it means something different. The card
+// interrupts a picture; this replaces one that was never there.
+void DrawIdleScreen(unsigned long long icon, int iconPixels, const std::string& detail);
+
 // Big centred card, used for "no device", "no signal" and error states.
 // `spinner` adds an animated dot row to show that a retry is running.
 void DrawStatusCard(const std::string& title, const std::string& detail, bool spinner);

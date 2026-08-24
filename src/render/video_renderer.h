@@ -211,6 +211,27 @@ class VideoRenderer {
   // the card hands over as black, is found here rather than by eye.
   bool contentBounds(int* left, int* top, int* right, int* bottom) const;
 
+  // ---- is there a picture in these frames at all ----
+  //
+  // Asking whether frames are arriving answers this on a digital input and not
+  // at all on an analogue one: a card with nothing on its composite pin goes on
+  // delivering sixty frames a second of whatever the decoder makes of an open
+  // wire. So the question has to be put to the pixels.
+  //
+  // No signal has two appearances and they look nothing like each other. An
+  // unterminated analogue input is *snow* -- full of contrast, and completely
+  // different from one frame to the next. A card that mutes, or a decoder that
+  // never locks, gives a flat field instead, with no contrast at all.
+  //
+  // Snow is decidable: that much contrast with that little correlation cannot
+  // be a picture. Flat is not -- a black loading screen is the same measurement
+  // -- so that one is only ever reported after it has held for a while, and the
+  // caller decides how long. Nothing here latches: a signal can come and go.
+  enum class SignalVerdict { Unknown, Picture, Snow, Flat };
+  SignalVerdict detectedSignal() const { return signalVerdict_; }
+  // Seconds the current verdict has held, or 0 before anything is measured.
+  double signalHeldSeconds() const;
+
   // Throws every measurement away and starts over. Switching the crossbar puts a
   // different signal on the same pins without the format changing, and none of
   // the verdicts survive that.
@@ -378,6 +399,7 @@ class VideoRenderer {
   void AnalyzeLevels(const FrameView& frame);
   void AnalyzeInterlace(const FrameView& frame);
   void AnalyzeContentBounds(const FrameView& frame);
+  void AnalyzeSignal(const FrameView& frame);
   // Byte offset of the first luma sample and the distance to the next one.
   // False for formats this cannot read.
   bool LumaLayout(size_t* offset, size_t* step) const;
@@ -405,6 +427,17 @@ class VideoRenderer {
   // neighbouring pairs. On a line doubled picture the first is nearly zero.
   uint64_t pairInner_ = 0;
   uint64_t pairOuter_ = 0;
+
+  // Signal presence. The previous sample set is kept rather than the previous
+  // frame: the comparison only ever looks at the same sparse grid, so a few
+  // hundred bytes stand in for a megabyte.
+  SignalVerdict signalVerdict_ = SignalVerdict::Unknown;
+  int signalFramesSeen_ = 0;
+  std::vector<uint8_t> signalPrev_;
+  // When the current verdict was first reached, on the tick clock. Zero before
+  // anything is measured. Milliseconds are ample for "how long has this held",
+  // and this file has no QPC helper of its own to borrow.
+  unsigned long signalSinceTick_ = 0;
 
   // Content bounds. Measured as a union across a window of frames, because a
   // fade to black is not evidence that the picture got smaller, and published

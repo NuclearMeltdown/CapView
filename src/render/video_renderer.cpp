@@ -1007,6 +1007,11 @@ void VideoRenderer::ResetAnalysis() {
   boundsValid_ = false;
   accAny_ = false;
   boundsFramesSeen_ = 0;
+
+  signalVerdict_ = SignalVerdict::Unknown;
+  signalFramesSeen_ = 0;
+  signalSinceTick_ = 0;
+  signalPrev_.clear();
 }
 
 bool VideoRenderer::LumaLayout(size_t* offset, size_t* step) const {
@@ -1129,6 +1134,98 @@ void VideoRenderer::AnalyzeContentBounds(const FrameView& frame) {
             boundsL_, boundsR_, boundsT_, boundsB_, boundsL_, source_.width - 1 - boundsR_,
             boundsT_, source_.height - 1 - boundsB_);
   }
+}
+
+// ---------------------------------------------------------------- signal
+//
+// A sparse grid of luma samples, compared against itself and against the same
+// grid one measurement ago. Two numbers come out: how much contrast the frame
+// holds, and how much it changed.
+//
+// The grid is deliberately coarse and spread with a prime stride, for the same
+// reason the level detector uses one -- a stride that divides the row length
+// reads a single column and calls it the picture.
+static const int kSignalSampleEvery = 6;
+static const int kSignalSamples = 2048;
+// Below this the frame has no contrast worth the name. Sixteen levels out of
+// 255, which is wide enough to cover the noise an analogue decoder puts on a
+// muted output and narrow enough that a dim night-time scene still clears it.
+static const int kSignalFlatSpan = 16;
+// Snow: mean absolute change per sample between two measurements. Real motion
+// on this hardware sits well under 20 even in a fast scene, because most of the
+// frame is background; snow replaces every sample every frame and lands near
+// the average distance between two random levels, which is 85.
+static const int kSignalSnowDelta = 48;
+// And it has to be contrasty as well, so a hard cut between two flat colours
+// cannot be mistaken for it.
+static const int kSignalSnowSpan = 96;
+
+void VideoRenderer::AnalyzeSignal(const FrameView& frame) {
+  if (++signalFramesSeen_ % kSignalSampleEvery != 0) return;
+
+  size_t offset = 0, step = 1;
+  if (!LumaLayout(&offset, &step)) return;
+  const size_t span = (size_t)source_.width * step * (size_t)source_.height;
+  if (span > frame.size || span <= offset + step) return;
+
+  const size_t count = (span - offset) / step;
+  size_t stride = count / (size_t)kSignalSamples;
+  if (stride < 1) stride = 1;
+  if (stride % 2 == 0) ++stride;
+
+  std::vector<uint8_t> now;
+  now.reserve((size_t)kSignalSamples);
+  int lo = 255, hi = 0;
+  for (size_t i = 0; i < count && now.size() < (size_t)kSignalSamples; i += stride) {
+    const uint8_t v = frame.data[offset + i * step];
+    now.push_back(v);
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  if (now.empty()) return;
+
+  // Only comparable against a grid of the same shape. A format change resizes
+  // it, and then this measurement simply starts over.
+  int delta = -1;
+  if (signalPrev_.size() == now.size()) {
+    uint64_t sum = 0;
+    for (size_t i = 0; i < now.size(); ++i) {
+      const int d = (int)now[i] - (int)signalPrev_[i];
+      sum += (uint64_t)(d < 0 ? -d : d);
+    }
+    delta = (int)(sum / now.size());
+  }
+  signalPrev_.swap(now);
+  if (delta < 0) return;  // nothing to compare against yet
+
+  const int spread = hi - lo;
+  SignalVerdict verdict;
+  if (spread < kSignalFlatSpan) {
+    verdict = SignalVerdict::Flat;
+  } else if (delta >= kSignalSnowDelta && spread >= kSignalSnowSpan) {
+    verdict = SignalVerdict::Snow;
+  } else {
+    verdict = SignalVerdict::Picture;
+  }
+
+  if (verdict != signalVerdict_) {
+    signalVerdict_ = verdict;
+    signalSinceTick_ = ::GetTickCount();
+    if (signalSinceTick_ == 0) signalSinceTick_ = 1;  // 0 means "never measured"
+    CAP_LOG("Signal: %s (Spanne %d, Aenderung %d)",
+            verdict == SignalVerdict::Picture ? "Bild"
+            : verdict == SignalVerdict::Snow  ? "Rauschen"
+                                              : "flach",
+            spread, delta);
+  }
+}
+
+double VideoRenderer::signalHeldSeconds() const {
+  if (signalSinceTick_ == 0) return 0.0;
+  // Unsigned subtraction, so the wrap after seven weeks of uptime costs one
+  // wrong reading rather than a negative age.
+  const unsigned long elapsed = ::GetTickCount() - signalSinceTick_;
+  return (double)elapsed / 1000.0;
 }
 
 bool VideoRenderer::contentBounds(int* left, int* top, int* right, int* bottom) const {
@@ -1260,6 +1357,7 @@ bool VideoRenderer::UploadFrame(const FrameView& frame) {
   AnalyzeLevels(frame);
   AnalyzeInterlace(frame);
   AnalyzeContentBounds(frame);
+  AnalyzeSignal(frame);
 
   // Before anything is written over: the frame currently in the planes moves
   // into the ring. One copy, whatever the depth. Skipped entirely unless

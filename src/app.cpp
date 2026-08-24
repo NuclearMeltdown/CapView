@@ -28,6 +28,17 @@ const wchar_t kWindowTitle[] = L"CapView";
 
 // How long without a frame before we call it "no signal".
 const double kNoSignalSeconds = 1.5;
+// How long a flat picture is given before it counts as no signal rather than as
+// a black screen. Generous, because being wrong here means covering a game that
+// was only fading out; a title screen that stays black for eight seconds is rare
+// and a card with nothing on it stays black forever.
+const double kFlatSeconds = 8.0;
+// Unless the decoder also says it has no lock, in which case there is no reason
+// to keep waiting on a second opinion.
+const double kFlatUnlockedSeconds = 2.0;
+// Snow is a confident verdict, so it needs only long enough to rule out a hard
+// cut between two busy scenes clearing both thresholds for one measurement.
+const double kSnowSeconds = 1.0;
 // Delay between reconnect attempts, and the slower pace once it is clear the
 // device is not coming back on its own.
 const double kRetrySeconds = 2.0;
@@ -162,6 +173,8 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
     ::MessageBoxW(nullptr, ToWide(error).c_str(), L"CapView", MB_ICONERROR | MB_OK);
     return false;
   }
+
+  LoadIdleIcon();
 
   if (config_.app.startFullscreen) SetFullscreen(true);
 
@@ -1117,6 +1130,130 @@ void App::UpdateVideoStandard() {
   // Setting it is not the same as it working. Give the decoder a moment, then
   // this function will look at the lock again and either keep it or move on.
   standardNextTryQpc_ = now + SecondsToQpc(kStandardSettleSeconds);
+}
+
+// The window icon, as a texture for the empty state.
+//
+// Not through WIC, although WIC is already linked: the resource compiler splits
+// an .ico into RT_GROUP_ICON plus one RT_ICON per size, so there is no .ico file
+// in the binary for WIC to decode. LoadImage understands that split and picks
+// the size asked for, which is the whole reason to go the GDI way here.
+void App::LoadIdleIcon() {
+  if (idleIcon_ || !d3d_.device()) return;
+
+  const int want = 256;
+  HICON icon = (HICON)::LoadImageW(instance_, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON, want,
+                                   want, LR_DEFAULTCOLOR);
+  if (!icon) return;
+
+  ICONINFO info = {};
+  BITMAP bm = {};
+  std::vector<uint8_t> pixels;
+  int w = 0, h = 0;
+  if (::GetIconInfo(icon, &info) && info.hbmColor &&
+      ::GetObjectW(info.hbmColor, sizeof(bm), &bm) && bm.bmWidth > 0 && bm.bmHeight > 0) {
+    w = bm.bmWidth;
+    h = bm.bmHeight;
+
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;  // negative: top down, so no row flip afterwards
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+
+    pixels.resize((size_t)w * (size_t)h * 4);
+    HDC screen = ::GetDC(nullptr);
+    if (!::GetDIBits(screen, info.hbmColor, 0, (UINT)h, pixels.data(), &bi, DIB_RGB_COLORS)) {
+      pixels.clear();
+    }
+    ::ReleaseDC(nullptr, screen);
+  }
+  if (info.hbmColor) ::DeleteObject(info.hbmColor);
+  if (info.hbmMask) ::DeleteObject(info.hbmMask);
+  ::DestroyIcon(icon);
+  if (pixels.empty()) return;
+
+  // GetDIBits hands back BGRA. Two things have to happen on the way to a
+  // D3D texture: the channel swap, and premultiplying by alpha -- ImGui's
+  // blend state is premultiplied, and handing it straight alpha draws a dark
+  // halo around every edge of the icon.
+  //
+  // An icon with no alpha at all is an old-style one whose transparency lives
+  // in the mask instead. Rather than decode the mask, such an icon is drawn
+  // opaque: the rectangle is square and the background behind it is flat, so
+  // the result is plain rather than wrong.
+  bool anyAlpha = false;
+  for (size_t i = 3; i < pixels.size(); i += 4) {
+    if (pixels[i] != 0) { anyAlpha = true; break; }
+  }
+  for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+    const uint8_t b = pixels[i];
+    const uint8_t r = pixels[i + 2];
+    const unsigned a = anyAlpha ? pixels[i + 3] : 255u;
+    pixels[i + 0] = (uint8_t)(r * a / 255u);
+    pixels[i + 1] = (uint8_t)(pixels[i + 1] * a / 255u);
+    pixels[i + 2] = (uint8_t)(b * a / 255u);
+    pixels[i + 3] = (uint8_t)a;
+  }
+
+  D3D11_TEXTURE2D_DESC td = {};
+  td.Width = (UINT)w;
+  td.Height = (UINT)h;
+  td.MipLevels = 1;
+  td.ArraySize = 1;
+  td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  td.SampleDesc.Count = 1;
+  td.Usage = D3D11_USAGE_IMMUTABLE;
+  td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+  D3D11_SUBRESOURCE_DATA init = {};
+  init.pSysMem = pixels.data();
+  init.SysMemPitch = (UINT)w * 4;
+
+  ComPtr<ID3D11Texture2D> tex;
+  if (FAILED(d3d_.device()->CreateTexture2D(&td, &init, &tex))) return;
+  if (FAILED(d3d_.device()->CreateShaderResourceView(tex.Get(), nullptr, &idleIcon_))) {
+    idleIcon_.Reset();
+    return;
+  }
+  idleIconSize_ = w;
+}
+
+// Frames arriving is the whole answer on a digital input and no answer at all on
+// an analogue one, where the card keeps delivering whatever an open wire decodes
+// to. So the pixels are asked as well -- and the decoder's own lock is used only
+// to say "no" faster, never to say "yes": this card reports a lock on some
+// standards with nothing connected, which is measured and written down in the
+// wiki.
+bool App::HaveLiveSignal() const {
+  const FrameSink* sink = capture_.sink();
+  if (!sink || !sink->HasRecentFrame(kNoSignalSeconds) || !renderer_.hasFrame()) return false;
+
+  const VideoRenderer::SignalVerdict verdict = renderer_.detectedSignal();
+  if (verdict == VideoRenderer::SignalVerdict::Picture ||
+      verdict == VideoRenderer::SignalVerdict::Unknown) {
+    return true;
+  }
+
+  // Neither of the two failure verdicts is acted on the instant it appears.
+  //
+  // Snow is the confident one, but a hard cut between two busy scenes can clear
+  // both its thresholds for a single measurement, and a viewer that blinks the
+  // idle screen mid-game is worse than one that takes a moment to notice a
+  // pulled cable. A second is far longer than any cut and far shorter than
+  // anyone's patience with a dead input.
+  //
+  // Flat is the ambiguous one: a black loading screen measures exactly like a
+  // muted input, so only time separates them at all. A decoder that says it has
+  // no lock is reason enough to stop waiting for a second opinion.
+  double patience = kSnowSeconds;
+  if (verdict == VideoRenderer::SignalVerdict::Flat) {
+    const int locked = signalLocked_.load(std::memory_order_relaxed);
+    patience = locked == 0 ? kFlatUnlockedSeconds : kFlatSeconds;
+  }
+  return renderer_.signalHeldSeconds() < patience;
 }
 
 void App::RememberSettingsWindow() {
@@ -2091,24 +2228,26 @@ void App::DrawUi() {
     vp->WorkSize.y -= reserved;
   }
 
-  // ---- status card ----
-  const bool haveSignal = sink && sink->HasRecentFrame(kNoSignalSeconds) && renderer_.hasFrame();
-  if (!haveSignal) {
+  // ---- status card, or the empty state ----
+  if (!HaveLiveSignal()) {
     if (captureState_ == CaptureState::Reconnecting) {
+      // This one keeps the card: it interrupts a picture that was there a moment
+      // ago and is expected back, and the spinner says so.
       DrawStatusCard(T("Verbindung unterbrochen", "Connection lost"),
                      captureError_.empty() ? std::string() : captureError_, true);
     } else if (captureState_ == CaptureState::Running) {
-      DrawStatusCard(T("Kein Signal", "No signal"),
-                     T("Die Karte läuft, liefert aber gerade kein Bild. Quelle "
-                       "eingeschaltet? Richtiger Eingang gewählt?",
-                       "The card is running but not delivering a picture. Is the source "
-                       "on? Is the right input selected?"),
-                     false);
+      const VideoRenderer::SignalVerdict verdict = renderer_.detectedSignal();
+      DrawIdleScreen(
+          (unsigned long long)idleIcon_.Get(), idleIconSize_,
+          verdict == VideoRenderer::SignalVerdict::Snow
+              ? T("Kein Signal — die Karte empfängt nur Rauschen. Kabel und Eingang prüfen.",
+                  "No signal — the card is receiving noise only. Check the cable and input.")
+              : T("Kein Signal. Quelle eingeschaltet? Richtiger Eingang gewählt?",
+                  "No signal. Is the source on? Is the right input selected?"));
     } else if (!settings_.isOpen()) {
-      DrawStatusCard(T("Kein Gerät aktiv", "No device active"),
-                     T("Rechtsklick oder F2 öffnet die Einstellungen.",
-                       "Right-click or press F2 to open the settings."),
-                     false);
+      DrawIdleScreen((unsigned long long)idleIcon_.Get(), idleIconSize_,
+                     T("Kein Gerät aktiv — Rechtsklick oder F2 öffnet die Einstellungen.",
+                       "No device active — right-click or press F2 for the settings."));
     }
   }
 
