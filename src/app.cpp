@@ -587,6 +587,10 @@ void App::MaybeSaveConfig() {
 }
 
 void App::SaveConfig() {
+  // Wherever the settings window stands right now goes into what is about to be
+  // written -- otherwise it is only remembered when the mode is toggled, and a
+  // window moved and then left alone would come back somewhere else.
+  RememberSettingsWindow();
   SaveWindowPlacement();
   std::string error;
   if (!config_.Save(&error)) {
@@ -1115,6 +1119,16 @@ void App::UpdateVideoStandard() {
   standardNextTryQpc_ = now + SecondsToQpc(kStandardSettleSeconds);
 }
 
+void App::RememberSettingsWindow() {
+  if (!settingsHost_.created()) return;
+  const SettingsHost::Placement where = settingsHost_.placement();
+  if (where.width <= 0 || where.height <= 0) return;
+  config_.app.settingsWindowX = where.x;
+  config_.app.settingsWindowY = where.y;
+  config_.app.settingsWindowW = where.width;
+  config_.app.settingsWindowH = where.height;
+}
+
 void App::DrawSettingsWindowed() {
   const bool wanted = config_.app.settingsSeparateWindow;
 
@@ -1125,8 +1139,13 @@ void App::DrawSettingsWindowed() {
     std::string error;
     // The font atlas is shared rather than rebuilt -- same glyphs, and one copy
     // on the GPU is enough for both windows.
+    SettingsHost::Placement where;
+    where.x = config_.app.settingsWindowX;
+    where.y = config_.app.settingsWindowY;
+    where.width = config_.app.settingsWindowW;
+    where.height = config_.app.settingsWindowH;
     if (!settingsHost_.Create(instance_, hwnd_, d3d_.device(), d3d_.context(),
-                              ImGui::GetIO().Fonts, uiScale_, d3d_.tearingSupported(),
+                              ImGui::GetIO().Fonts, uiScale_, d3d_.tearingSupported(), where,
                               &error)) {
       CAP_WARN("%s", error.c_str());
       config_.app.settingsSeparateWindow = false;
@@ -1156,7 +1175,10 @@ void App::DrawSettingsWindowed() {
 
   if (!wanted) {
     // Switched off again: put the panel back inside the picture, and give the
-    // preview its shortest queue back.
+    // preview its shortest queue back. Where it stood is remembered first --
+    // this is the same object that will be built again if it is switched back
+    // on, and it should come up where it was left.
+    RememberSettingsWindow();
     settingsHost_.Destroy();
     d3d_.SetFrameLatency(1);
     return;

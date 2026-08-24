@@ -37,9 +37,19 @@ class SettingsHost {
   // anywhere on the desktop.
   // `allowTearing` comes from the main context, which has already asked DXGI
   // whether the adapter supports it.
+  // Where the window should come up, and where it ended up. Zero or negative
+  // means "wherever Windows likes", which is only right the very first time.
+  struct Placement {
+    int x = -1;
+    int y = -1;
+    int width = 0;
+    int height = 0;
+  };
+  Placement placement() const;
+
   bool Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
               ID3D11DeviceContext* context, ImFontAtlas* atlas, float uiScale,
-              bool allowTearing, std::string* error);
+              bool allowTearing, const Placement& where, std::string* error);
   void Destroy();
 
   bool created() const { return hwnd_ != nullptr; }

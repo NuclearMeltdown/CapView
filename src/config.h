@@ -354,6 +354,14 @@ struct AppSettings {
   // drawn inside the preview, so it can be put on another monitor or beside the
   // picture instead of on top of it.
   bool settingsSeparateWindow = false;
+  // Where that window was last left. Kept because it is destroyed and rebuilt
+  // every time the setting is switched, and a window that jumps back to the
+  // middle of the screen each time is a window you have to keep putting back.
+  // -1 means "let Windows place it", which is right the first time only.
+  int settingsWindowX = -1;
+  int settingsWindowY = -1;
+  int settingsWindowW = 0;
+  int settingsWindowH = 0;
   // Ask GitHub for the newest release once at startup. Only ever asks -- the
   // download is a separate, explicit action.
   bool checkUpdatesOnStart = true;
