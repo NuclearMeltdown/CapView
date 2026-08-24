@@ -88,6 +88,7 @@ class SettingsHost {
   int height_ = 0;
   bool visible_ = false;
   bool closeRequested_ = false;
+  bool occluded_ = false;
   bool themeApplied_ = false;
   bool inFrameCallback_ = false;
   unsigned long lastDrawTick_ = 0;

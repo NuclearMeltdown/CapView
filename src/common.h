@@ -55,7 +55,7 @@ std::wstring ExeDirectory();
 // What this build calls itself. Compared against the newest release tag on
 // GitHub, so it has to line up with how those are named -- "v1.1" there against
 // "1.1" here.
-inline const char* kAppVersion = "1.6";
+inline const char* kAppVersion = "1.6.1";
 
 // Creates a directory and every missing parent. True when it exists afterwards.
 bool EnsureFolder(const std::wstring& path);
