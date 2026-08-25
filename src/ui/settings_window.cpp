@@ -450,6 +450,12 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
       ImGui::EndTabItem();
     }
     ++tabIndex;
+    // Ohne Gerät gibt es nur eine sinnvolle Handlung, und das ist eines
+    // auszuwählen. Neun weitere Reiter voller Regler, die alle auf ein Bild
+    // wirken sollen, das es nicht gibt, sind an dieser Stelle kein Angebot
+    // sondern eine Hürde. Sie kommen zurück, sobald die Karte läuft -- und dann
+    // gleich passend zu dem, was sie tatsächlich liefert.
+    if (!cfg().active().capture.video.empty()) {
     if (ImGui::BeginTabItem(T("Bild###picture", "Picture###picture"), nullptr, tabFlags())) {
       activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_image", ImVec2(0, -footer));
@@ -522,6 +528,7 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
       ImGui::EndTabItem();
     }
     ++tabIndex;
+    }  // alle Reiter außer Quelle, nur mit ausgewähltem Gerät
     ImGui::EndTabBar();
   }
   wantTab_ = -1;
@@ -673,6 +680,20 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
     if (videoDevices_.empty()) {
       ImGui::TextDisabled(T("Keine Videogeräte gefunden", "No video devices found"));
     }
+    // Nichts auszuwählen ist auch eine Auswahl. Niemand braucht das im Betrieb;
+    // es ist der einzige Weg, den leeren Zustand zu sehen, ohne die
+    // Konfigurationsdatei von Hand anzufassen.
+    {
+      const bool none = p.capture.video.empty();
+      if (ImGui::Selectable(T("— kein Gerät —", "— no device —"), none) && !none) {
+        p.capture.video = DeviceRef{};
+        p.capture.format = FormatSel{};
+        p.capture.videoStandard = -1;
+        p.capture.crossbarInput = -1;
+        embeddedAudioForDevice_.clear();
+      }
+      ImGui::Separator();
+    }
     for (const VideoDeviceInfo& d : videoDevices_) {
       const bool selected = (d.id == p.capture.video.id);
       if (ImGui::Selectable(d.name.c_str(), selected) && !selected) {
@@ -693,6 +714,19 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
   }
   ImGui::SameLine();
   if (ImGui::Button(T("Aktualisieren", "Refresh"), ImVec2(-1, 0))) InvalidateDeviceLists();
+
+  // Hier ist Schluss, solange nichts ausgewählt ist. Alles Weitere -- Norm,
+  // Eingang, Ton, Format -- beschreibt eine Karte, und es gibt noch keine.
+  // Sobald eine läuft, steht ohnehin fest, was sie kann, und der Rest erscheint
+  // passend dazu.
+  if (p.capture.video.empty()) {
+    ImGui::Spacing();
+    ImGui::TextDisabled(
+        "%s", T("Wähle oben eine Capture-Karte. Alles Weitere richtet sich danach, was sie "
+                "liefert.",
+                "Pick a capture card above. Everything else follows from what it delivers."));
+    return;
+  }
 
   // The driver's own dialog. Everything in it belongs to the card -- video
   // standard, decoder settings, whatever the vendor put there -- and none of it
@@ -1114,6 +1148,11 @@ void SettingsWindow::DrawImageTab() {
 
   // Natives Raster. Gehört zur Skalierung, nicht zur Bildröhre: es macht das
   // Bild sauberer, nicht nostalgischer.
+  //
+  // Und es ist rein analog. Es rechnet zurück, was das Abtasten einer analogen
+  // Zeile mit fester Rate angerichtet hat -- ein digitaler Eingang überträgt
+  // die Bildpunkte bereits einzeln, da gibt es kein Raster wiederzufinden.
+  if (analogueSource_) {
   ImGui::Spacing();
   ImGui::SeparatorText(T("Natives Pixelraster", "Native pixel grid"));
 
@@ -1160,9 +1199,19 @@ void SettingsWindow::DrawImageTab() {
                "Replaces the filter above, because the mapping is the decision. Best with "
                "integer scaling."));
 
+  }  // natives Pixelraster, nur analog
+
   // Bildröhre. Steht am Ende der Skalierungsgruppe, weil es dorthin gehört --
   // es sind Anzeigeeffekte und keine Signalbearbeitung, und sie landen weder in
   // einer Aufnahme noch in einem Screenshot.
+  //
+  // Gezeigt wird das nach der Zeilenzahl der Quelle, nicht danach, ob sie
+  // analog ist. Der Grund ist ein Geraet, das es wirklich gibt: ein RetroTINK
+  // oder ein MiSTer haengt mit 480p an HDMI, ist also digital, und genau dessen
+  // Besitzer will Zeilenluecken. Umgekehrt greifen sie bei 720p und darueber
+  // ohnehin nicht -- der Shader schaltet unterhalb der doppelten Quellhoehe ab,
+  // weil dort keine Luecke mehr hinpasst.
+  if (sourceHeight_ == 0 || sourceHeight_ <= 576) {
   ImGui::Spacing();
   ImGui::SeparatorText(T("Bildröhre", "Cathode ray tube"));
   ImGui::TextDisabled(
@@ -1193,6 +1242,7 @@ void SettingsWindow::DrawImageTab() {
                  "wirken.",
                  "Needs a high output resolution to read as a mask rather than as a tint."));
   }
+  }  // Bildröhre, nur bei standardaufloesenden Quellen
   ImGui::Spacing();
 
   int aspect = (int)img.aspect;
@@ -1219,6 +1269,13 @@ void SettingsWindow::DrawImageTab() {
                  "For 240p/288p sources that arrive half as tall as they should."));
   }
 
+  // Halbbilder. Nicht danach gezeigt, ob die Quelle analog ist, sondern danach,
+  // ob sie ueberhaupt Halbbilder hat -- 1080i und 480i gibt es auch ueber HDMI,
+  // und wer so etwas anschliesst, braucht diese Regler genauso.
+  //
+  // Solange noch nichts gemessen ist, wird gezeigt. Etwas zu verstecken, bevor
+  // man weiss, ob es gebraucht wird, ist der schlechtere Fehler von beiden.
+  if (analogueSource_ || sourceInterlaced_ || sourceHeight_ == 0) {
   ImGui::Spacing();
   ImGui::SeparatorText(T("Halbbilder", "Fields"));
   ImGui::Checkbox(T("Nur bei interlaced Quellen anwenden", "Only apply to interlaced sources"),
@@ -1258,6 +1315,7 @@ void SettingsWindow::DrawImageTab() {
   ImGui::SameLine();
   HelpMarker(T("Springt das Bild auf und ab, die andere Reihenfolge wählen.",
                "If the picture jumps up and down, pick the other order."));
+  }  // Halbbilder, nur wenn die Quelle welche hat
 
   if (analogueSource_) {
     ImGui::Spacing();
@@ -1625,21 +1683,36 @@ void SettingsWindow::DrawHdrBlock() {
   }
   ImGui::Spacing();
 
-  const char* inputNames[] = {
-      T("Automatisch", "Automatic"), T("SDR", "SDR"), T("HDR10 (PQ)", "HDR10 (PQ)"),
-      T("HLG", "HLG")};
-  int input = (int)app.hdrInput;
-  ImGui::SetNextItemWidth(-260.0f);
-  if (ImGui::Combo(T("Quellkurve", "Source curve"), &input, inputNames, kHdrInputCount)) {
-    app.hdrInput = (HdrInput)input;
+  // Was die Quelle liefert -- und ein Analogdekoder liefert kein HDR. PQ und HLG
+  // sind digitale Uebertragungskurven; über Composite, S-Video oder Component
+  // kommt so etwas nicht an, und eine Kurve zu wählen, die es nicht gibt, kann
+  // nur schaden.
+  //
+  // Was darunter steht, bleibt trotzdem stehen: das ist die Anzeige, nicht die
+  // Quelle. Läuft der Desktop im HDR-Modus, muss auch ein SDR-Bild mit einem
+  // Weißwert in den HDR-Behälter geschrieben werden, sonst kommt es zu dunkel
+  // oder zu hell heraus. Das gilt für ein SNES genauso wie für alles andere.
+  if (!analogueSource_) {
+    const char* inputNames[] = {
+        T("Automatisch", "Automatic"), T("SDR", "SDR"), T("HDR10 (PQ)", "HDR10 (PQ)"),
+        T("HLG", "HLG")};
+    int input = (int)app.hdrInput;
+    ImGui::SetNextItemWidth(-260.0f);
+    if (ImGui::Combo(T("Quellkurve", "Source curve"), &input, inputNames, kHdrInputCount)) {
+      app.hdrInput = (HdrInput)input;
+    }
+    ImGui::SameLine();
+    HelpMarker(T("Automatisch glaubt, was der Treiber in den Medientyp schreibt. Die "
+                 "meisten Karten schreiben dort nichts -- dann bleibt es bei SDR und muss "
+                 "hier von Hand gesetzt werden.",
+                 "Automatic believes what the driver put in the media type. Most cards put "
+                 "nothing there, in which case it stays on SDR and has to be set here by "
+                 "hand."));
+  } else {
+    ImGui::TextDisabled(
+        "%s", T("Analoge Quelle: HDR gibt es dort nicht. Was bleibt, betrifft die Anzeige.",
+                "Analogue source: there is no HDR there. What remains concerns the display."));
   }
-  ImGui::SameLine();
-  HelpMarker(T("Automatisch glaubt, was der Treiber in den Medientyp schreibt. Die "
-               "meisten Karten schreiben dort nichts -- dann bleibt es bei SDR und muss "
-               "hier von Hand gesetzt werden.",
-               "Automatic believes what the driver put in the media type. Most cards put "
-               "nothing there, in which case it stays on SDR and has to be set here by "
-               "hand."));
 
   const char* outputNames[] = {T("Aus", "Off"), T("Automatisch", "Automatic"),
                                T("Immer wenn möglich", "Whenever possible")};
@@ -1666,6 +1739,10 @@ void SettingsWindow::DrawHdrBlock() {
                "abgemischt wird.",
                "How bright ordinary white comes out -- a sheet of paper in the picture, not "
                "the brightest spot. 203 is what HDR material is usually graded against."));
+
+  // Auch das gehört der Quelle, also weg bei einer analogen: was ein SNES an
+  // seiner hellsten Stelle in nits erreicht, ist keine sinnvolle Frage.
+  if (analogueSource_) return;
 
   ImGui::SetNextItemWidth(-260.0f);
   ImGui::SliderFloat(T("Spitze der Quelle", "Source peak"), &app.sourcePeakNits, 200.0f,

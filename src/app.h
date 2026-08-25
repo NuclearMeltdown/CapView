@@ -359,6 +359,9 @@ class App {
 
   DWORD lastPowerPokeTick_ = 0;
   bool cursorHidden_ = false;
+  // Es gab noch keine Konfigurationsdatei, als dieser Lauf begann. Entscheidet
+  // ueber die Begruessung statt der Einstellungen.
+  bool firstRun_ = false;
   int64_t lastMouseMoveQpc_ = 0;
   POINT lastMousePos_ = {};
 };
