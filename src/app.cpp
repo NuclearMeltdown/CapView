@@ -1361,7 +1361,6 @@ void App::DrawSettingsWindowed() {
     }
     settings_.RestorePosition();
     settingsHost_.Destroy();
-    d3d_.SetFrameLatency(1);
     return;
   }
 
@@ -1383,7 +1382,10 @@ void App::DrawSettingsWindowed() {
   // millisecond. Only while the dialog is actually on screen -- the preview
   // wants the shortest queue there is the rest of the time, and that is the
   // single biggest lever on its latency.
-  d3d_.SetFrameLatency(settingsHost_.visible() ? 3 : 1);
+  // Die Vorschau behaelt ihre kurze Warteschlange, immer. Frueher musste sie
+  // hier auf drei hoch, weil beide Fenster an einem Geraet hingen und sich
+  // gegenseitig auf das Present warten liessen; seit der Dialog sein eigenes
+  // Geraet hat, geht ihn das nichts mehr an.
 
   if (!settingsHost_.BeginFrame(darkMode_, config_.app.accentColor)) return;
 
