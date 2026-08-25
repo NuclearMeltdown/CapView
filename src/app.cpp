@@ -515,6 +515,29 @@ void App::ReinitialiseCard() {
   }
 }
 
+// Wie lange die Anzeige stehen darf, wenn kein Bild ankommt.
+//
+// Das Video braucht keinen Boden: kommt nichts, gibt es nichts Neues zu zeigen,
+// und 200 ms halten den Ruhebildschirm am Leben, ohne Rechenzeit fuer ein
+// unveraendertes Bild zu verbrennen.
+//
+// Die Bedienoberflaeche ist etwas anderes. Sie bewegt sich aus eigener Kraft --
+// und das eingebettete Einstellungsfeld wird von genau dieser Schleife
+// gezeichnet. Mit dem Boden fuer das Video lief es ohne Aufnahmegeraet mit
+// gemessenen 4,7 Bildern in der Sekunde, was sich anfuehlt wie zwei.
+//
+// Es geht dabei nicht darum, ob ein Signal anliegt, sondern ob etwas auf dem
+// Schirm ist, das sich bewegen koennen muss. Liegt ein Signal an, gibt dessen
+// Takt ohnehin alles vor und dieser Boden kommt nie zum Tragen.
+double App::IdleFloorMs() const {
+  const bool embeddedPanel = settings_.isOpen() && !config_.app.settingsSeparateWindow;
+  const double now = ImGui::GetTime();
+  const bool toastUp = !toastText_.empty() && now - toastStart_ <= 2.5;
+  const bool osdUp = now - volumeOsdStart_ <= kVolumeOsdSeconds;
+  if (embeddedPanel || cropPick_.active || toastUp || osdUp) return 16.0;
+  return 200.0;
+}
+
 void App::RestartAll(bool userRequested) {
   std::string error;
   if (StartCapture(&error)) {
@@ -2105,7 +2128,8 @@ int App::Run() {
     // drag loop's message flood: a schedule must not be conditional on the
     // queue being quiet.
     const bool fieldDue = secondFieldPending_ && nowQpc >= secondFieldQpc_;
-    if (wokeOnPicture || fieldDue || sinceRenderMs >= 200.0) {
+    const double idleFloor = IdleFloorMs();
+    if (wokeOnPicture || fieldDue || sinceRenderMs >= idleFloor) {
       lastRenderQpc_ = nowQpc;
       RenderFrame();
     }
@@ -2126,7 +2150,11 @@ int App::Run() {
     // Short while the dialog is open, because that is what keeps *it* smooth;
     // it no longer costs the preview anything, since a wake-up without a
     // picture no longer redraws the preview.
-    DWORD timeout = settings_.isOpen() ? 16 : 100;
+    // Ein Boden nuetzt nichts, wenn die Schleife laenger schlaeft als er lang
+    // ist. Solange die Einstellungen offen sind kurz, weil das freigestellte
+    // Fenster jede Runde gezeichnet wird; sonst so kurz, wie der Boden es
+    // verlangt, und hoechstens 100 ms.
+    DWORD timeout = settings_.isOpen() ? 16 : (DWORD)Clamp((int)idleFloor, 16, 100);
     if (secondFieldPending_) {
       // Rounded up, not truncated. Truncating asks to be woken a fraction of a
       // millisecond before the field is due, at which point the loop finds it is
