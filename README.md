@@ -44,6 +44,33 @@ Details: [Latency](../../wiki/Latency).
 
 ## Features
 
+### The settings show what the source can use
+
+The settings live in a window of their own by default. It has a Direct3D device
+of its own, so the preview's size and position do not constrain it and it can go
+on a second monitor. An embedded panel is still available under **Display**,
+because a window capture in OBS cannot see a second window.
+
+What they contain depends on what is plugged in. Before a capture card is
+chosen there is nothing but the device picker — everything else describes a card
+that does not exist yet. Once one is running, controls that cannot apply are not
+disabled, they are absent:
+
+| | Shown when |
+|---|---|
+| Native pixel grid, composite filter | the source is analogue |
+| Scanlines and CRT mask | the source is 576 lines or fewer, analogue or not |
+| Deinterlacing | the source has fields at all |
+| HDR source curve and source peak | the source is not analogue |
+
+The rules follow the picture rather than the socket, which matters on a hybrid
+card: having an analogue decoder is not the same as using it, and a console at
+1080p60 over the digital input was being treated as analogue because the card
+still reported its decoder. No analogue standard produces more than 576 lines,
+so anything taller did not come from one.
+
+The first run opens on a welcome screen rather than on the settings.
+
 ### Source
 
 Any DirectShow video device. Resolution, frame rate, pixel format and colour
