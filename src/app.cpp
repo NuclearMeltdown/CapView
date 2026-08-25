@@ -156,7 +156,9 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
   instance_ = instance;
 
   std::string configError;
-  config_.Load(&configError);
+  // Load meldet dasselbe False fuer "keine Datei" und fuer "Datei kaputt". Der
+  // Unterschied steht in error: beim allerersten Start ist es leer.
+  firstRun_ = !config_.Load(&configError) && configError.empty();
   LogInit(config_.app.logToFile);
   CAP_LOG("CapView startet");
   if (!configError.empty()) CAP_WARN("%s", configError.c_str());
@@ -183,7 +185,16 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
   if (config_.app.startFullscreen) SetFullscreen(true);
 
   // Straight into the picture if we can; into the settings if we cannot.
-  if (config_.active().capture.video.empty()) {
+  //
+  // Beim allerersten Start aber nicht: zehn Reiter voller Optionen sind das
+  // Erste, was jemand von diesem Programm sehen sollte, am allerwenigsten. Da
+  // steht stattdessen der Willkommensbildschirm, der eine einzige Sache sagt --
+  // welche Taste die Einstellungen oeffnet. Ab dem zweiten Start ist es wieder
+  // die Abkuerzung, denn dann ist "kein Geraet" keine Begruessung mehr, sondern
+  // ein Problem.
+  if (firstRun_) {
+    CAP_LOG("Erster Start: Willkommensbildschirm statt Einstellungen");
+  } else if (config_.active().capture.video.empty()) {
     OpenSettings(T("Noch kein Aufnahmegerät ausgewählt. Wähle unten die Capture-Karte aus.",
                    "No capture device selected yet. Pick your capture card below."));
   } else if (!StartCapture(&error)) {
@@ -2443,9 +2454,18 @@ void App::DrawUi() {
               : T("Kein Signal. Quelle eingeschaltet? Richtiger Eingang gewählt?",
                   "No signal. Is the source on? Is the right input selected?"));
     } else if (!settings_.isOpen()) {
-      DrawIdleScreen((unsigned long long)idleIcon_.Get(), idleIconSize_,
-                     T("Kein Gerät aktiv — Rechtsklick oder F2 öffnet die Einstellungen.",
-                       "No device active — right-click or press F2 for the settings."));
+      // Beim ersten Start eine Begruessung statt einer Fehlermeldung. Es ist
+      // derselbe Bildschirm -- Zeichen, Schriftzug, eine Zeile darunter --, nur
+      // sagt die Zeile hier, was als Naechstes zu tun ist, statt zu melden, dass
+      // etwas fehlt. Beim ersten Mal fehlt naemlich noch nichts.
+      DrawIdleScreen(
+          (unsigned long long)idleIcon_.Get(), idleIconSize_,
+          firstRun_ ? T("Willkommen. F2 öffnet die Einstellungen — dort zuerst die "
+                        "Capture-Karte auswählen.",
+                        "Welcome. Press F2 for the settings, and pick your capture card "
+                        "there first.")
+                    : T("Kein Gerät aktiv — Rechtsklick oder F2 öffnet die Einstellungen.",
+                        "No device active — right-click or press F2 for the settings."));
     }
   }
 
@@ -2567,10 +2587,29 @@ void App::DrawUi() {
     const SignalKind kind = config_.active().capture.signalKind;
     const bool hasDecoder =
         capture_.running() && capture_.capabilities().availableStandards != 0;
+    // Einen Dekoder zu haben heisst nicht, ihn zu benutzen. Auf einer Karte, die
+    // beides kann, sind der analoge und der digitale Eingang zwei Geraete auf
+    // einer Platine, und der Dekoder wird weiterhin gemeldet, waehrend das Bild
+    // vom digitalen Eingang kommt. Die Automatik hielt eine Switch mit 1080p60
+    // deshalb fuer eine analoge Quelle.
+    //
+    // Das Bild selbst beantwortet die Frage: keine Videonorm in der Tabelle
+    // liefert mehr als 576 Zeilen. Was hoeher ankommt, kann nicht aus dem
+    // Analogdekoder stammen, egal was die Karte sonst kann.
+    const VideoFormatInfo fmt = renderer_.sourceFormat();
+    const bool plausible = fmt.valid() ? fmt.height <= 576 : true;
     settings_.SetAnalogueSource(kind == SignalKind::Analog ||
-                                (kind == SignalKind::Auto && hasDecoder));
+                                (kind == SignalKind::Auto && hasDecoder && plausible));
   }
   settings_.SetSourceFps(renderer_.sourceFormat().fps);
+  // Woraus sich entscheidet, welche Abschnitte im Reiter Bild erscheinen: die
+  // Zeilenzahl fuer die Bildroehreneffekte, die Halbbilder fuer das
+  // Deinterlacing. Beides aus der Quelle, nicht daraus, ob sie analog ist --
+  // 1080i gibt es ueber HDMI, und 480p gibt es von einem RetroTINK.
+  settings_.SetSourceHeight(renderer_.sourceFormat().valid() ? renderer_.sourceFormat().height : 0);
+  settings_.SetSourceInterlaced(
+      renderer_.sourceFormat().interlaced ||
+      renderer_.detectedInterlace() == VideoRenderer::InterlaceVerdict::Interlaced);
   settings_.SetLevels(audio_.inputPeak(), mic_.peak(), mic_.running());
   if (settings_.takeCropPickRequest()) BeginCropPick();
   if (settings_.takeDeviceConfigRequest()) OpenDeviceConfig();

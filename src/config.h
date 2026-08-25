@@ -378,7 +378,12 @@ struct AppSettings {
   // The settings as a window of the operating system's own rather than one
   // drawn inside the preview, so it can be put on another monitor or beside the
   // picture instead of on top of it.
-  bool settingsSeparateWindow = false;
+  // Standardmaessig ein eigenes Fenster. Es hat ein eigenes Direct3D-Geraet und
+  // ist damit vollstaendig von der Vorschau entkoppelt -- die Groesse und die
+  // Lage der Vorschau schraenken es nicht ein, und es kann auf einen zweiten
+  // Bildschirm. Das eingebettete Feld bleibt, weil es Faelle gibt, in denen ein
+  // zweites Fenster stoert: eine Fensteraufnahme in OBS sieht es nicht.
+  bool settingsSeparateWindow = true;
   // Where that window was last left. Kept because it is destroyed and rebuilt
   // every time the setting is switched, and a window that jumps back to the
   // middle of the screen each time is a window you have to keep putting back.
