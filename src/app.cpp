@@ -1328,7 +1328,30 @@ void App::DrawSettingsWindowed() {
       // frame is being dragged, and redrawing it here means a second present
       // between every mouse movement and the window catching up with it --
       // which turns a frozen preview into a window that lags the cursor.
-      RenderFrame();
+      //
+      // Genau dieselbe Frage wie in der Hauptschleife, und aus demselben Grund:
+      // ist ein neues Bild da, ist ein zweites Halbbild faellig, oder ist es zu
+      // lange her? Frueher stand hier stattdessen eine Zeitschranke, und jede
+      // Zahl, die dort stand, war neben der Kadenz der Quelle -- mal zu
+      // langsam, mal gegen sie schwebend.
+      //
+      // Das Ereignis der Karte laesst sich mit einer Wartezeit von null
+      // abfragen; es setzt sich selbst zurueck, also ist das dieselbe
+      // Entnahme, die die Hauptschleife sonst macht. Sie laeuft in diesem
+      // Moment nicht, also nimmt ihr das nichts weg.
+      bool newPicture = false;
+      if (FrameSink* sink = capture_.sink()) {
+        HANDLE ev = sink->frameEvent();
+        newPicture = ev && ::WaitForSingleObject(ev, 0) == WAIT_OBJECT_0;
+      }
+      const int64_t nowQpc = QpcNow();
+      const double sinceRenderMs =
+          lastRenderQpc_ == 0 ? 1e9 : QpcToSeconds(nowQpc - lastRenderQpc_) * 1000.0;
+      const bool fieldDue = secondFieldPending_ && nowQpc >= secondFieldQpc_;
+      if (newPicture || fieldDue || sinceRenderMs >= 200.0) {
+        lastRenderQpc_ = nowQpc;
+        RenderFrame();
+      }
       inModalFrame_ = false;
     });
   }
@@ -1360,15 +1383,6 @@ void App::DrawSettingsWindowed() {
     settings_.RestorePosition();
     settingsHost_.Destroy();
     return;
-  }
-
-  // Wie oft die Vorschau waehrend eines Fensterzugs neu gezeichnet werden darf.
-  // Die Quelle gibt den Takt vor -- oefter gibt es nichts Neues zu zeigen, und
-  // seltener waere eine Zahl, die sich jemand ausgedacht hat.
-  {
-    const FrameSink* sink = capture_.sink();
-    const double fps = sink ? sink->stats().sourceFps : 0.0;
-    settingsHost_.SetModalInterval(fps > 1.0 ? (unsigned long)(1000.0 / fps) : 16);
   }
 
   // Closing the window is closing the settings, the same as the button is.
@@ -1587,6 +1601,49 @@ void App::DetectCrop() {
   }
   const VideoFormatInfo format = renderer_.sourceFormat();
   if (!format.valid()) return;
+
+  // Wieviel vom Bild ueberhaupt uebrig bliebe -- und das ist die Frage, die vor
+  // dem Zuschneiden zu stellen ist.
+  //
+  // Die Messung sucht die Grenzen dessen, was nicht schwarz ist, und kann
+  // zwischen einem Rand und einer dunklen Stelle nicht unterscheiden. Zeigt
+  // eine Konsole gerade nur ihr Startlogo auf Schwarz, ist das gemessene
+  // Rechteck das Logo, und alles darum wuerde weggeschnitten: Bildflaeche, die
+  // in diesem Moment nur nicht beleuchtet ist.
+  //
+  // Gemessen wird die Flaeche, nicht die einzelne Kante, und das ist der
+  // Unterschied, auf den es ankommt: ein echter Rand frisst eine Richtung, ein
+  // Logo auf Schwarz frisst beide.
+  //
+  // Der breiteste Rand, der noch einer ist, ist ein Kinoformat in 4:3 --
+  // 2,35:1 laesst 57 Prozent der Hoehe und damit auch 57 Prozent der Flaeche
+  // stehen. Ein 4:3-Bild in einem 16:9-Signal laesst 75 Prozent der Breite.
+  // Der Startbildschirm des GameCube dagegen, an einem 720x576-Signal
+  // nachgerechnet: 45 Prozent der Breite, 73 Prozent der Hoehe, zusammen 33
+  // Prozent der Flaeche -- ueber die Kanten allein waeren das nur fuenf Punkte
+  // Abstand zur Haelfte, ueber die Flaeche sind es siebzehn.
+  //
+  // Die zweite Schranke ist nur gegen den entarteten Fall: ein schmaler
+  // Streifen kann die halbe Flaeche halten und trotzdem kein Rand sein.
+  const int keptW = right - left + 1;
+  const int keptH = bottom - top + 1;
+  const double partW = format.width > 0 ? (double)keptW / format.width : 1.0;
+  const double partH = format.height > 0 ? (double)keptH / format.height : 1.0;
+  if (partW * partH < 0.5 || partW < 0.4 || partH < 0.4) {
+    char text[240];
+    std::snprintf(text, sizeof(text),
+                  T("Da blieben nur %.0f Prozent des Bildes stehen (%.0f x %.0f). Das sieht "
+                    "nach einem Logo auf Schwarz aus, nicht nach einem Rand -- erst ein "
+                    "richtiges Bild der Konsole abwarten.",
+                    "That would leave only %.0f per cent of the picture (%.0f x %.0f). It "
+                    "looks like a logo on black rather than a border -- wait for a real "
+                    "picture from the console first."),
+                  partW * partH * 100.0, partW * 100.0, partH * 100.0);
+    Toast(text);
+    CAP_LOG("Zuschnitt verworfen: nur %dx%d von %dx%d uebrig (%.0f %% der Flaeche)", keptW, keptH,
+            format.width, format.height, partW * partH * 100.0);
+    return;
+  }
 
   ImageSettings& img = config_.active().image;
   const int cl = left;

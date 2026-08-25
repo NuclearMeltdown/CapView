@@ -53,8 +53,10 @@ struct ConvertCB {
   // linear light with 1.0 meaning diffuse white.
   int32_t transfer;
   int32_t gamut;  // 1 = the primaries are BT.2020 and want converting to BT.709
-  float hdrPad0;
-  float hdrPad1;
+  // Where the temporal filter's motion gate lets go: how much movement it
+  // ignores, and how fast it gives up above that. See TemporalGate.
+  float motionSlack;
+  float motionSlope;
 
   float coef[4];
 };
@@ -1947,6 +1949,17 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   cb.temporal = image.temporalDenoise < 0.0f   ? 0.0f
                 : image.temporalDenoise > 1.0f ? 1.0f
                                                : image.temporalDenoise;
+  // Kriechen zuerst, oder Ghosting zuerst -- derselbe Ausdruck an zwei
+  // Arbeitspunkten.
+  //
+  // Das Spiel bleibt in beiden Faellen bei fuenf von 255 Stufen, und zwar
+  // absichtlich: das ist nicht die Empfindlichkeit, sondern der Rauschboden der
+  // Karte. Wer den wegnimmt, laesst den Filter auf ruhendem Bild an- und
+  // abschalten und hat nichts gewonnen. Verschoben wird nur die Flanke: ganz
+  // zu nach 26 Stufen oder schon nach 9. Dazwischen liegen genau die langsamen,
+  // kontrastarmen Bewegungen, an denen die Fahne sichtbar wird.
+  cb.motionSlack = 0.02f;
+  cb.motionSlope = image.avoidGhosting ? 64.0f : 12.0f;
   cb.dotNotch = image.dotNotch < 0.0f   ? 0.0f
                 : image.dotNotch > 1.0f ? 1.0f
                                         : image.dotNotch;

@@ -58,8 +58,12 @@ LRESULT CALLBACK SettingsHost::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
       // generates one when the queue is otherwise empty. During a drag the queue
       // never is. Measured, at an interval of 8 ms it fired seven times in a
       // second, and the preview stood still for over a second at a stretch.
-      ::SetTimer(hwnd, 1, 16, nullptr);
-      self->lastModalTick_ = 0;
+      //
+      // 10 ms, weil das die kleinste Zahl ist, die Windows fuer einen Timer
+      // ueberhaupt annimmt (USER_TIMER_MINIMUM). Ein Weckruf ohne neues Bild
+      // kostet seit dem Wegfall der Zeitschranke nichts mehr als die Frage, ob
+      // eines da ist -- also darf oefter gefragt werden, als 60 Hz brauchen.
+      ::SetTimer(hwnd, 1, 10, nullptr);
       return 0;
     case WM_EXITSIZEMOVE:
       ::KillTimer(hwnd, 1);
@@ -90,22 +94,24 @@ LRESULT CALLBACK SettingsHost::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 // until the mouse is released, so CapView's own loop stops running and the
 // preview stops with it. The only way back in is from a message this window
 // receives while that loop is running.
+// Kein Takt mehr an dieser Stelle -- und das ist der dritte Anlauf.
+//
+// Erst stand hier fest 30 ms. Sichtbar: die Vorschau fiel beim Ziehen auf 33
+// Bilder, nicht weil etwas ueberlastet war, sondern weil es hier so beschlossen
+// wurde. Dann stand hier die gemessene Bildrate der Quelle, und das war
+// schlechter: bei PAL sind das 25 Bilder, waehrend die Vorschau nach dem
+// Deinterlacing 50 Halbbilder zeigt -- die Haelfte davon fiel weg. Dazu kommt,
+// dass ::GetTickCount alle 15,6 ms weiterzaehlt, also jede Schranke auf das
+// naechste Vielfache davon aufrundet: 40 ms werden zu 46,8 und damit 21 Bilder
+// in der Sekunde. Genau das war zu sehen.
+//
+// Eine Zahl ist hier immer falsch, egal welche. Ob es etwas Neues zu zeigen
+// gibt, weiss nur die Schleife oben, und die entscheidet es fuer den Normalfall
+// laengst -- neues Bild, faelliges zweites Halbbild, oder ein langsamer Boden.
+// Also wird hier nichts mehr entschieden: der Rueckruf wird angeboten, und was
+// daran haengt, prueft dieselbe Bedingung wie sonst auch.
 void SettingsHost::PumpModalFrame() {
   if (!onFrame_ || inFrameCallback_) return;
-  const DWORD now = ::GetTickCount();
-  // Gepaced von der Quelle, nicht von einer geratenen Zahl.
-  //
-  // Hier stand einmal fest 30 ms, und das war sichtbar: waehrend ein Fenster
-  // gezogen wurde, fiel die Vorschau von 60 auf 33 Bilder -- nicht weil etwas
-  // ueberlastet war, sondern weil genau das hier so beschlossen wurde. Der
-  // Grund dafuer ist inzwischen weg: damals kostete jedes Bild hier zwei
-  // Presents auf einem gemeinsamen Geraet und liess das Fenster dem Mauszeiger
-  // hinterherhaengen, heute hat der Dialog sein eigenes.
-  //
-  // Was bleibt, ist die einzige Obergrenze, die etwas bedeutet: oefter als die
-  // Karte Bilder liefert gibt es nichts Neues zu zeigen.
-  if (lastModalTick_ != 0 && now - lastModalTick_ < modalIntervalMs_) return;
-  lastModalTick_ = now;
   inFrameCallback_ = true;
   onFrame_();
   inFrameCallback_ = false;

@@ -86,8 +86,8 @@ cbuffer ConvertCB : register(b0) {
 
   int   gTransfer;        // 0 display referred, 1 PQ, 2 HLG
   int   gGamut;           // 1 = BT.2020 primaries, convert to BT.709
-  float gHdrPad0;
-  float gHdrPad1;
+  float gMotionSlack;     // how much movement the temporal gate ignores
+  float gMotionSlope;     // and how fast it lets go above that
 
   float4 gCoef;           // Cr->R, Cb->G, Cr->G, Cb->B
 };
@@ -412,9 +412,18 @@ R"HLSL(    s0 += LumaFrameAt(q, 0);
   }
   float mhi = max(max(s0, s1), max(s2, s3)) * 0.142857;
   float mlo = min(min(s0, s1), min(s2, s3)) * 0.142857;
-  // Five levels out of 255 of slack, then full suppression twenty-odd levels
-  // later. Below the slack nothing is moving; above it, something is.
-  return 1.0 - saturate((mhi - mlo - 0.02) * 12.0);
+  // Where the gate lets go, which is the whole trade and therefore a setting.
+  //
+  // Held on: five levels out of 255 of slack, then full suppression twenty-odd
+  // levels later. That is deliberately late, because the artefact this filter
+  // exists for moves by itself -- let go early and the filter switches off
+  // exactly where the crawl is. The price is that a slowly moving edge is
+  // averaged with three older copies of itself, which is the ghosting.
+  //
+  // Let go early: no slack at all and gone within four levels. Moving edges
+  // come out clean; slow parts of the picture keep some of their crawl,
+  // where the demodulator below picks the work back up.
+  return 1.0 - saturate((mhi - mlo - gMotionSlack) * gMotionSlope);
 }
 
 // The spatial half of the same job, for everything the temporal filter cannot

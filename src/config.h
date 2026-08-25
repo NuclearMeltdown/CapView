@@ -267,6 +267,14 @@ struct ImageSettings {
   // The colour subcarrier flips phase from frame to frame, so that average is
   // what cancels dot crawl -- and analogue noise goes with it.
   float temporalDenoise = 0.0f;  // 0..1
+  // Wo der Mittelwert wieder losgelassen wird. Er kann nur mitteln, und Mitteln
+  // ueber Bewegung ist Schmieren -- also entscheidet ein Gatter pro Bildpunkt,
+  // und dieses Flag verschiebt dessen Arbeitspunkt. Aus: das Gatter haelt lange
+  // fest, weil Punktkriechen sich selbst bewegt und ein empfindliches Gatter
+  // den Filter genau dort abschaltet, wo das Artefakt sitzt. An: es laesst
+  // frueh los, was bewegte Kanten sauber macht und dafuer etwas Kriechen an
+  // langsamen Stellen stehen laesst.
+  bool avoidGhosting = false;
   // The same defect where the temporal filter cannot reach it, which in a
   // running game is most of the screen. Costs a little horizontal sharpness,
   // which is why it is a knob of its own rather than part of the one above.

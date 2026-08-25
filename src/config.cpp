@@ -359,6 +359,7 @@ json::Value WriteProfile(const Profile& p) {
   img["rotation"] = (int)p.image.rotation;
   img["chromaSoft"] = p.image.chromaSoft;
   img["temporalDenoise"] = p.image.temporalDenoise;
+  img["avoidGhosting"] = p.image.avoidGhosting;
   img["dotNotch"] = p.image.dotNotch;
   img["aspect"] = (int)p.image.aspect;
   img["cropLeft"] = p.image.cropLeft;
@@ -413,6 +414,7 @@ Profile ReadProfile(const json::Value& v) {
   p.image.rotation = ReadEnum<Rotation>(i, "rotation", kRotationCount, Rotation::None);
   p.image.chromaSoft = i["chromaSoft"].AsInt(0);
   p.image.temporalDenoise = (float)i["temporalDenoise"].AsNumber(0.0);
+  p.image.avoidGhosting = i["avoidGhosting"].AsBool(false);
   p.image.dotNotch = (float)i["dotNotch"].AsNumber(0.0);
   p.image.aspect = ReadEnum<AspectMode>(i, "aspect", 5, AspectMode::Source);
   p.image.cropLeft = Clamp(i["cropLeft"].AsInt(0), 0, 4096);

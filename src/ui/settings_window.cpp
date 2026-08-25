@@ -1265,6 +1265,40 @@ void SettingsWindow::DrawImageTab() {
                  "the demodulator works over the still parts of the picture as well, and "
                  "pays sharpness there for something that is free here."));
 
+    // Derselbe Filter an einem anderen Arbeitspunkt, nicht ein zweiter Filter.
+    // Mitteln ueber Bewegung ist Schmieren -- das laesst sich nicht wegrechnen,
+    // nur verschieben, und wohin es verschoben wird, weiss die Quelle besser
+    // als der Code.
+    ImGui::BeginDisabled(!average);
+    ImGui::Indent();
+    bool quick = img.avoidGhosting;
+    if (ImGui::Checkbox(T("Ghosting vermeiden", "Avoid ghosting"), &quick)) {
+      img.avoidGhosting = quick;
+    }
+    ImGui::Unindent();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    HelpMarker(T("Wo die Mittelung bei Bewegung wieder loslaesst. Sie kann nur mitteln, und "
+                 "Mitteln über Bewegung ist Schmieren -- der Haken verschiebt also nur, wo "
+                 "der Tausch stattfindet, weg ist er nie.\n\n"
+                 "Aus: das Gatter hält lange fest. Punktkriechen bewegt sich selbst, und ein "
+                 "empfindliches Gatter schaltet den Filter genau dort ab, wo das Artefakt "
+                 "sitzt -- dafür wird eine langsam wandernde Kante mit drei älteren Kopien "
+                 "ihrer selbst gemittelt, und das ist die Fahne dahinter.\n\n"
+                 "An: das Gatter lässt nach vier von 255 Stufen los. Bewegte Kanten bleiben "
+                 "sauber, an langsamen Stellen bleibt etwas Kriechen stehen -- dort nimmt "
+                 "der Regler darunter die Arbeit wieder auf.",
+                 "Where the averaging lets go of moving parts. It can only average, and "
+                 "averaging across movement is smearing -- so this only moves where the "
+                 "trade happens, it never removes it.\n\n"
+                 "Off: the gate holds on late. Dot crawl crawls, so a sensitive gate "
+                 "switches the filter off exactly where the artefact is -- the price is "
+                 "that a slowly moving edge gets averaged with three older copies of "
+                 "itself, which is the trail behind it.\n\n"
+                 "On: the gate lets go within four levels out of 255. Moving edges stay "
+                 "clean, slow parts keep some crawl -- and there the slider below picks "
+                 "the work back up."));
+
     // Stufen statt freiem Lauf: die Zwischenwerte sind ohne Wirkung, und ein
     // Regler, der sich bewegt ohne etwas zu ändern, behauptet etwas Falsches.
     DotCrawlStep steps[16];
