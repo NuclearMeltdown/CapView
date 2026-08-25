@@ -121,7 +121,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
       <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/CapView">Source on GitHub</a>
       <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/CapView/wiki">Documentation</a>
     </div>
-    <p class="sub">One file, about 1.6&nbsp;MB. No installer, nothing written to the registry.</p>
+    <p class="sub">One file, just under 2&nbsp;MB. No installer, nothing written to the registry.</p>
   </div>
 </header>
 
@@ -188,7 +188,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
       <div class="card"><h3>Encoder controls</h3><p>Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass, under one set of names translated into each vendor's own.</p></div>
       <div class="card"><h3>Virtual camera</h3><p>Offer the picture to Discord, OBS, Teams or a browser. Built on Media Foundation, which reaches strictly more programs than DirectShow. Needs Windows&nbsp;11.</p></div>
       <div class="card"><h3>High dynamic range</h3><p>PQ and HLG are decoded to linear light, tone mapped with BT.2390 for an ordinary screen or passed through as scRGB for an HDR one.</p></div>
-      <div class="card"><h3>Screenshots</h3><p>PNG or JPEG at source resolution through Windows Imaging Component, so they work without ffmpeg. JPEG&nbsp;XR and AVIF when the range is kept.</p></div>
+      <div class="card"><h3>Screenshots</h3><p>PNG or JPEG at source resolution through Windows Imaging Component, so no ffmpeg is needed. JPEG&nbsp;XR keeps the HDR range and needs none either; AVIF does. A switch grabs the finished window instead, interface and all.</p></div>
       <div class="card"><h3>Profiles</h3><p>Device, input, capture format and every picture and audio setting, one per source, on Ctrl+1 to Ctrl+9.</p></div>
     </div>
   </div>
@@ -202,7 +202,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
       <tr><th>Requirement</th><th></th></tr>
       <tr><td>Windows 10 or later</td><td>Windows 11 for the virtual camera</td></tr>
       <tr><td>A DirectShow capture device</td><td>almost every card, including USB ones</td></tr>
-      <tr><td>ffmpeg</td><td>for recording only, fetched by a button</td></tr>
+      <tr><td>ffmpeg</td><td>for recording and AVIF screenshots, fetched by a button</td></tr>
     </table>
   </div>
 </section>
