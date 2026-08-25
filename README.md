@@ -345,7 +345,7 @@ no external dependencies; Dear ImGui is vendored in `third_party/`.
 build.bat
 ```
 
-The result is `CapView.exe` in the repository root, around 1.6 MB, linked
+The result is `CapView.exe` in the repository root, just under 2 MB, linked
 against the static CRT. `build.bat keep` retains the build tree for incremental
 rebuilds, and `build.bat debug` produces a debug configuration.
 
