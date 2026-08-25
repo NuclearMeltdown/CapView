@@ -240,6 +240,9 @@ struct ImageSettings {
   //
   // Display only. Recordings, screenshots and the virtual camera take the
   // intermediate, which is upstream of the pass these run in.
+  // What the source really has across, when the card is sampling it at some
+  // other rate. 0 leaves it alone. Display only, like the two below it.
+  int nativeWidth = 0;
   float scanlines = 0.0f;   // 0..1, how dark the gaps between source lines go
   int mask = 0;             // 0 off, 1 aperture grille, 2 shadow mask
   float maskStrength = 0.35f;

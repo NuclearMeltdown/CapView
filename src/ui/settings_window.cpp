@@ -975,6 +975,47 @@ void SettingsWindow::DrawImageTab() {
   HelpMarker(T("Hebt Kanten nach der Skalierung an. 0 schaltet es ab.",
                "Lifts edges after scaling. 0 turns it off."));
 
+  // Natives Raster. Gehört zur Skalierung, nicht zur Bildröhre: es macht das
+  // Bild sauberer, nicht nostalgischer.
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Natives Pixelraster", "Native pixel grid"));
+
+  static const int kNativePresets[] = {0, 256, 320, 384, 512, 640};
+  static const char* kNativeLabels[] = {"aus", "256", "320", "384", "512", "640"};
+  int nativeIdx = 0;
+  for (int k = 0; k < 6; ++k) {
+    if (img.nativeWidth == kNativePresets[k]) nativeIdx = k;
+  }
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::BeginCombo(T("Breite der Quelle", "Source width"),
+                        nativeIdx == 0 ? T("aus", "off") : kNativeLabels[nativeIdx])) {
+    for (int k = 0; k < 6; ++k) {
+      const bool chosen = nativeIdx == k;
+      if (ImGui::Selectable(k == 0 ? T("aus", "off") : kNativeLabels[k], chosen)) {
+        img.nativeWidth = kNativePresets[k];
+      }
+      if (chosen) ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Wie viele Pixel die Konsole waagerecht wirklich zeichnet. Die Karte tastet "
+               "mit fester Rate ab, meist 720 -- ein SNES-Pixel landet damit auf 2,8 "
+               "Proben. Ist die Zahl bekannt, wird jedes Ausgabepixel dem richtigen "
+               "Konsolenpixel zugeordnet statt irgendwo dazwischen.\n\n"
+               "256 SNES, NES, PS1 niedrig · 320 Mega Drive, PS1 · 512 SNES hochauflösend · "
+               "640 GameCube, PS2 in 480p\n\n"
+               "Ersetzt den Filter oben, weil die Zuordnung selbst schon die Entscheidung "
+               "ist. Am besten mit Integer-Skalierung.",
+               "How many pixels the console really draws across. The card samples at a "
+               "fixed rate, usually 720 -- so one SNES pixel lands on about 2.8 samples. "
+               "Given the real number, every output pixel resolves to the console's pixel "
+               "instead of somewhere between two of them.\n\n"
+               "256 SNES, NES, PS1 low · 320 Mega Drive, PS1 · 512 SNES hi-res · "
+               "640 GameCube, PS2 at 480p\n\n"
+               "Replaces the filter above, because the mapping is the decision. Best with "
+               "integer scaling."));
+
   // Bildröhre. Steht am Ende der Skalierungsgruppe, weil es dorthin gehört --
   // es sind Anzeigeeffekte und keine Signalbearbeitung, und sie landen weder in
   // einer Aufnahme noch in einem Screenshot.

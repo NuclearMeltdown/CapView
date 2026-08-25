@@ -348,6 +348,7 @@ json::Value WriteProfile(const Profile& p) {
   json::Value img = json::Value::Object();
   img["filter"] = (int)p.image.filter;
   img["sharpen"] = p.image.sharpen;
+  img["nativeWidth"] = p.image.nativeWidth;
   img["scanlines"] = p.image.scanlines;
   img["mask"] = p.image.mask;
   img["maskStrength"] = p.image.maskStrength;
@@ -400,6 +401,7 @@ Profile ReadProfile(const json::Value& v) {
   const json::Value& i = v["image"];
   p.image.filter = ReadEnum<ScaleFilter>(i, "filter", 5, ScaleFilter::Bilinear);
   p.image.sharpen = (float)Clamp(i["sharpen"].AsNumber(0.0), 0.0, 1.0);
+  p.image.nativeWidth = Clamp(i["nativeWidth"].AsInt(0), 0, 4096);
   p.image.scanlines = (float)Clamp(i["scanlines"].AsNumber(0.0), 0.0, 1.0);
   p.image.mask = Clamp(i["mask"].AsInt(0), 0, 2);
   p.image.maskStrength = (float)Clamp(i["maskStrength"].AsNumber(0.35), 0.0, 1.0);

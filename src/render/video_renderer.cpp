@@ -75,7 +75,8 @@ struct ScaleCB {
 
   int32_t mask;        // 0 off, 1 aperture grille, 2 shadow mask
   float maskStrength;  // 0..1
-  float scalePad[2];
+  int32_t nativeWidth; // pixels the source really has across, 0 = leave alone
+  float scalePad;
 };
 static_assert(sizeof(ScaleCB) % 16 == 0, "constant buffer must be 16 byte aligned");
 
@@ -823,6 +824,7 @@ void VideoRenderer::RenderSdrCopy() {
   sc.scanlines = 0.0f;
   sc.mask = 0;
   sc.maskStrength = 0.0f;
+  sc.nativeWidth = 0;
   sc.transfer = (int32_t)hdrTransfer_;
   sc.outputHdr = 0;   // this copy is for things that are not a screen
   sc.paperWhite = paperWhiteNits_;
@@ -2064,6 +2066,11 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   sc.scanlines = Clamp(image.scanlines, 0.0f, 1.0f);
   sc.mask = (int32_t)Clamp(image.mask, 0, 2);
   sc.maskStrength = Clamp(image.maskStrength, 0.0f, 1.0f);
+  // Only meaningful when it is actually below what the card delivers; asking to
+  // "recover" a grid wider than the samples there are would invent detail.
+  sc.nativeWidth = image.nativeWidth > 0 && image.nativeWidth < srcW
+                       ? (int32_t)Clamp(image.nativeWidth, 64, 4096)
+                       : 0;
   sc.transfer = (int32_t)hdrTransfer_;
   sc.outputHdr = hdrOutput_ ? 1 : 0;
   sc.paperWhite = paperWhiteNits_;
