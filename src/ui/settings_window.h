@@ -230,6 +230,9 @@ class SettingsWindow {
   bool deviceConfigRequested_ = false;
   bool cropDetectRequested_ = false;
   bool cardResetRequested_ = false;
+  // Setzt den Eingabecursor beim Oeffnen des Namensdialogs ins Textfeld, aber
+  // nur einmal -- sonst finge es jedes Bild die Eingabe neu ein.
+  bool namePopupFocus_ = false;
   int virtualCameraRequest_ = 0;
   int vcamStatus_ = 0;
   double vcamStatusChecked_ = -10.0;
