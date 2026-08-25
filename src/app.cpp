@@ -1739,7 +1739,17 @@ void App::DrawCropPicker() {
   auto toSrcX = [&](float screen) { return (int)std::lround((screen - (float)r.left) / scaleX); };
   auto toSrcY = [&](float screen) { return (int)std::lround((screen - (float)r.top) / scaleY); };
 
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  // Hintergrundliste, nicht Vordergrundliste: ImGui zeichnet die Vordergrundliste
+  // nach allen Fenstern, die Hintergrundliste davor. Beide liegen ueber dem
+  // Video, denn das Bild kommt gar nicht aus ImGui -- es steht schon im
+  // Rueckpuffer, bevor hier irgendetwas gezeichnet wird.
+  //
+  // Im Vordergrund lag die Abdunklung ueber der eigenen Werkzeugleiste: zieht
+  // man eine Kante ueber sie hinweg, waechst das abgedunkelte Feld darueber und
+  // Übernehmen und Abbrechen werden unlesbar -- genau in dem Moment, in dem man
+  // sie braucht. Dieselbe Ordnung, die der Ruhebildschirm in overlay.cpp
+  // benutzt, und aus demselben Grund.
+  ImDrawList* dl = ImGui::GetBackgroundDrawList();
   const ImVec2 mouse = ImGui::GetMousePos();
 
   float xL = toScreenX(cropPick_.left);
