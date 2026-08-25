@@ -60,6 +60,15 @@ cycles the plausible standards and keeps the first that locks.
 Whatever the driver keeps to itself is reachable through **Configure card**,
 which opens the driver's own property pages while the picture keeps running.
 
+A video standard belongs to the analogue decoder, so it is dropped whenever the
+input it described goes away: changing the device clears it, and a source
+declared Digital never gets one at all. **Reinitialise card** does the same
+thing on demand — it releases the card, looks for it again, and puts the
+standard and the format back to automatic, while leaving the device and the
+input alone. Those are decisions; the other two are measurements. Switching a
+card from composite to DVI and pressing it is enough to have 1920×1080 at 60
+found on its own.
+
 When nothing is coming in, the viewer says so. That is measured from the pixels
 rather than from whether frames arrive, because an analogue card with nothing
 connected keeps delivering frames regardless — and no signal on composite is not
