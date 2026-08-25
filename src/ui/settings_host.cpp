@@ -112,8 +112,48 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
                           ID3D11DeviceContext* context, ImFontAtlas* atlas, float uiScale,
                           bool allowTearing, const Placement& where, std::string* error) {
   if (hwnd_) return true;
-  device_ = device;
-  ctx_ = context;
+  // Ein eigenes Direct3D-Geraet, nicht das der Vorschau.
+  //
+  // Zwei Swapchains auf einem Geraet teilen sich zwangslaeufig zwei Dinge, und
+  // beide waren teuer. Erstens gilt SetMaximumFrameLatency fuer das *Geraet*:
+  // mit der kurzen Warteschlange, von der die Vorschau lebt, wartete jedes
+  // Present auf das Bild der jeweils anderen. Zweitens teilen sie den Immediate
+  // Context -- jeder Zeichenbefehl des Dialogs laeuft dann durch genau den
+  // Strang, den die Vorschau braucht, und serialisiert sich dagegen.
+  //
+  // Ein zweites Geraet loest beides an der Wurzel statt es auszubalancieren.
+  // Es kostet eine eigene Schriftatlas-Textur und etwas Speicher; dafuer darf
+  // die Vorschau ihre Warteschlange dauerhaft auf eins lassen, was der groesste
+  // einzelne Hebel auf ihre Verzoegerung ist.
+  (void)device;
+  (void)context;
+  {
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    const D3D_FEATURE_LEVEL levels[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
+                                        D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
+    D3D_FEATURE_LEVEL got = D3D_FEATURE_LEVEL_11_0;
+    HRESULT hr = ::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, levels,
+                                     (UINT)(sizeof(levels) / sizeof(levels[0])), D3D11_SDK_VERSION,
+                                     &device_, &got, &ctx_);
+    if (FAILED(hr)) {
+      // Ohne BGRA nochmal: aeltere Treiber melden das Flag nicht, brauchen es
+      // hier aber auch nicht.
+      hr = ::D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels,
+                               (UINT)(sizeof(levels) / sizeof(levels[0])), D3D11_SDK_VERSION,
+                               &device_, &got, &ctx_);
+    }
+    if (FAILED(CAP_HR(hr)) || !device_ || !ctx_) {
+      if (error) {
+        *error = T("Eigenes Grafikgerät für das Einstellungsfenster fehlgeschlagen",
+                   "Could not create a graphics device for the settings window");
+      }
+      return false;
+    }
+    // Der Dialog darf ruhig eine Warteschlange haben: er will fluessig dem
+    // Mauszeiger folgen, nicht in einer Millisekunde auf dem Schirm sein.
+    ComPtr<IDXGIDevice1> own;
+    if (SUCCEEDED(device_.As(&own)) && own) own->SetMaximumFrameLatency(3);
+  }
   uiScale_ = uiScale > 0.1f ? uiScale : 1.0f;
 
   WNDCLASSEXW wc = {};
@@ -223,12 +263,26 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   // A context of its own, sharing the main one's fonts: the glyphs are the same
   // and one atlas on the GPU is enough for both.
   ImGuiContext* previous = ImGui::GetCurrentContext();
-  imgui_ = ImGui::CreateContext(atlas);
+  // Eigener Atlas, weil eine Textur nicht ueber zwei Geraete hinweg gilt. Das
+  // nimmt dem Ganzen zugleich die Falle, die der geteilte Atlas mitbrachte: der
+  // DX11-Rueckenteil legt die Textur-Id *im Atlas* ab, also riss das Schliessen
+  // dieses Fensters dem Hauptfenster die Schrift unter den Fuessen weg.
+  (void)atlas;
+  imgui_ = ImGui::CreateContext();
   ImGui::SetCurrentContext(imgui_);
   ImGuiIO& io = ImGui::GetIO();
   io.IniFilename = nullptr;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-  const bool ok = ImGui_ImplWin32_Init(hwnd_) && ImGui_ImplDX11_Init(device_.Get(), ctx_.Get());
+  // Dieselbe Schrift wie im Hauptfenster, und in derselben Groesse. Der eigene
+  // Atlas faengt sonst mit ImGuis eingebauter an -- dann sieht ein Fenster des
+  // Programms aus wie aus einem anderen Programm.
+  //
+  // Muss nach SetCurrentContext stehen: LoadUiFont haengt die Schrift in den
+  // Atlas des gerade aktuellen Kontexts.
+  LoadUiFont(17.0f * uiScale_);
+
+  const bool ok =
+      ImGui_ImplWin32_Init(hwnd_) && ImGui_ImplDX11_Init(device_.Get(), ctx_.Get());
   ImGui::SetCurrentContext(previous);
   if (!ok) {
     if (error) *error = T("ImGui für das Einstellungsfenster fehlgeschlagen",
@@ -255,25 +309,10 @@ void SettingsHost::Destroy() {
     // never started walks a null.
     if (ImGui::GetIO().BackendRendererUserData) ImGui_ImplDX11_Shutdown();
     if (ImGui::GetIO().BackendPlatformUserData) ImGui_ImplWin32_Shutdown();
-    // The shared atlas belongs to the main context, so it must survive this.
-    ImGui::GetIO().Fonts = nullptr;
     ImGui::DestroyContext(imgui_);
     imgui_ = nullptr;
     ImGui::SetCurrentContext(previous == nullptr ? nullptr : previous);
 
-    // And then put back what that took from the main context, if there is a main
-    // context left to put it back into -- at program exit there may not be.
-    //
-    // Sharing one font atlas between two contexts has a sting in it that is
-    // easy to miss: the DX11 backend keeps the atlas's texture id *in the
-    // atlas*, and its shutdown calls io.Fonts->SetTexID(0) and releases the
-    // texture. Since the atlas is the main context's, closing this window left
-    // the main interface drawing every glyph with a null texture -- which is
-    // exactly the "everything breaks until restart" that was reported. One call
-    // rebuilds the texture and puts the id back.
-    if (previous && ImGui::GetIO().BackendRendererUserData) {
-      ImGui_ImplDX11_CreateDeviceObjects();
-    }
   }
   ReleaseRenderTarget();
   swapchain_.Reset();
