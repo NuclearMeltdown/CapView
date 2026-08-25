@@ -402,9 +402,9 @@ Profile ReadProfile(const json::Value& v) {
   p.image.filter = ReadEnum<ScaleFilter>(i, "filter", 5, ScaleFilter::Bilinear);
   p.image.sharpen = (float)Clamp(i["sharpen"].AsNumber(0.0), 0.0, 1.0);
   p.image.nativeWidth = Clamp(i["nativeWidth"].AsInt(0), 0, 4096);
-  p.image.scanlines = (float)Clamp(i["scanlines"].AsNumber(0.0), 0.0, 1.0);
+  p.image.scanlines = (float)Clamp(i["scanlines"].AsNumber(0.0), 0.0, 0.5);
   p.image.mask = Clamp(i["mask"].AsInt(0), 0, 2);
-  p.image.maskStrength = (float)Clamp(i["maskStrength"].AsNumber(0.35), 0.0, 1.0);
+  p.image.maskStrength = (float)Clamp(i["maskStrength"].AsNumber(0.35), 0.0, 0.5);
   p.image.deinterlace =
       ReadEnum<Deinterlace>(i, "deinterlace", kDeinterlaceCount, Deinterlace::Bob);
   p.image.deinterlaceAuto = i["deinterlaceAuto"].AsBool(true);

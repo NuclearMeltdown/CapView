@@ -923,6 +923,50 @@ int DotCrawlWindow(float slider, float carrierPeriod) {
   return 2 * r + 1;
 }
 
+// The slider positions that actually do something different.
+//
+// The shader rounds the window to a whole number of samples and clamps it, so
+// between two positions that land on the same one nothing happens at all: the
+// control moves and the picture does not. How many distinct stops there are is
+// not fixed either -- it falls out of the carrier period, which comes from the
+// video standard and the capture width, so NTSC and PAL do not have the same
+// ones.
+//
+// Rather than invert the shader's arithmetic and risk drifting from it, the
+// range is simply walked and the distinct windows collected. One canonical
+// position per window, in the middle of the span that produces it, so a stop is
+// as far as possible from the rounding boundaries on either side.
+struct DotCrawlStep {
+  float slider;
+  int window;
+};
+
+int BuildDotCrawlSteps(float carrierPeriod, DotCrawlStep* out, int max) {
+  int count = 0;
+  int lastWindow = -1;
+  float spanStart = 0.0f;
+  const int kProbe = 400;
+  for (int i = 0; i <= kProbe; ++i) {
+    const float s = (float)i / (float)kProbe;
+    const int w = DotCrawlWindow(s, carrierPeriod);
+    if (w != lastWindow) {
+      if (lastWindow >= 0 && count < max) {
+        out[count].slider = (spanStart + (float)(i - 1) / (float)kProbe) * 0.5f;
+        out[count].window = lastWindow;
+        ++count;
+      }
+      lastWindow = w;
+      spanStart = s;
+    }
+  }
+  if (lastWindow >= 0 && count < max) {
+    out[count].slider = (spanStart + 1.0f) * 0.5f;
+    out[count].window = lastWindow;
+    ++count;
+  }
+  return count;
+}
+
 // What that window does, from the measurements on the capture card rather than
 // from theory: how much of the pattern goes, and what it costs in horizontal
 // sharpness. Between the measured points it is a straight line, which is honest
@@ -980,20 +1024,27 @@ void SettingsWindow::DrawImageTab() {
   ImGui::Spacing();
   ImGui::SeparatorText(T("Natives Pixelraster", "Native pixel grid"));
 
+  // Die Konsole steht in der Liste selbst, nicht nur im Tooltip: wer hier
+  // vorbeikommt, weiß was er angeschlossen hat und sucht die Zahl dazu -- nicht
+  // umgekehrt.
   static const int kNativePresets[] = {0, 256, 320, 384, 512, 640};
-  static const char* kNativeLabels[] = {"aus", "256", "320", "384", "512", "640"};
+  const char* kNativeWho[] = {
+      T("aus", "off"),
+      "256  ·  SNES, NES, PS1",
+      T("320  ·  Mega Drive, PS1", "320  ·  Mega Drive, PS1"),
+      T("384  ·  Amiga, PS1 breit", "384  ·  Amiga, PS1 wide"),
+      T("512  ·  SNES hochauflösend", "512  ·  SNES hi-res"),
+      T("640  ·  GameCube, PS2, Dreamcast", "640  ·  GameCube, PS2, Dreamcast"),
+  };
   int nativeIdx = 0;
   for (int k = 0; k < 6; ++k) {
     if (img.nativeWidth == kNativePresets[k]) nativeIdx = k;
   }
   ImGui::SetNextItemWidth(-260.0f);
-  if (ImGui::BeginCombo(T("Breite der Quelle", "Source width"),
-                        nativeIdx == 0 ? T("aus", "off") : kNativeLabels[nativeIdx])) {
+  if (ImGui::BeginCombo(T("Breite der Quelle", "Source width"), kNativeWho[nativeIdx])) {
     for (int k = 0; k < 6; ++k) {
       const bool chosen = nativeIdx == k;
-      if (ImGui::Selectable(k == 0 ? T("aus", "off") : kNativeLabels[k], chosen)) {
-        img.nativeWidth = kNativePresets[k];
-      }
+      if (ImGui::Selectable(kNativeWho[k], chosen)) img.nativeWidth = kNativePresets[k];
       if (chosen) ImGui::SetItemDefaultFocus();
     }
     ImGui::EndCombo();
@@ -1026,7 +1077,7 @@ void SettingsWindow::DrawImageTab() {
               "Puts back what a CRT added. Display only."));
 
   ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Zeilenlücken", "Scanlines"), &img.scanlines, 0.0f, 1.0f, "%.2f");
+  ImGui::SliderFloat(T("Zeilenlücken", "Scanlines"), &img.scanlines, 0.0f, 0.5f, "%.2f");
   ImGui::SameLine();
   HelpMarker(T("Dunkelt die Lücken zwischen den Zeilen der Quelle ab. Braucht mindestens "
                "doppelte Höhe im Fenster, darunter bleibt es aus -- sonst gäbe es Moiré "
@@ -1043,7 +1094,7 @@ void SettingsWindow::DrawImageTab() {
 
   if (img.mask != 0) {
     ImGui::SetNextItemWidth(-260.0f);
-    ImGui::SliderFloat(T("Maskenstärke", "Mask strength"), &img.maskStrength, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat(T("Maskenstärke", "Mask strength"), &img.maskStrength, 0.0f, 0.5f, "%.2f");
     ImGui::SameLine();
     HelpMarker(T("Braucht eine hohe Ausgabeauflösung, um als Maske statt als Farbstich zu "
                  "wirken.",
@@ -1170,9 +1221,31 @@ void SettingsWindow::DrawImageTab() {
                  "the demodulator works over the still parts of the picture as well, and "
                  "pays sharpness there for something that is free here."));
 
+    // Stufen statt freiem Lauf: die Zwischenwerte sind ohne Wirkung, und ein
+    // Regler, der sich bewegt ohne etwas zu ändern, behauptet etwas Falsches.
+    DotCrawlStep steps[16];
+    const int stepCount = BuildDotCrawlSteps(carrierPeriod_, steps, 16);
+    int stepIndex = 0;  // 0 heißt aus
+    if (img.dotNotch > 0.0f) {
+      const int nowWindow = DotCrawlWindow(img.dotNotch, carrierPeriod_);
+      stepIndex = 1;
+      for (int k = 0; k < stepCount; ++k) {
+        if (steps[k].window == nowWindow) stepIndex = k + 1;
+      }
+    }
+
+    char label[64];
+    if (stepIndex == 0) {
+      snprintf(label, sizeof(label), "%s", T("aus", "off"));
+    } else {
+      snprintf(label, sizeof(label), T("Stufe %d von %d", "step %d of %d"), stepIndex, stepCount);
+    }
+
     ImGui::SetNextItemWidth(-260.0f);
-    ImGui::SliderFloat(T("Bewegtes entstören", "Clean up what moves"), &img.dotNotch, 0.0f, 1.0f,
-                       img.dotNotch <= 0.0f ? T("aus", "off") : T("Stufe %.2f", "step %.2f"));
+    if (ImGui::SliderInt(T("Bewegtes entstören", "Clean up what moves"), &stepIndex, 0, stepCount,
+                         label)) {
+      img.dotNotch = stepIndex <= 0 ? 0.0f : steps[stepIndex - 1].slider;
+    }
     ImGui::SameLine();
     HelpMarker(T("Rechnet den Farbträger aus der Helligkeit heraus -- das Einzige, was gegen "
                  "Punktkriechen an bewegten Stellen hilft, und es kostet Schärfe. Weiter "
