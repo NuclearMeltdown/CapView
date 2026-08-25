@@ -1151,11 +1151,21 @@ static const int kSignalSamples = 2048;
 // 255, which is wide enough to cover the noise an analogue decoder puts on a
 // muted output and narrow enough that a dim night-time scene still clears it.
 static const int kSignalFlatSpan = 16;
-// Snow: mean absolute change per sample between two measurements. Real motion
-// on this hardware sits well under 20 even in a fast scene, because most of the
-// frame is background; snow replaces every sample every frame and lands near
-// the average distance between two random levels, which is 85.
-static const int kSignalSnowDelta = 48;
+// Snow: mean absolute change per sample between two measurements. Two
+// independent uniform samples average 85 apart, which is what an open input
+// produces; the question is only how close real content can get to that.
+//
+// A synthetic estimate said 17 and was far too generous. Measured against live
+// 1080p60 with a busy animated background, real motion reaches 52 and sits in
+// the high forties for seconds at a time -- so the first value tried here, 48,
+// had no margin at all and the verdict flipped several times a second.
+//
+// Sixty-five, because the two errors are not equally bad. Too low and a moving
+// picture is declared dead and covered by the idle screen, which is the one
+// outcome nobody can work around. Too high and snow goes unrecognised -- and
+// then you simply see the snow, which tells you exactly the same thing the idle
+// screen would have.
+static const int kSignalSnowDelta = 65;
 // And it has to be contrasty as well, so a hard cut between two flat colours
 // cannot be mistaken for it.
 static const int kSignalSnowSpan = 96;
