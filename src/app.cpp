@@ -1285,9 +1285,12 @@ void App::DrawSettingsWindowed() {
     // verschiedenen Bezugssystemen leben -- das Feld im Client des
     // Hauptfensters, das Fenster auf dem Desktop.
     //
-    // Die gemerkte Feldflaeche ist der *Client* des neuen Fensters, also kommt
-    // der Rahmen mit AdjustWindowRectEx obendrauf. Ohne das waere das Fenster
-    // um die Titelleiste kleiner und um deren Hoehe verschoben.
+    // Verglichen werden die *Aussenkanten* beider, nicht ihre Inhalte. Das ist
+    // die einzige Zuordnung, die sich nicht um ein paar Pixel verzieht: das
+    // eingebettete Feld zaehlt seine eigene Titelleiste zur Flaeche dazu, das
+    // freigestellte faengt beim Client unterhalb der Windows-Titelleiste an.
+    // Wer Client auf Client abbildet, verschiebt beim Umschalten jedes Mal um
+    // die Differenz der beiden Leisten -- einmal nach unten, einmal nach oben.
     SettingsHost::Placement where;
     where.x = config_.app.settingsWindowX;
     where.y = config_.app.settingsWindowY;
@@ -1296,14 +1299,10 @@ void App::DrawSettingsWindowed() {
     if (config_.app.settingsPanelW > 200 && config_.app.settingsPanelH > 200) {
       POINT topLeft = {config_.app.settingsPanelX, config_.app.settingsPanelY};
       ::ClientToScreen(hwnd_, &topLeft);
-      RECT want = {topLeft.x, topLeft.y, topLeft.x + config_.app.settingsPanelW,
-                   topLeft.y + config_.app.settingsPanelH};
-      if (::AdjustWindowRectEx(&want, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_APPWINDOW)) {
-        where.x = want.left;
-        where.y = want.top;
-        where.width = want.right - want.left;
-        where.height = want.bottom - want.top;
-      }
+      where.x = topLeft.x;
+      where.y = topLeft.y;
+      where.width = config_.app.settingsPanelW;
+      where.height = config_.app.settingsPanelH;
     }
     if (!settingsHost_.Create(instance_, hwnd_, d3d_.device(), d3d_.context(),
                               ImGui::GetIO().Fonts, uiScale_, d3d_.tearingSupported(), where,
@@ -1348,20 +1347,28 @@ void App::DrawSettingsWindowed() {
     // dabei eine Lage heraus, die das Feld unerreichbar machen wuerde. Das faengt
     // die Wiederherstellung selbst ab und setzt in die Mitte.
     if (HWND host = settingsHost_.hwnd()) {
-      RECT client = {};
-      POINT topLeft = {0, 0};
-      if (::GetClientRect(host, &client) && ::ClientToScreen(host, &topLeft)) {
-        POINT inMain = topLeft;
+      RECT outer = {};
+      if (::GetWindowRect(host, &outer)) {
+        POINT inMain = {outer.left, outer.top};
         ::ScreenToClient(hwnd_, &inMain);
         config_.app.settingsPanelX = inMain.x;
         config_.app.settingsPanelY = inMain.y;
-        config_.app.settingsPanelW = client.right;
-        config_.app.settingsPanelH = client.bottom;
+        config_.app.settingsPanelW = outer.right - outer.left;
+        config_.app.settingsPanelH = outer.bottom - outer.top;
       }
     }
     settings_.RestorePosition();
     settingsHost_.Destroy();
     return;
+  }
+
+  // Wie oft die Vorschau waehrend eines Fensterzugs neu gezeichnet werden darf.
+  // Die Quelle gibt den Takt vor -- oefter gibt es nichts Neues zu zeigen, und
+  // seltener waere eine Zahl, die sich jemand ausgedacht hat.
+  {
+    const FrameSink* sink = capture_.sink();
+    const double fps = sink ? sink->stats().sourceFps : 0.0;
+    settingsHost_.SetModalInterval(fps > 1.0 ? (unsigned long)(1000.0 / fps) : 16);
   }
 
   // Closing the window is closing the settings, the same as the button is.

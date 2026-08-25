@@ -55,6 +55,11 @@ class SettingsHost {
   bool created() const { return hwnd_ != nullptr; }
   bool visible() const { return visible_; }
   HWND hwnd() const { return hwnd_; }
+
+  // Wie oft die Vorschau waehrend eines Fensterzugs neu gezeichnet werden darf,
+  // in Millisekunden. Wird von der gemessenen Bildrate der Quelle gesetzt: mehr
+  // als die Karte liefert hat keinen Zweck, und weniger ist willkuerlich.
+  void SetModalInterval(unsigned long ms) { modalIntervalMs_ = ms < 2 ? 2 : (ms > 250 ? 250 : ms); }
   ImGuiContext* context() const { return imgui_; }
 
   // Called while the window is being dragged or resized. Windows runs a modal
@@ -112,6 +117,7 @@ class SettingsHost {
   UINT presentFlags_ = 0;
   bool themeApplied_ = false;
   bool inFrameCallback_ = false;
+  unsigned long modalIntervalMs_ = 16;
   unsigned long lastDrawTick_ = 0;
   std::function<void()> onFrame_;
   float uiScale_ = 1.0f;

@@ -84,24 +84,27 @@ LRESULT CALLBACK SettingsHost::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
   return ::DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-// One frame from inside the modal loop, at most every twelve milliseconds.
+// One frame from inside the modal loop.
 //
 // Dragging a window puts Windows into a loop of its own that does not return
 // until the mouse is released, so CapView's own loop stops running and the
 // preview stops with it. The only way back in is from a message this window
 // receives while that loop is running.
-//
-// The ceiling matters as much as the hook: rendering on every WM_MOVING would
-// put a whole frame -- shaders, readbacks, two presents -- between each mouse
-// movement and the window following it, which trades one kind of stutter for
-// another.
 void SettingsHost::PumpModalFrame() {
   if (!onFrame_ || inFrameCallback_) return;
   const DWORD now = ::GetTickCount();
-  // Thirty a second, not eighty. The preview has nothing more to show than the
-  // capture card delivers, and every frame drawn here is time the window is not
-  // following the mouse.
-  if (lastModalTick_ != 0 && now - lastModalTick_ < 30) return;
+  // Gepaced von der Quelle, nicht von einer geratenen Zahl.
+  //
+  // Hier stand einmal fest 30 ms, und das war sichtbar: waehrend ein Fenster
+  // gezogen wurde, fiel die Vorschau von 60 auf 33 Bilder -- nicht weil etwas
+  // ueberlastet war, sondern weil genau das hier so beschlossen wurde. Der
+  // Grund dafuer ist inzwischen weg: damals kostete jedes Bild hier zwei
+  // Presents auf einem gemeinsamen Geraet und liess das Fenster dem Mauszeiger
+  // hinterherhaengen, heute hat der Dialog sein eigenes.
+  //
+  // Was bleibt, ist die einzige Obergrenze, die etwas bedeutet: oefter als die
+  // Karte Bilder liefert gibt es nichts Neues zu zeigen.
+  if (lastModalTick_ != 0 && now - lastModalTick_ < modalIntervalMs_) return;
   lastModalTick_ = now;
   inFrameCallback_ = true;
   onFrame_();
@@ -395,11 +398,14 @@ bool SettingsHost::BeginFrame(bool darkMode, unsigned accentColor) {
   }
   if (width_ <= 0 || height_ <= 0) return false;
 
-  // Sixty redraws a second is plenty for a dialog, and the preview runs at twice
-  // that or more -- drawing the whole settings tree on every one of its frames
-  // is work nobody sees.
+  // Ein Deckel bleibt, aber weit oberhalb dessen, was ein Monitor zeigt: ohne
+  // ihn zeichnet der Dialog den kompletten Einstellungsbaum so oft neu, wie die
+  // Schleife durchlaeuft, und verbrennt dafuer Rechenzeit an Bilder, die
+  // niemand sieht. Bei vier Millisekunden sind das 250 in der Sekunde -- ueber
+  // jeder Bildwiederholrate, die an diesem Rechner haengt, und trotzdem
+  // begrenzt.
   const DWORD now = ::GetTickCount();
-  if (lastDrawTick_ != 0 && now - lastDrawTick_ < 16) return false;
+  if (lastDrawTick_ != 0 && now - lastDrawTick_ < 4) return false;
   lastDrawTick_ = now;
 
   if (!themeApplied_) ApplyTheme(darkMode, accentColor);
