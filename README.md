@@ -384,9 +384,19 @@ More: [Building](../../wiki/Building).
 
 ## ffmpeg
 
-Recording requires `ffmpeg.exe`. Nothing else does. *Settings → Encoder*
-provides a button that downloads a static build, verifies its published SHA-256
-and extracts only the executable. The same is available from the command line:
+Two things require `ffmpeg.exe`, and nothing else does:
+
+- **Recording**, whichever encoder is used.
+- **HDR screenshots in AVIF**, which go through libaom. The other HDR format,
+  JPEG XR, does not — Windows ships that encoder — so an HDR still can be saved
+  without ffmpeg by choosing it instead. SDR screenshots never need it.
+
+Everything else — the preview, the composite filters, deinterlacing, the virtual
+camera, SDR and JPEG XR stills — runs without it.
+
+*Settings → Encoder* provides a button that downloads a static build, verifies
+its published SHA-256 and extracts only the executable. The same is available
+from the command line:
 
 ```bash
 CapView.exe --fetch-ffmpeg
