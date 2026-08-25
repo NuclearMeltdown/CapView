@@ -202,6 +202,28 @@ const char* DeinterlaceHelp(int i) {
   return T(de[i], en[i]);
 }
 
+const char* MaskName(int i) {
+  static const char* de[3] = {"Aus", "Streifenmaske", "Lochmaske"};
+  static const char* en[3] = {"Off", "Aperture grille", "Shadow mask"};
+  i = Pick(i, 3);
+  return T(de[i], en[i]);
+}
+
+const char* MaskHelp(int i) {
+  static const char* de[3] = {
+      "Keine Maske.",
+      "Senkrechte Streifen, wie bei einer Trinitron-Röhre.",
+      "Versetzte Tripel, wie bei einer gewöhnlichen Lochmaskenröhre.",
+  };
+  static const char* en[3] = {
+      "No mask.",
+      "Vertical stripes, the way a Trinitron tube worked.",
+      "Staggered triads, the way an ordinary shadow mask tube worked.",
+  };
+  i = Pick(i, 3);
+  return T(de[i], en[i]);
+}
+
 const char* AspectHelp(int i) {
   static const char* de[5] = {
       "So wie die Karte es liefert.",
@@ -326,6 +348,9 @@ json::Value WriteProfile(const Profile& p) {
   json::Value img = json::Value::Object();
   img["filter"] = (int)p.image.filter;
   img["sharpen"] = p.image.sharpen;
+  img["scanlines"] = p.image.scanlines;
+  img["mask"] = p.image.mask;
+  img["maskStrength"] = p.image.maskStrength;
   img["deinterlace"] = (int)p.image.deinterlace;
   img["deinterlaceAuto"] = p.image.deinterlaceAuto;
   img["fieldOrder"] = (int)p.image.fieldOrder;
@@ -375,6 +400,9 @@ Profile ReadProfile(const json::Value& v) {
   const json::Value& i = v["image"];
   p.image.filter = ReadEnum<ScaleFilter>(i, "filter", 5, ScaleFilter::Bilinear);
   p.image.sharpen = (float)Clamp(i["sharpen"].AsNumber(0.0), 0.0, 1.0);
+  p.image.scanlines = (float)Clamp(i["scanlines"].AsNumber(0.0), 0.0, 1.0);
+  p.image.mask = Clamp(i["mask"].AsInt(0), 0, 2);
+  p.image.maskStrength = (float)Clamp(i["maskStrength"].AsNumber(0.35), 0.0, 1.0);
   p.image.deinterlace =
       ReadEnum<Deinterlace>(i, "deinterlace", kDeinterlaceCount, Deinterlace::Bob);
   p.image.deinterlaceAuto = i["deinterlaceAuto"].AsBool(true);

@@ -165,6 +165,8 @@ const char* RecordSpeedName(int index);
 // worth saying beyond the label.
 const char* ScaleFilterHelp(int index);
 const char* DeinterlaceHelp(int index);
+const char* MaskName(int index);
+const char* MaskHelp(int index);
 const char* AspectHelp(int index);
 
 // Accent colour presets offered in the settings, as 0xRRGGBB.
@@ -229,6 +231,18 @@ struct CaptureSettings {
 struct ImageSettings {
   ScaleFilter filter = ScaleFilter::Bilinear;
   float sharpen = 0.0f;  // 0..1, contrast-adaptive sharpening applied after scaling
+
+  // What a cathode ray tube did to the picture. Off by default, and deliberately
+  // so: the rest of this program exists to hand over the signal as clean as it
+  // arrived, and these put something back that was never in it. They are here
+  // because 240p artwork was drawn for a display that had line gaps and a
+  // coloured mask, and some people want that back.
+  //
+  // Display only. Recordings, screenshots and the virtual camera take the
+  // intermediate, which is upstream of the pass these run in.
+  float scanlines = 0.0f;   // 0..1, how dark the gaps between source lines go
+  int mask = 0;             // 0 off, 1 aperture grille, 2 shadow mask
+  float maskStrength = 0.35f;
   Deinterlace deinterlace = Deinterlace::Bob;
   bool deinterlaceAuto = true;  // only kick in when the source looks interlaced
   FieldOrder fieldOrder = FieldOrder::Auto;
