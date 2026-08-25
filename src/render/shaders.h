@@ -299,7 +299,37 @@ float LumaFrameAt(int2 p, int frame) {
 // decoder mistook for colour, and it lives in the chroma.
 //
 // The brightness is put back sharp afterwards. Only the colour is softened.
+)HLSL"
+R"HLSL(// How sharply a neighbour is discounted for having a different colour from the
+// centre. Measured against a gold-on-blue edge from this card: at 0 -- a plain
+// box average -- the edge loses 0.42 of its saturation, at 4 it loses 0.19, at
+// 8 about 0.09, at 20 it loses 0.05. Smoothing inside a flat area is unchanged
+// by any of it, because there every weight is near one anyway, so the whole
+// scale is free of charge on the half of the job that matters.
+//
+// Eight, because past that the returns are small and the risk is not: a gentle
+// chroma gradient -- a sky, a fade -- is made of small differences, and a
+// weight that discounts those stops smoothing the very thing it is for.
+static const float kChromaKeepEdge = 8.0;
+
 float3 SoftenChroma(float3 rgb, int x, int row) {
+  // Averaging colour sideways across a *colour edge* cannot work unweighted,
+  // and the reason is not a bug in the arithmetic: gold and blue are close to
+  // complementary, so the mean of their chroma genuinely is grey. That is what
+  // put a grey ring around anything gold on a blue background.
+  //
+  // Note that keeping the original luma does not help with this, and that the
+  // obvious "convert to YCbCr, average only Cb and Cr" is not a different
+  // formulation -- adding (Luma(rgb) - Luma(soft)) to all three channels is
+  // algebraically the same thing, to the last decimal. The fix has to be in
+  // *which* neighbours are averaged, not in what is averaged.
+  //
+  // So each neighbour is weighted by how close its colour is to the centre's.
+  // In a flat area every weight is near one and this is the box average it was
+  // before; across an edge the far side falls away and the colour survives.
+  const float centreLuma = Luma(rgb);
+  const float3 centreChroma = rgb - centreLuma;
+
   float3 sum = 0.0;
   float n = 0.0;
   // Deliberately not unrolled. Every FetchRgbAt expands into a pixel format
@@ -308,11 +338,16 @@ float3 SoftenChroma(float3 rgb, int x, int row) {
   // through at every start. A real loop over the actual radius costs nothing at
   // runtime and compiles in a fraction of the time.
   for (int dx = -gChromaSoft; dx <= gChromaSoft; ++dx) {
-    sum += FetchRgbAt(int2(x + dx, row));
-    n += 1.0;
+    float3 s = FetchRgbAt(int2(x + dx, row));
+    float3 sc = s - Luma(s);
+    float3 d = sc - centreChroma;
+    float w = exp(-dot(d, d) * kChromaKeepEdge);
+    sum += sc * w;
+    n += w;
   }
-  float3 soft = sum / max(n, 1.0);
-  return soft + (Luma(rgb) - Luma(soft));
+  // The centre's own luma, with the neighbourhood's colour. Luma of a chroma
+  // vector is zero by construction, so this cannot shift brightness.
+  return centreLuma + sum / max(n, 1e-4);
 }
 
 // Dot crawl is the other half of the same crosstalk, going the other way: colour

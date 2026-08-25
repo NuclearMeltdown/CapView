@@ -8,7 +8,7 @@
   A low-latency viewer and recorder for DirectShow capture cards on Windows.
 </p>
 
-![The viewer showing a console at 1080p60, with the statistics overlay reading a frame age of 1.0 ms](docs/viewer.jpg)
+![The viewer in fullscreen showing a console at 1080p60, with the statistics overlay reading a frame age of 1.2 ms](docs/viewer.jpg)
 
 CapView displays the output of a capture card with as little delay as the
 hardware allows, so the captured signal can be played on directly rather than
@@ -105,6 +105,8 @@ frames, measured on a 480i console:
 | Edge directed | 0.69 | follows edges; meant for pixel art |
 | YADIF | **0.002** | best quality; keeps one frame in memory |
 
+![Left: a 480i GameCube frame woven, with combing across the moving item boxes. Right: the same source through YADIF, clean](docs/deinterlace-before-after.png)
+
 More: [Deinterlacing](../../wiki/Deinterlacing).
 
 ### Composite
@@ -118,6 +120,14 @@ sharpness. A **synchronous demodulator** — a slider — handles what is moving
 reconstructing the colour subcarrier out of the brightness and subtracting it,
 which costs some horizontal sharpness. The averaging locks on whenever the
 demodulator is used, so it never pays for what is already free.
+
+![Left: a GameCube over composite with the filter off, dot crawl speckling the gold laurel and the chequered flag. Right: the same frame with the filter on](docs/composite-before-after.png)
+
+Colour shimmer is handled separately, by averaging the colour sideways — which
+composite carries at a quarter of the bandwidth anyway, so it costs no real
+detail. Each neighbour is weighted by how close its colour is to the centre's,
+because an unweighted average across a colour edge turns complementary
+neighbours into grey.
 
 The subcarrier frequency follows from the video standard, so the Source tab
 matters here too. SECAM is not handled by the demodulator; the averaging still

@@ -36,9 +36,13 @@ const double kFlatSeconds = 8.0;
 // Unless the decoder also says it has no lock, in which case there is no reason
 // to keep waiting on a second opinion.
 const double kFlatUnlockedSeconds = 2.0;
-// Snow is a confident verdict, so it needs only long enough to rule out a hard
-// cut between two busy scenes clearing both thresholds for one measurement.
-const double kSnowSeconds = 1.0;
+// Snow is the confident verdict, but not by as much as a synthetic test
+// suggested. Measured against a real racing demo on this card, steady fast
+// motion reads a change of 37 against a threshold of 48, and a fade-and-cut
+// between scenes produced a burst of Snow, Picture, Flat, Picture, Snow inside
+// 1.2 seconds. Two seconds clears that comfortably and costs nothing where it
+// matters: an unterminated input does not stop being snow after two seconds.
+const double kSnowSeconds = 2.0;
 // Delay between reconnect attempts, and the slower pace once it is clear the
 // device is not coming back on its own.
 const double kRetrySeconds = 2.0;
@@ -1934,7 +1938,20 @@ int App::Run() {
     const double sinceRenderMs =
         lastRenderQpc_ == 0 ? 1e9 : QpcToSeconds(nowQpc - lastRenderQpc_) * 1000.0;
     const bool wokeOnPicture = lastWait_ == WAIT_OBJECT_0 && lastWaitHadEvent_;
-    const bool fieldDue = lastWait_ == WAIT_TIMEOUT && secondFieldPending_;
+    // Due by the clock, not by *how* the wait ended.
+    //
+    // This used to read `lastWait_ == WAIT_TIMEOUT`, which is only ever true
+    // when nothing else woke the loop at all. Open the settings and there is a
+    // steady stream of messages, so the wait returns "input available" every
+    // time and the timeout branch never runs -- on an interlaced source that
+    // silently dropped every second field for as long as the dialog was open,
+    // because the next arriving picture takes the other branch and resets the
+    // field index before the second one was ever drawn.
+    //
+    // The same shape of mistake as the WM_TIMER that could not compete with the
+    // drag loop's message flood: a schedule must not be conditional on the
+    // queue being quiet.
+    const bool fieldDue = secondFieldPending_ && nowQpc >= secondFieldQpc_;
     if (wokeOnPicture || fieldDue || sinceRenderMs >= 200.0) {
       lastRenderQpc_ = nowQpc;
       RenderFrame();
