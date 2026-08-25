@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CapView — low-latency capture card viewer for Windows</title>
+<meta name="description" content="A low-latency viewer and recorder for DirectShow capture cards on Windows. Play on your capture card instead of only watching it.">
+<link rel="icon" href="icon.png">
+<meta property="og:title" content="CapView">
+<meta property="og:description" content="Play on your capture card, don't just watch it. 1080p60 at about one millisecond.">
+<meta property="og:image" content="https://nuclearmeltdown.github.io/CapView/viewer.jpg">
+<style>
+:root{
+  --accent:#8B5CF6;
+  --accent-soft:#a78bfa;
+  --bg:#0c0b12;
+  --bg-raised:#131120;
+  --line:#241f38;
+  --text:#e8e6f2;
+  --dim:#9a94b4;
+  --radius:14px;
+  --wrap:1080px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--text);
+  font:400 16px/1.65 "Segoe UI",system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;
+}
+a{color:var(--accent-soft);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:var(--wrap);margin:0 auto;padding:0 24px}
+
+/* ---------------------------------------------------------------- header */
+header{
+  position:relative;text-align:center;
+  padding:104px 0 72px;
+  background:
+    radial-gradient(900px 460px at 50% -160px,rgba(139,92,246,.28),transparent 70%),
+    radial-gradient(600px 300px at 80% 10%,rgba(139,92,246,.10),transparent 70%);
+}
+header img.logo{width:104px;height:104px;image-rendering:auto}
+h1{font-size:clamp(2.6rem,7vw,4.2rem);font-weight:700;letter-spacing:-.03em;margin:18px 0 10px}
+.tag{font-size:clamp(1.05rem,2.4vw,1.3rem);color:var(--dim);max-width:620px;margin:0 auto}
+.cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:34px}
+.btn{
+  display:inline-block;padding:13px 26px;border-radius:11px;font-weight:600;font-size:.98rem;
+  border:1px solid transparent;transition:transform .16s ease,background .16s ease,border-color .16s ease;
+}
+.btn:hover{text-decoration:none;transform:translateY(-2px)}
+.btn-main{background:var(--accent);color:#fff}
+.btn-main:hover{background:#7c4ff0}
+.btn-ghost{border-color:var(--line);color:var(--text);background:var(--bg-raised)}
+.btn-ghost:hover{border-color:var(--accent)}
+.sub{margin-top:14px;font-size:.86rem;color:var(--dim)}
+
+/* ------------------------------------------------------------- sections */
+section{padding:76px 0}
+h2{font-size:clamp(1.6rem,3.6vw,2.1rem);font-weight:650;letter-spacing:-.02em;margin-bottom:12px}
+h2 .num{color:var(--accent);font-weight:600;margin-right:.5em;font-variant-numeric:tabular-nums}
+.lead{color:var(--dim);max-width:660px;margin-bottom:34px}
+figure{margin:34px 0}
+figure img{
+  width:100%;height:auto;display:block;border-radius:var(--radius);
+  border:1px solid var(--line);background:#000;
+}
+figcaption{margin-top:12px;font-size:.87rem;color:var(--dim);line-height:1.55}
+
+/* the one number worth shouting about */
+.metric{
+  display:flex;gap:40px;flex-wrap:wrap;justify-content:center;
+  padding:34px;border:1px solid var(--line);border-radius:var(--radius);
+  background:linear-gradient(180deg,var(--bg-raised),transparent);
+}
+.metric div{text-align:center;min-width:150px}
+.metric b{display:block;font-size:2.2rem;font-weight:700;color:var(--accent-soft);letter-spacing:-.02em}
+.metric span{font-size:.85rem;color:var(--dim)}
+
+.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+.card{
+  padding:24px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--bg-raised);transition:border-color .18s ease,transform .18s ease;
+}
+.card:hover{border-color:var(--accent);transform:translateY(-3px)}
+.card h3{font-size:1.02rem;font-weight:640;margin-bottom:8px}
+.card p{font-size:.9rem;color:var(--dim);line-height:1.6}
+
+table{width:100%;border-collapse:collapse;font-size:.9rem;margin-top:8px}
+th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line)}
+th{color:var(--dim);font-weight:600;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+td strong{color:var(--accent-soft)}
+
+.note{
+  border-left:3px solid var(--accent);padding:14px 18px;margin-top:26px;
+  background:var(--bg-raised);border-radius:0 10px 10px 0;font-size:.92rem;color:var(--dim);
+}
+
+footer{padding:56px 0 72px;border-top:1px solid var(--line);color:var(--dim);font-size:.88rem}
+footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;align-items:center}
+
+/* --------------------------------------------------------- scroll reveal */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.2,.7,.3,1),transform .7s cubic-bezier(.2,.7,.3,1)}
+.reveal.on{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .reveal{opacity:1;transform:none;transition:none}
+  .btn:hover,.card:hover{transform:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <img class="logo" src="icon.png" alt="">
+    <h1>CapView</h1>
+    <p class="tag">A low-latency viewer and recorder for DirectShow capture cards on&nbsp;Windows. Built to be <em>played on</em>, not just watched.</p>
+    <div class="cta">
+      <a class="btn btn-main" id="dl" href="https://github.com/NuclearMeltdown/CapView/releases/latest">Download the latest release</a>
+      <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/CapView">Source on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/CapView/wiki">Documentation</a>
+    </div>
+    <p class="sub">One file, about 1.6&nbsp;MB. No installer, nothing written to the registry.</p>
+  </div>
+</header>
+
+<section class="reveal">
+  <div class="wrap">
+    <div class="metric">
+      <div><b>~1 ms</b><span>from card to screen at 1080p60</span></div>
+      <div><b>1 file</b><span>no installer, no dependencies</span></div>
+      <div><b>MIT</b><span>free and open source</span></div>
+    </div>
+    <figure>
+      <img src="viewer.jpg" alt="CapView in fullscreen showing a console at 1080p60, with the statistics overlay reading a frame age of 1.2 ms">
+      <figcaption>The viewer in fullscreen. The overlay is not a mock-up — it is CapView's own statistics panel reporting the source format, the measured rate and, at the bottom, the age of the frame being drawn.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="wrap">
+    <h2><span class="num">01</span>Why it exists</h2>
+    <p class="lead">A capture card's picture normally arrives too late to play on. CapView takes the queue out of the path so the console on your desk behaves like a console on a television — while still recording, screenshotting and feeding a virtual camera.</p>
+    <div class="grid">
+      <div class="card"><h3>No queue in the capture path</h3><p>Frames are copied into a triple buffer and the filter returns at once. Anything arriving faster than it can be shown is dropped, never buffered, so delay cannot accumulate.</p></div>
+      <div class="card"><h3>No graph clock</h3><p>The DirectShow graph runs without a reference clock, so nothing is held back waiting for a presentation time.</p></div>
+      <div class="card"><h3>Tearing allowed</h3><p>A flip-model swap chain with one frame of queue and VSync off by default — the single biggest lever there is.</p></div>
+      <div class="card"><h3>Conversion on the GPU</h3><p>YUY2, UYVY, NV12, planar 4:2:0, RGB and P010 are unpacked in a pixel shader. Nothing touches the CPU between arrival and drawing.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="wrap">
+    <h2><span class="num">02</span>It cleans up composite</h2>
+    <p class="lead">Composite carries colour and brightness on one wire and they leak into each other. Most viewers leave that alone. CapView removes it in real time, and the numbers behind every setting were measured on real hardware rather than guessed.</p>
+    <figure>
+      <img src="composite-before-after.png" alt="The same GameCube frame over composite: filter off on the left with dot crawl on the gold laurel and the chequered flag, filter on and clean on the right">
+      <figcaption>A PAL-60 GameCube over composite, filter off and on. The crop was not chosen by eye — it is the region where the measured difference between the two frames is largest.</figcaption>
+    </figure>
+    <table>
+      <tr><th>Half</th><th>What it does</th><th>What it costs</th></tr>
+      <tr><td><strong>Four-frame average</strong></td><td>Cancels dot crawl wherever the picture stands still. Four, because the subcarrier walks a four-frame cycle — measured 1.91, 2.62, 1.90 and <strong>0.78</strong> at lags of one to four.</td><td>Nothing at all.</td></tr>
+      <tr><td><strong>Synchronous demodulator</strong></td><td>Reconstructs the subcarrier out of the brightness and subtracts it, so moving content is covered too. Removes 81&nbsp;% of the pattern at a window of nine samples.</td><td>17&nbsp;% of horizontal sharpness.</td></tr>
+    </table>
+    <div class="note">The two are told about each other: the averaging reports how much of the job it did, and the demodulator only handles the rest. Turning both up used to make the picture worse than either alone.</div>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="wrap">
+    <h2><span class="num">03</span>Five deinterlacers, and it measures which you need</h2>
+    <p class="lead">Whether a source is interlaced is measured from the picture, not read from the media type — a media type is entitled to say so and frequently does not.</p>
+    <figure>
+      <img src="deinterlace-before-after.png" alt="Left: a 480i GameCube frame woven, showing combing on the moving item boxes. Right: the same source through YADIF, clean">
+      <figcaption>480i from a GameCube. Left, weaving: combing on everything that moves. Right, YADIF. A 240p or 288p console whose fields hold the same lines is detected separately and handled without interpolation at all.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="wrap">
+    <h2><span class="num">04</span>Everything else</h2>
+    <div class="grid">
+      <div class="card"><h3>Recording</h3><p>H.264, H.265 or AV1 through NVENC, Quick Sync, AMF, x264 or x265. The audio is the master clock, so the output is constant frame rate and does not drift — measured at 1&nbsp;ms over 15&nbsp;seconds.</p></div>
+      <div class="card"><h3>Encoder controls</h3><p>Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass, under one set of names translated into each vendor's own.</p></div>
+      <div class="card"><h3>Virtual camera</h3><p>Offer the picture to Discord, OBS, Teams or a browser. Built on Media Foundation, which reaches strictly more programs than DirectShow. Needs Windows&nbsp;11.</p></div>
+      <div class="card"><h3>High dynamic range</h3><p>PQ and HLG are decoded to linear light, tone mapped with BT.2390 for an ordinary screen or passed through as scRGB for an HDR one.</p></div>
+      <div class="card"><h3>Screenshots</h3><p>PNG or JPEG at source resolution through Windows Imaging Component, so they work without ffmpeg. JPEG&nbsp;XR and AVIF when the range is kept.</p></div>
+      <div class="card"><h3>Profiles</h3><p>Device, input, capture format and every picture and audio setting, one per source, on Ctrl+1 to Ctrl+9.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="wrap">
+    <h2><span class="num">05</span>What it is not</h2>
+    <p class="lead">Scenes, overlays, compositing and streaming are not here and are not planned. For those, use OBS — and note that a card grants its capture pin to one process at a time, so the two cannot hold the same card at once.</p>
+    <table>
+      <tr><th>Requirement</th><th></th></tr>
+      <tr><td>Windows 10 or later</td><td>Windows 11 for the virtual camera</td></tr>
+      <tr><td>A DirectShow capture device</td><td>almost every card, including USB ones</td></tr>
+      <tr><td>ffmpeg</td><td>for recording only, fetched by a button</td></tr>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap row">
+    <div>MIT licensed · Dear ImGui is MIT as well · ffmpeg is fetched from upstream and run as a child process</div>
+    <div><a href="https://github.com/NuclearMeltdown/CapView">GitHub</a> · <a href="https://github.com/NuclearMeltdown/CapView/wiki">Wiki</a> · <a href="https://github.com/NuclearMeltdown/CapView/releases">Releases</a></div>
+  </div>
+</footer>
+
+<script>
+// Scroll reveal, and nothing that breaks without JavaScript: the sections are
+// visible by default if this never runs.
+(function(){
+  var els = document.querySelectorAll('.reveal');
+  if (!('IntersectionObserver' in window)) {
+    els.forEach(function(e){ e.classList.add('on'); });
+    return;
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(en){
+      if (en.isIntersecting) { en.target.classList.add('on'); io.unobserve(en.target); }
+    });
+  }, {rootMargin:'0px 0px -12% 0px', threshold:0.08});
+  els.forEach(function(e){ io.observe(e); });
+})();
+
+// Name the newest release on the download button, so it says what you get.
+// Falls back silently to the generic /releases/latest link.
+fetch('https://api.github.com/repos/NuclearMeltdown/CapView/releases/latest')
+  .then(function(r){ return r.ok ? r.json() : null; })
+  .then(function(j){
+    if (!j) return;
+    var a = document.getElementById('dl');
+    var exe = (j.assets || []).filter(function(x){ return /\.exe$/i.test(x.name); })[0];
+    if (exe) a.href = exe.browser_download_url;
+    a.textContent = 'Download ' + (j.tag_name || 'the latest release');
+  })
+  .catch(function(){});
+</script>
+</body>
+</html>
