@@ -1280,11 +1280,31 @@ void App::DrawSettingsWindowed() {
     std::string error;
     // The font atlas is shared rather than rebuilt -- same glyphs, and one copy
     // on the GPU is enough for both windows.
+    // Auspoppen: das Fenster geht dort auf, wo das eingebettete Feld gerade
+    // stand. Der Weg fuehrt ueber Bildschirmkoordinaten, weil die beiden in
+    // verschiedenen Bezugssystemen leben -- das Feld im Client des
+    // Hauptfensters, das Fenster auf dem Desktop.
+    //
+    // Die gemerkte Feldflaeche ist der *Client* des neuen Fensters, also kommt
+    // der Rahmen mit AdjustWindowRectEx obendrauf. Ohne das waere das Fenster
+    // um die Titelleiste kleiner und um deren Hoehe verschoben.
     SettingsHost::Placement where;
     where.x = config_.app.settingsWindowX;
     where.y = config_.app.settingsWindowY;
     where.width = config_.app.settingsWindowW;
     where.height = config_.app.settingsWindowH;
+    if (config_.app.settingsPanelW > 200 && config_.app.settingsPanelH > 200) {
+      POINT topLeft = {config_.app.settingsPanelX, config_.app.settingsPanelY};
+      ::ClientToScreen(hwnd_, &topLeft);
+      RECT want = {topLeft.x, topLeft.y, topLeft.x + config_.app.settingsPanelW,
+                   topLeft.y + config_.app.settingsPanelH};
+      if (::AdjustWindowRectEx(&want, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_APPWINDOW)) {
+        where.x = want.left;
+        where.y = want.top;
+        where.width = want.right - want.left;
+        where.height = want.bottom - want.top;
+      }
+    }
     if (!settingsHost_.Create(instance_, hwnd_, d3d_.device(), d3d_.context(),
                               ImGui::GetIO().Fonts, uiScale_, d3d_.tearingSupported(), where,
                               &error)) {
@@ -1320,6 +1340,26 @@ void App::DrawSettingsWindowed() {
     // this is the same object that will be built again if it is switched back
     // on, and it should come up where it was left.
     RememberSettingsWindow();
+    // Einbetten: das Feld geht dort auf, wo das Fenster gerade stand. Umgekehrt
+    // derselbe Weg -- Client des Fensters auf den Bildschirm, von dort in den
+    // Client des Hauptfensters.
+    //
+    // Liegt das Fenster ganz oder ueberwiegend neben dem Hauptfenster, kommt
+    // dabei eine Lage heraus, die das Feld unerreichbar machen wuerde. Das faengt
+    // die Wiederherstellung selbst ab und setzt in die Mitte.
+    if (HWND host = settingsHost_.hwnd()) {
+      RECT client = {};
+      POINT topLeft = {0, 0};
+      if (::GetClientRect(host, &client) && ::ClientToScreen(host, &topLeft)) {
+        POINT inMain = topLeft;
+        ::ScreenToClient(hwnd_, &inMain);
+        config_.app.settingsPanelX = inMain.x;
+        config_.app.settingsPanelY = inMain.y;
+        config_.app.settingsPanelW = client.right;
+        config_.app.settingsPanelH = client.bottom;
+      }
+    }
+    settings_.RestorePosition();
     settingsHost_.Destroy();
     d3d_.SetFrameLatency(1);
     return;

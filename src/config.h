@@ -379,6 +379,14 @@ struct AppSettings {
   // working in is worth the four bytes; reopening on the first one every time
   // means finding the same thing again on every visit.
   int settingsTab = 0;
+  // Wo das *eingebettete* Feld zuletzt stand, im Hauptfenster. Getrennt von der
+  // Lage des freigestellten Fensters gefuehrt: das sind zwei verschiedene Orte
+  // in zwei verschiedenen Bezugssystemen, und der eine soll den anderen nicht
+  // verschieben.
+  int settingsPanelX = -1;
+  int settingsPanelY = -1;
+  int settingsPanelW = 0;
+  int settingsPanelH = 0;
   int settingsWindowX = -1;
   int settingsWindowY = -1;
   int settingsWindowW = 0;
