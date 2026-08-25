@@ -85,6 +85,21 @@ image rather than inferred from the pixel format, because it is a property of
 the source signal: a console set to full range delivers full range whether the
 card is asked for NV12 or RGB32.
 
+A **native pixel grid** setting resolves every output pixel to the console's own
+pixel rather than to a fraction of one. A card samples the line at a fixed rate
+— usually 720 — while a SNES draws 256 pixels across it, so each console pixel
+lands on about 2.8 samples and the boundaries end up wherever the arithmetic
+puts them. Told the real count, the grid comes back. Note what this is: it
+recovers the *grid*, not the detail that grid used to carry. An OSSC samples the
+waveform at the console's own dot clock and can do the second; nothing
+downstream of a capture card can.
+
+Optional **scanlines** and a **shadow mask** are there for anyone who wants the
+tube back. Off by default, display only, and both compensate their own
+brightness so the sliders change structure rather than exposure. Scanlines
+switch off below twice the source height, because below that there is nowhere to
+put a gap and the result would be moiré.
+
 More: [Scaling and sharpening](../../wiki/Scaling-and-sharpening),
 [Cropping and geometry](../../wiki/Cropping-and-geometry),
 [Colour range and matrix](../../wiki/Colour-range-and-matrix).
