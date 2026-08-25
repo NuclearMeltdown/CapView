@@ -83,6 +83,9 @@ class App {
   void StopCapture();
   void StartAudio();
   void RestartAll(bool userRequested);
+  // Wie lange die Anzeige hoechstens stehen darf, wenn kein Bild ankommt.
+  // Haengt davon ab, ob etwas auf dem Schirm ist, das sich bewegen muss.
+  double IdleFloorMs() const;
   // Wie RestartAll, verwirft aber vorher, was fuer den vorherigen Eingang
   // gemessen wurde -- Videonorm und Format. Siehe die Umsetzung.
   void ReinitialiseCard();
