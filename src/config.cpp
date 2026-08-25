@@ -625,6 +625,7 @@ bool Config::Load(std::string* error) {
   record.screenshotFormat = ReadEnum<ScreenshotFormat>(r, "screenshotFormat", 2,
                                                        ScreenshotFormat::Png);
   record.jpegQuality = Clamp(r["jpegQuality"].AsInt(92), 1, 100);
+  record.screenshotIncludeUi = r["screenshotIncludeUi"].AsBool(false);
 
   const json::Value& hk = root["hotkeys"];
   for (int i = 0; i < (int)HotkeyAction::Count; ++i) {
@@ -732,6 +733,7 @@ std::string Config::Serialize() const {
   r["screenshotFolder"] = record.screenshotFolder;
   r["screenshotFormat"] = (int)record.screenshotFormat;
   r["jpegQuality"] = record.jpegQuality;
+  r["screenshotIncludeUi"] = record.screenshotIncludeUi;
   root["record"] = r;
 
   json::Value hk = json::Value::Object();

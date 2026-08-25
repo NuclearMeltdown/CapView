@@ -232,6 +232,53 @@ bool D3DContext::BeginFrame(const float clearColor[4]) {
   return true;
 }
 
+bool D3DContext::GrabBackBuffer(std::vector<uint8_t>* rgba, int* width, int* height) {
+  if (!rgba || !swapchain_ || !context_ || !device_) return false;
+  if (hdrOutput_) return false;  // scRGB-Float, siehe Kommentar in der Kopfdatei
+  if (width_ <= 0 || height_ <= 0) return false;
+
+  ComPtr<ID3D11Texture2D> back;
+  if (FAILED(CAP_HR(swapchain_->GetBuffer(0, IID_PPV_ARGS(&back)))) || !back) return false;
+
+  D3D11_TEXTURE2D_DESC td = {};
+  back->GetDesc(&td);
+  td.Usage = D3D11_USAGE_STAGING;
+  td.BindFlags = 0;
+  td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+  td.MiscFlags = 0;
+
+  ComPtr<ID3D11Texture2D> staging;
+  if (FAILED(CAP_HR(device_->CreateTexture2D(&td, nullptr, &staging)))) return false;
+  context_->CopyResource(staging.Get(), back.Get());
+
+  D3D11_MAPPED_SUBRESOURCE mapped = {};
+  if (FAILED(CAP_HR(context_->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped)))) return false;
+
+  const int w = (int)td.Width;
+  const int h = (int)td.Height;
+  const size_t rowBytes = (size_t)w * 4;
+  rgba->resize(rowBytes * (size_t)h);
+  const uint8_t* src = (const uint8_t*)mapped.pData;
+  for (int y = 0; y < h; ++y) {
+    const uint8_t* s = src + (size_t)y * (size_t)mapped.RowPitch;
+    uint8_t* d = rgba->data() + (size_t)y * rowBytes;
+    // Der Rueckpuffer ist BGRA, die Speicherroutinen erwarten RGBA. Und das
+    // Alpha wird gesetzt statt uebernommen: was auf dem Bildschirm deckend
+    // aussieht, muss in der Datei deckend sein.
+    for (int x = 0; x < w; ++x) {
+      d[x * 4 + 0] = s[x * 4 + 2];
+      d[x * 4 + 1] = s[x * 4 + 1];
+      d[x * 4 + 2] = s[x * 4 + 0];
+      d[x * 4 + 3] = 0xFF;
+    }
+  }
+  context_->Unmap(staging.Get(), 0);
+
+  if (width) *width = w;
+  if (height) *height = h;
+  return true;
+}
+
 void D3DContext::EndFrame(bool vsync) {
   if (!swapchain_) return;
 

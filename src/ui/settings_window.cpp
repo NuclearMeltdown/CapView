@@ -2176,9 +2176,21 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   // imaging stack and have nothing to do with ffmpeg.
   ImGui::Spacing();
   ImGui::SeparatorText(T("Screenshots", "Screenshots"));
-  ImGui::TextWrapped(T("Einzelbild in Quellauflösung, ohne Bedienoberfläche. Benötigt kein ffmpeg.",
-                       "Single frame at source resolution, without the interface. Does not need "
+  ImGui::TextWrapped(T("Einzelbild aus der Quelle, ohne die Bedienoberfläche. Benötigt kein ffmpeg.",
+                       "Single frame from the source, without the interface. Does not need "
                        "ffmpeg."));
+  ImGui::Spacing();
+
+  ImGui::Checkbox(T("Bedienoberfläche mit aufnehmen", "Include the interface"),
+                  &rec.screenshotIncludeUi);
+  HelpMarker(T("Statt des Bildes wird das fertige Fenster gespeichert, also mit Leiste, "
+               "Meldungen und allem, was gerade darauf liegt. Das Ergebnis hat dann die "
+               "Größe des Fensters und nicht die der Quelle, und es ist immer SDR: bei "
+               "HDR-Ausgabe wird stattdessen das reine Bild gespeichert.",
+               "Saves the finished window instead of the picture: the bar, the messages and "
+               "whatever else is on it. The result is then the size of the window rather than "
+               "of the source, and it is always SDR -- with HDR output the picture alone is "
+               "saved instead."));
   ImGui::Spacing();
 
   int shot = (int)rec.screenshotFormat;
