@@ -2,11 +2,14 @@
 build/
 /CapView.exe
 /capview_vcam.dll
+# Written out of the exe when the camera is installed; the hash is per build.
+/capview_vcam_*.dll
 /capview_vcam.dll.old*
 /capview_probe.exe
 
 # Settings are per machine and hold device names and paths.
 CapView.json
+CapView.json.bak*
 CapView.log
 
 # ffmpeg is downloaded from upstream at runtime, never committed: it is ~100 MB
