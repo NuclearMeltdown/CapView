@@ -478,6 +478,43 @@ void App::StartAudio() {
   delayLine_.Configure(std::max(0, -p.audio.avOffsetMs));
 }
 
+// Die Karte von vorn aufmachen, nicht nur den Graphen neu bauen.
+//
+// Der Unterschied ist, was verworfen wird. Ein Neustart nimmt die Einstellungen
+// mit, die gerade dastehen -- und genau die sind das Problem, wenn zwischen dem
+// analogen und dem digitalen Eingang umgesteckt wurde: Videonorm und Format
+// beschreiben, was an der *vorherigen* Buchse hing. Eine auf PAL festgehaltene
+// Karte liefert dann 720x576 bei 50 Hz an einem Eingang, an dem etwas voellig
+// anderes anliegt.
+//
+// Geraet und Eingang bleiben stehen. Die hat jemand ausgesucht; Norm und Format
+// hat CapView gemessen oder geraten, und Gemessenes darf weg.
+void App::ReinitialiseCard() {
+  StopCapture();
+
+  CaptureSettings& c = config_.active().capture;
+  const bool hadStandard = c.videoStandard > 0;
+  const bool hadFormat = c.format.valid();
+  c.videoStandard = -1;  // wieder suchen lassen
+  c.format = FormatSel{};
+
+  // Die Geraeteliste ebenfalls, denn eine umgesteckte Karte kann unter einem
+  // anderen Pfad auftauchen als der, den wir uns gemerkt haben.
+  settings_.InvalidateDeviceLists();
+
+  CAP_LOG("Karte neu einlesen: Videonorm %s, Format %s",
+          hadStandard ? "verworfen" : "war schon automatisch",
+          hadFormat ? "verworfen" : "war schon automatisch");
+
+  std::string error;
+  if (StartCapture(&error)) {
+    Toast(T("Karte neu eingelesen. Videonorm und Format stehen wieder auf automatisch.",
+            "Card reinitialised. Video standard and format are back to automatic."));
+  } else {
+    Toast(error);
+  }
+}
+
 void App::RestartAll(bool userRequested) {
   std::string error;
   if (StartCapture(&error)) {
@@ -2510,6 +2547,7 @@ void App::DrawUi() {
   if (settings_.takeCropPickRequest()) BeginCropPick();
   if (settings_.takeDeviceConfigRequest()) OpenDeviceConfig();
   if (settings_.takeCropDetectRequest()) DetectCrop();
+  if (settings_.takeCardResetRequest()) ReinitialiseCard();
   settings_.setProbeBusy(probing_.load(std::memory_order_relaxed));
   // Drawn here only when the settings live inside the picture. The separate
   // window is deliberately not touched from in here: this runs between the main

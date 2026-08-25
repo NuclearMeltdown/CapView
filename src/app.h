@@ -83,6 +83,9 @@ class App {
   void StopCapture();
   void StartAudio();
   void RestartAll(bool userRequested);
+  // Wie RestartAll, verwirft aber vorher, was fuer den vorherigen Eingang
+  // gemessen wurde -- Videonorm und Format. Siehe die Umsetzung.
+  void ReinitialiseCard();
 
   void OpenSettings(const std::string& reason);
 

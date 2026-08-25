@@ -20,6 +20,20 @@ namespace {
 using NameFn = const char* (*)(int);
 
 // A small "?" that shows an explanation on hover.
+// Wie SetItemTooltip, aber mit Umbruch. Der eingebaute bricht nicht um, was bei
+// den kurzen Einzeilern hier nirgends auffaellt und bei einem laengeren Text
+// sofort: er laeuft dann quer ueber den Bildschirm aus dem Fenster heraus.
+// Dieselbe Breite wie HelpMarker, damit beide gleich aussehen.
+void WrappedTooltip(const char* text) {
+  if (!text || !*text) return;
+  if (ImGui::BeginItemTooltip()) {
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+    ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+  }
+}
+
 void HelpMarker(const char* text) {
   if (!text || !*text) return;
   ImGui::SameLine();
@@ -172,6 +186,12 @@ bool SettingsWindow::takeRestartRequest() {
 bool SettingsWindow::takeCropDetectRequest() {
   const bool requested = cropDetectRequested_;
   cropDetectRequested_ = false;
+  return requested;
+}
+
+bool SettingsWindow::takeCardResetRequest() {
+  const bool requested = cardResetRequested_;
+  cardResetRequested_ = false;
   return requested;
 }
 
@@ -658,6 +678,12 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
       if (ImGui::Selectable(d.name.c_str(), selected) && !selected) {
         p.capture.video = DeviceRef{d.name, d.id, ""};
         p.capture.format = FormatSel{};  // format belongs to the old card
+        // Und die Videonorm ebenso, aus genau demselben Grund. Auf dieser Karte
+        // sind der analoge und der digitale Eingang zwei getrennte Geraete, das
+        // Umstecken ist also ein Geraetewechsel -- und eine mitgeschleppte
+        // PAL-Einstellung nagelt den digitalen Eingang auf 720x576 bei 50 Hz
+        // fest, obwohl sie dort ueberhaupt nichts beschreibt.
+        p.capture.videoStandard = -1;
         p.capture.crossbarInput = -1;
         embeddedAudioForDevice_.clear();
       }
@@ -681,6 +707,29 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
           ? T("Eigener Dialog des Treibers. Das Bild läuft dabei weiter.",
               "The driver's own dialog. The picture keeps running while it is open.")
           : T("Nur bei laufender Karte.", "Only while the card is running."));
+
+  // Mehr als ein Neustart des Graphen, und deshalb ein eigener Knopf: die Karte
+  // wird vollstaendig losgelassen und alles, was fuer den vorherigen Eingang
+  // gemessen oder gewaehlt wurde, wird verworfen.
+  ImGui::SameLine();
+  if (ImGui::Button(T("Karte neu einlesen", "Reinitialise card"))) {
+    cardResetRequested_ = true;
+  }
+  WrappedTooltip(
+      T("Gibt die Karte ganz frei, sucht sie neu und beginnt von vorn.\n\n"
+        "Videonorm und Format gehen dabei auf automatisch zurück, denn beide "
+        "gehören zu dem Eingang, der vorher angeschlossen war. Wer zwischen analog "
+        "und digital umsteckt, hängt sonst an einer PAL-Einstellung fest, die für "
+        "HDMI nichts bedeutet und die Karte auf 720x576 bei 50 Hz festnagelt.\n\n"
+        "Gerät und Eingang bleiben, wie sie eingestellt sind -- das ist eine "
+        "Entscheidung, keine Messung.",
+        "Releases the card completely, finds it again and starts over.\n\n"
+        "The video standard and the format go back to automatic, because both "
+        "belong to whichever input was plugged in before. Move between analogue "
+        "and digital and you are otherwise stuck on a PAL setting that means "
+        "nothing over HDMI and pins the card to 720x576 at 50 Hz.\n\n"
+        "The device and the input stay as they are -- those are decisions, not "
+        "measurements."));
 
   if (!caps.error.empty()) {
     ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s", caps.error.c_str());

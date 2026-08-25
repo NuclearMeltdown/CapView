@@ -213,7 +213,17 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
   // Before the formats are read, not after: the standard decides how many lines
   // the card will produce, and therefore which formats it advertises at all.
   capabilities_.availableStandards = AvailableVideoStandards(captureFilter_.Get());
-  if (settings.videoStandard > 0 &&
+  // Eine Videonorm gehoert dem Analogdekoder. Eine Karte, die beides kann, hat
+  // ihn trotzdem und meldet die Normen weiterhin -- auf einem HDMI-Eingang sagt
+  // das aber nichts ueber das Signal, und PAL dort zu setzen legt die Karte auf
+  // 720x576 bei 50 Hz fest, obwohl an der Buchse etwas ganz anderes anliegt.
+  //
+  // Wer die Quelle ausdruecklich als digital angegeben hat, meint genau das.
+  const bool digital = settings.signalKind == SignalKind::Digital;
+  if (digital && settings.videoStandard > 0) {
+    CAP_LOG("Quelle ist als digital angegeben, Videonorm wird nicht gesetzt");
+  }
+  if (!digital && settings.videoStandard > 0 &&
       (capabilities_.availableStandards & settings.videoStandard) != 0) {
     SetVideoStandard(captureFilter_.Get(), settings.videoStandard);
   }
