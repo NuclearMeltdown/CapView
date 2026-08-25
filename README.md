@@ -242,6 +242,38 @@ and does not drift: measured at 1 ms over 15 seconds.
 
 More: [Recording](../../wiki/Recording).
 
+### Screenshots
+
+Taken at source resolution, after crop and deinterlacing and before window
+scaling, and captured **before the interface is drawn** — no overlay, no
+toolbar, no settings panel ends up in the file.
+
+**SDR: PNG or JPEG.** PNG is the default and the sane one for a capture card,
+since the point of a still is usually to look at it closely; JPEG, with an
+adjustable quality, is there for whoever takes hundreds. Both go through Windows
+Imaging Component, so **no ffmpeg is needed**.
+
+**HDR: JPEG XR or AVIF.** When the source is HDR, a screenshot can keep the
+range instead of being mapped down to SDR first. The two formats are a genuine
+trade rather than a preference:
+
+| | Needs | Read by |
+|---|---|---|
+| **JPEG XR** (`.jxr`) | nothing — Windows ships the encoder | the Windows Photos app; little else |
+| **AVIF** (`.avif`) | **ffmpeg**, with libaom | every browser, and most things that are not Windows |
+
+AVIF is the only part of screenshots that needs ffmpeg, which is otherwise
+required only for recording. Without it the setting says so and points at the
+download under *Recording*, rather than failing at the moment you press the key.
+The still is encoded as 10-bit AV1 on the PQ curve, tagged BT.2020 — without
+those tags a viewer reads the samples as ordinary SDR and shows a dark picture.
+
+Whether HDR stills are written at all is a switch of its own under **HDR**,
+alongside the equivalents for recordings and the virtual camera, so a source
+with range to keep does not force it on all three.
+
+More: [Screenshots](../../wiki/Screenshots).
+
 ### Encoder settings
 
 Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass
@@ -298,11 +330,6 @@ something you cannot see a control for. The values stay in the profile, because
 the profile describes a console and that console will be back — but they are not
 restored on the way out and back, because the next analogue source may well be a
 different console.
-
-### Screenshots
-
-Screenshots are PNG or JPEG at source resolution, taken before the interface is
-drawn, and written through Windows Imaging Component — so no ffmpeg is required.
 
 ### Updates
 
