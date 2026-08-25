@@ -1034,7 +1034,8 @@ cbuffer ScaleCB : register(b0) {
 
   int    gMask;         // 0 off, 1 aperture grille, 2 shadow mask
   float  gMaskStrength; // 0..1
-  float2 gScalePad;
+  int    gNativeWidth;  // pixels the source really has across, 0 = leave alone
+  float  gScalePad;
 };
 
 struct VSOut {
@@ -1143,6 +1144,61 @@ float3 Sharpen(float3 c, float2 uv, float amount) {
   float3 hi = max(max(max(n, s), max(w, e)), c);
   float3 sharp = c + (c * 4.0 - n - s - w - e) * (amount * 0.25);
   return clamp(sharp, lo, hi);
+}
+
+// ---------------------------------------------------------------------------
+// Back onto the pixel grid the console actually drew.
+//
+// A capture card samples the active line at a fixed rate -- 720 samples for
+// BT.601, whatever the source does. A SNES puts 256 pixels across that same
+// line, so each of its pixels lands on about 2.8 samples: not a whole number,
+// and already softened by the card's own filter. Scale that straight to a
+// window and the pixel boundaries fall wherever the arithmetic puts them, which
+// is why upscaled pixel art usually looks slightly wrong even when it is sharp.
+//
+// Told what the real horizontal count is, every output pixel can be resolved to
+// the *console's* pixel instead: work out which one it belongs to, and average
+// exactly the samples that pixel covers. The grid comes back, and with integer
+// scaling every block is the same width again.
+//
+// This is not what an OSSC does and cannot be. An OSSC samples the analogue
+// waveform at the console's own dot clock, so it recovers the pixels before
+// they are ever mixed together. Here they have already been resampled once and
+// low-pass filtered by the card; what this recovers is the grid, not the detail
+// that grid used to carry. Worth having, worth not overselling.
+//
+// Horizontal only, deliberately: vertically the card already gives one sample
+// per real line -- 240 or 288 of them -- so there is nothing to undo.
+//
+// Bounded loop, because HLSL wants one and because the ratio is small: 720 over
+// 256 is under three samples, and the clamp on the setting keeps it under
+// sixteen even for an absurdly low count.
+float3 SampleNativeGrid(float2 uv) {
+  float n = floor(uv.x * (float)gNativeWidth);
+  float span = gSrcSize.x / (float)gNativeWidth;
+  float x0 = n * span;
+  float x1 = x0 + span;
+
+  int row = clamp((int)(uv.y * gSrcSize.y), 0, (int)gSrcSize.y - 1);
+  int first = (int)floor(x0);
+  int maxX = (int)gSrcSize.x - 1;
+
+  float3 sum = 0.0;
+  float weight = 0.0;
+  [loop]
+  for (int k = 0; k < 16; ++k) {
+    int x = first + k;
+    if ((float)x >= x1) break;
+    // How much of this source sample the console pixel actually covers. The
+    // ends are partial, which is the whole reason for weighting rather than
+    // simply averaging whole samples: at 2.8 samples per pixel the boundaries
+    // land inside a sample two times out of three.
+    float cover = min((float)x + 1.0, x1) - max((float)x, x0);
+    if (cover <= 0.0) continue;
+    sum += texSrc.Load(int3(clamp(x, 0, maxX), row, 0)).rgb * cover;
+    weight += cover;
+  }
+  return sum / max(weight, 1e-4);
 }
 
 // ---------------------------------------------------------------------------
@@ -1281,7 +1337,14 @@ float4 main(VSOut i) : SV_Target {
   float2 pos = i.uv * gSrcSize;  // position in source pixels
 
   float3 rgb;
-  if (gFilter == 0) {
+  if (gNativeWidth > 0) {
+    // Deliberately ahead of the filter choice and instead of it. Resolving to
+    // the console's own pixel *is* a nearest-neighbour decision -- that is the
+    // point of it -- and running a smoothing filter afterwards would put back
+    // exactly the boundary softness this just removed. The filter setting still
+    // governs anything else on screen.
+    rgb = SampleNativeGrid(i.uv);
+  } else if (gFilter == 0) {
     rgb = texSrc.SampleLevel(sampPoint, i.uv, 0).rgb;
   } else if (gFilter == 1) {
     rgb = texSrc.SampleLevel(sampLinear, i.uv, 0).rgb;
