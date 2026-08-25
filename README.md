@@ -78,7 +78,11 @@ turns; line doubling for 240p and 288p sources.
 
 Crop is set by dragging the edges, or found for you: **Detect** measures where
 the black border ends, as a union across about two seconds so a fade to black is
-not read as the picture getting smaller.
+not read as the picture getting smaller. It refuses when too little would
+survive — a console showing a logo on black is not a bordered picture, and
+cropping to the logo would throw away the rest of the frame. Measured on a
+GameCube home screen: 37 % of the area left, against 57 % for the widest border
+that is still a border.
 
 Colour range and matrix default to automatic. The range is measured from the
 image rather than inferred from the pixel format, because it is a property of
@@ -134,7 +138,16 @@ average** removes it wherever the picture is standing still, at no cost in
 sharpness. A **synchronous demodulator** — a slider — handles what is moving,
 reconstructing the colour subcarrier out of the brightness and subtracting it,
 which costs some horizontal sharpness. The averaging locks on whenever the
-demodulator is used, so it never pays for what is already free.
+demodulator is used, so it never pays for what is already free. The slider snaps
+to the steps that actually change the window width — nine of them on PAL —
+because the positions in between compute the same filter and a control that
+moves without doing anything is claiming something untrue.
+
+An **Avoid ghosting** checkbox decides where the averaging lets go of movement.
+It can only average, and averaging across movement is smearing, so this moves
+the trade rather than removing it: held on late, slow low-contrast movement
+drags a trail; released early, moving edges stay clean and slow areas keep some
+crawl for the demodulator to pick up.
 
 ![Left: a GameCube over composite with the filter off, dot crawl speckling the gold laurel and the chequered flag. Right: the same frame with the filter on](docs/composite-before-after.png)
 
