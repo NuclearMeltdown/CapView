@@ -1035,7 +1035,7 @@ cbuffer ScaleCB : register(b0) {
   int    gMask;         // 0 off, 1 aperture grille, 2 shadow mask
   float  gMaskStrength; // 0..1
   int    gNativeWidth;  // pixels the source really has across, 0 = leave alone
-  float  gScalePad;
+  float  gLinePitch;    // output rows per real picture line; 0 disables scanlines
 };
 
 struct VSOut {
@@ -1173,7 +1173,8 @@ float3 Sharpen(float3 c, float2 uv, float amount) {
 // Bounded loop, because HLSL wants one and because the ratio is small: 720 over
 // 256 is under three samples, and the clamp on the setting keeps it under
 // sixteen even for an absurdly low count.
-float3 SampleNativeGrid(float2 uv) {
+)HLSL"
+R"HLSL(float3 SampleNativeGrid(float2 uv) {
   float n = floor(uv.x * (float)gNativeWidth);
   float span = gSrcSize.x / (float)gNativeWidth;
   float x0 = n * span;
@@ -1222,12 +1223,22 @@ float3 SampleNativeGrid(float2 uv) {
 // simply absent below it, which is safer than letting somebody turn on
 // something that can only alias.
 float Scanline(float2 uv) {
-  float scale = gDstSize.y / max(gSrcSize.y, 1.0);
+  if (gLinePitch <= 0.0) return 1.0;
+
+  // The *real* line count, which is not always the height of the picture.
+  //
+  // A 240p console packed into a 576i frame arrives with its fields co-sited:
+  // two rows of the frame carry the same picture line. Line doubling does the
+  // same thing on purpose. In both cases the frame is twice as tall as the
+  // signal, and drawing a gap between two rows that hold one line would put
+  // scanlines at double the density the console ever had.
+  float lines = gSrcSize.y / gLinePitch;
+  float scale = gDstSize.y / max(lines, 1.0);
   float room = saturate((scale - 2.0) * 1.0);
   if (room <= 0.0) return 1.0;
 
-  // Distance from the centre of the source line this pixel falls in, 0..1.
-  float phase = frac(uv.y * gSrcSize.y);
+  // Distance from the centre of the picture line this pixel falls in, 0..1.
+  float phase = frac(uv.y * lines);
   float d = abs(phase - 0.5) * 2.0;
 
   // A raised cosine rather than a hard bar: a real beam has a profile, and a
@@ -1364,8 +1375,28 @@ float4 main(VSOut i) : SV_Target {
   // belong on the picture as it will be seen and not on the signal. Neither
   // reaches a recording, a screenshot or the virtual camera -- those take the
   // intermediate, which is upstream of this pass entirely.
-  if (gScanlines > 0.001) rgb *= Scanline(i.uv);
-  if (gMask != 0 && gMaskStrength > 0.001) rgb *= Mask(i.pos.xy);
+  if (gScanlines > 0.001 || (gMask != 0 && gMaskStrength > 0.001)) {
+    float3 gain = 1.0;
+    if (gScanlines > 0.001) gain *= Scanline(i.uv);
+    if (gMask != 0 && gMaskStrength > 0.001) gain *= Mask(i.pos.xy);
+
+    // Both effects darken and both put the brightness back, which means the
+    // gain goes above one wherever a line or a phosphor sits. On an already
+    // bright pixel that lands past full scale and clips -- and clipping happens
+    // per channel, so a saturated yellow loses its red first and shifts hue.
+    // That is what "the colour goes odd" was: not too much effect, but a boost
+    // with nowhere left to go.
+    //
+    // So the boost is held to what the pixel can still take. Scaling all three
+    // channels by one number keeps the hue exactly; only the amount of lift
+    // changes, and it only changes where there was no room for it anyway.
+    float peak = max(max(rgb.r, rgb.g), rgb.b);
+    if (peak > 1e-4) {
+      float headroom = 1.0 / peak;
+      gain = min(gain, max(headroom, 1.0));
+    }
+    rgb *= gain;
+  }
 
   if (gTransfer != 0) {
     // Linear light in, 1.0 being diffuse white.

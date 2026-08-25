@@ -174,7 +174,12 @@ void DrawIdleScreen(unsigned long long icon, int iconPixels, const std::string& 
   ImGui::SetNextWindowBgAlpha(0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
-  if (!ImGui::Begin("##idle", nullptr, kOverlayFlags)) {
+  // Explicitly at the back. ImGui orders windows by focus history rather than
+  // by the order they were declared in, so being drawn first is no guarantee of
+  // staying behind -- and this one covered the settings panel, which is both
+  // the thing you opened deliberately and the place you would go to fix
+  // whatever it is complaining about.
+  if (!ImGui::Begin("##idle", nullptr, kOverlayFlags | ImGuiWindowFlags_NoBringToFrontOnFocus)) {
     ImGui::End();
     ImGui::PopStyleVar();
     return;

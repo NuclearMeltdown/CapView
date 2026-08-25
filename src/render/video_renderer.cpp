@@ -76,7 +76,7 @@ struct ScaleCB {
   int32_t mask;        // 0 off, 1 aperture grille, 2 shadow mask
   float maskStrength;  // 0..1
   int32_t nativeWidth; // pixels the source really has across, 0 = leave alone
-  float scalePad;
+  float linePitch;     // output rows per real picture line; 0 disables scanlines
 };
 static_assert(sizeof(ScaleCB) % 16 == 0, "constant buffer must be 16 byte aligned");
 
@@ -825,6 +825,7 @@ void VideoRenderer::RenderSdrCopy() {
   sc.mask = 0;
   sc.maskStrength = 0.0f;
   sc.nativeWidth = 0;
+  sc.linePitch = 0.0f;
   sc.transfer = (int32_t)hdrTransfer_;
   sc.outputHdr = 0;   // this copy is for things that are not a screen
   sc.paperWhite = paperWhiteNits_;
@@ -2071,6 +2072,17 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   sc.nativeWidth = image.nativeWidth > 0 && image.nativeWidth < srcW
                        ? (int32_t)Clamp(image.nativeWidth, 64, 4096)
                        : 0;
+
+  // How many rows of the intermediate make up one line the console drew.
+  // Doubling and co-sited fields each put two rows where the signal has one;
+  // a quarter turn puts the lines along the other axis entirely, and rather
+  // than draw them sideways the effect simply stands down.
+  float pitch = 1.0f;
+  if (image.lineDouble) pitch *= 2.0f;
+  if (coSitedFields_) pitch *= 2.0f;
+  const bool turned =
+      image.rotation == Rotation::Cw90 || image.rotation == Rotation::Ccw90;
+  sc.linePitch = turned ? 0.0f : pitch;
   sc.transfer = (int32_t)hdrTransfer_;
   sc.outputHdr = hdrOutput_ ? 1 : 0;
   sc.paperWhite = paperWhiteNits_;
