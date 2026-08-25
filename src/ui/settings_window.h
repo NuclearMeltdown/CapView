@@ -107,6 +107,9 @@ class SettingsWindow {
   bool takeDeviceConfigRequest();
   // Set when the user wants the black border measured and cropped away.
   bool takeCropDetectRequest();
+  // Set when the user wants the card opened from scratch, forgetting what was
+  // measured and chosen for the input that was plugged in before.
+  bool takeCardResetRequest();
 
   // The virtual camera. 0 = nothing wanted, 1 = install the source, 2 = remove
   // it. Both raise a UAC prompt, so the app does it rather than the UI thread.
@@ -222,6 +225,7 @@ class SettingsWindow {
   bool captureRunning_ = false;
   bool deviceConfigRequested_ = false;
   bool cropDetectRequested_ = false;
+  bool cardResetRequested_ = false;
   int virtualCameraRequest_ = 0;
   int vcamStatus_ = 0;
   double vcamStatusChecked_ = -10.0;
