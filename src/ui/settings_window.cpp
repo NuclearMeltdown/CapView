@@ -975,6 +975,41 @@ void SettingsWindow::DrawImageTab() {
   HelpMarker(T("Hebt Kanten nach der Skalierung an. 0 schaltet es ab.",
                "Lifts edges after scaling. 0 turns it off."));
 
+  // Bildröhre. Steht am Ende der Skalierungsgruppe, weil es dorthin gehört --
+  // es sind Anzeigeeffekte und keine Signalbearbeitung, und sie landen weder in
+  // einer Aufnahme noch in einem Screenshot.
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Bildröhre", "Cathode ray tube"));
+  ImGui::TextDisabled(
+      "%s", T("Setzt zurück, was ein Röhrenmonitor hinzugefügt hat. Nur für die Anzeige.",
+              "Puts back what a CRT added. Display only."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Zeilenlücken", "Scanlines"), &img.scanlines, 0.0f, 1.0f, "%.2f");
+  ImGui::SameLine();
+  HelpMarker(T("Dunkelt die Lücken zwischen den Zeilen der Quelle ab. Braucht mindestens "
+               "doppelte Höhe im Fenster, darunter bleibt es aus -- sonst gäbe es Moiré "
+               "statt Zeilen. Die Helligkeit wird ausgeglichen.",
+               "Darkens the gaps between the source's own lines. Needs at least twice the "
+               "height in the window and stays off below that, because there is nowhere to "
+               "put a gap otherwise. Brightness is compensated."));
+
+  int mask = Clamp(img.mask, 0, 2);
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Maske", "Mask"), &mask, 3, MaskName, MaskHelp)) img.mask = mask;
+  ImGui::SameLine();
+  HelpMarker(MaskHelp(mask));
+
+  if (img.mask != 0) {
+    ImGui::SetNextItemWidth(-260.0f);
+    ImGui::SliderFloat(T("Maskenstärke", "Mask strength"), &img.maskStrength, 0.0f, 1.0f, "%.2f");
+    ImGui::SameLine();
+    HelpMarker(T("Braucht eine hohe Ausgabeauflösung, um als Maske statt als Farbstich zu "
+                 "wirken.",
+                 "Needs a high output resolution to read as a mask rather than as a tint."));
+  }
+  ImGui::Spacing();
+
   int aspect = (int)img.aspect;
   ImGui::SetNextItemWidth(-260.0f);
   if (ComboEnum(T("Seitenverhältnis", "Aspect ratio"), &aspect, 5, AspectName, AspectHelp)) {

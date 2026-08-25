@@ -1021,6 +1021,7 @@ SamplerState sampLinear : register(s1);
 cbuffer ScaleCB : register(b0) {
   float2 gSrcSize;
   float2 gDstSize;
+
   int    gFilter;   // 0 nearest, 1 bilinear, 2 bicubic, 3 lanczos3, 4 sharp bilinear
   float  gSharpen;  // 0..1
   int    gTransfer;    // 0 the picture is display referred, otherwise it is linear light
@@ -1029,7 +1030,11 @@ cbuffer ScaleCB : register(b0) {
   float  gPaperWhite;  // nits diffuse white should come out at
   float  gSourcePeak;  // nits the source is assumed to reach at its brightest
   float  gDisplayPeak; // nits this screen can manage
-  float  gScalePad;
+  float  gScanlines;   // 0..1, how dark the gaps between source lines go
+
+  int    gMask;         // 0 off, 1 aperture grille, 2 shadow mask
+  float  gMaskStrength; // 0..1
+  float2 gScalePad;
 };
 
 struct VSOut {
@@ -1141,6 +1146,70 @@ float3 Sharpen(float3 c, float2 uv, float amount) {
 }
 
 // ---------------------------------------------------------------------------
+// Optional: what a cathode ray tube did to the picture.
+//
+// Off by default and meant to stay that way for anyone who wants the signal
+// as clean as it arrived. It is here because 240p artwork was drawn for a
+// display that had gaps between its lines and a coloured mask over its
+// phosphors, and on a modern panel the absence of both is itself a distortion.
+//
+// Both effects darken, so both are compensated afterwards: without that,
+// turning them on is mostly a brightness control.
+// ---------------------------------------------------------------------------
+
+// Scanlines follow the *source* line grid, not the output pixel grid -- the
+// gaps belong to the signal, not to the monitor showing it.
+//
+// Below roughly twice the source height there is nowhere to put them: the gap
+// and the line land inside the same output pixel and the result is a moire
+// pattern rather than a scanline. So the effect fades in across 2x-3x and is
+// simply absent below it, which is safer than letting somebody turn on
+// something that can only alias.
+float Scanline(float2 uv) {
+  float scale = gDstSize.y / max(gSrcSize.y, 1.0);
+  float room = saturate((scale - 2.0) * 1.0);
+  if (room <= 0.0) return 1.0;
+
+  // Distance from the centre of the source line this pixel falls in, 0..1.
+  float phase = frac(uv.y * gSrcSize.y);
+  float d = abs(phase - 0.5) * 2.0;
+
+  // A raised cosine rather than a hard bar: a real beam has a profile, and a
+  // hard edge would alias again at every non-integer scale.
+  float beam = 0.5 + 0.5 * cos(3.14159265 * d);
+  float dark = 1.0 - gScanlines * room * (1.0 - beam);
+
+  // Put back what the gaps took, so the control changes structure and not
+  // brightness. The mean of the raised cosine over a line is 0.5.
+  return dark / (1.0 - gScanlines * room * 0.5);
+}
+
+// A coloured mask, the way a grille or a shadow mask splits white into triads.
+// Needs real output resolution to read as anything but a tint -- at 1080p over
+// a 240p source each source line is four output pixels tall and a triad is
+// three across, which is about the floor.
+float3 Mask(float2 pos) {
+  if (gMask == 0) return 1.0;
+
+  int col = ((int)pos.x) % 3;
+  float3 tint = col == 0 ? float3(1.0, 0.35, 0.35)
+              : col == 1 ? float3(0.35, 1.0, 0.35)
+                         : float3(0.35, 0.35, 1.0);
+
+  if (gMask == 2) {
+    // Shadow mask: the triads step sideways every other line, which is what
+    // stops a grille's vertical stripes from being so obvious.
+    int row = ((int)pos.y / 2) % 2;
+    if (row == 1) tint = tint.zxy;
+  }
+
+  float3 m = lerp(float3(1.0, 1.0, 1.0), tint, gMaskStrength);
+  // Same compensation as the scanlines: the mask's average is below one.
+  float mean = (m.r + m.g + m.b) / 3.0;
+  return m / max(mean, 1e-3);
+}
+
+// ---------------------------------------------------------------------------
 // Getting linear light onto a screen.
 //
 // Two jobs, and which one runs depends on the screen rather than the source.
@@ -1227,6 +1296,13 @@ float4 main(VSOut i) : SV_Target {
   if (gSharpen > 0.001) {
     rgb = Sharpen(rgb, i.uv, gSharpen);
   }
+
+  // After sharpening, before the transfer: these are display effects, so they
+  // belong on the picture as it will be seen and not on the signal. Neither
+  // reaches a recording, a screenshot or the virtual camera -- those take the
+  // intermediate, which is upstream of this pass entirely.
+  if (gScanlines > 0.001) rgb *= Scanline(i.uv);
+  if (gMask != 0 && gMaskStrength > 0.001) rgb *= Mask(i.pos.xy);
 
   if (gTransfer != 0) {
     // Linear light in, 1.0 being diffuse white.

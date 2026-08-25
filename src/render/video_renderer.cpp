@@ -71,7 +71,11 @@ struct ScaleCB {
   float paperWhite;    // nits the source's diffuse white should come out at
   float sourcePeak;    // nits the brightest part of the source is assumed to reach
   float displayPeak;   // nits this display can actually manage
-  float scalePad;
+  float scanlines;     // 0..1, how dark the gaps between source lines go
+
+  int32_t mask;        // 0 off, 1 aperture grille, 2 shadow mask
+  float maskStrength;  // 0..1
+  float scalePad[2];
 };
 static_assert(sizeof(ScaleCB) % 16 == 0, "constant buffer must be 16 byte aligned");
 
@@ -811,7 +815,14 @@ void VideoRenderer::RenderSdrCopy() {
   sc.dstSize[0] = (float)intermediateWidth_;
   sc.dstSize[1] = (float)intermediateHeight_;
   sc.filter = 0;      // one to one, so nearest is exact
-  sc.sharpen = 0.0f;  // sharpening belongs to the display, not to a recording
+  // All three belong to the display rather than to the picture. Scanlines and
+  // the mask especially: they are drawn for a particular size on a particular
+  // screen, and baking them into a file at source resolution would put the gaps
+  // in the wrong places for whoever plays it back.
+  sc.sharpen = 0.0f;
+  sc.scanlines = 0.0f;
+  sc.mask = 0;
+  sc.maskStrength = 0.0f;
   sc.transfer = (int32_t)hdrTransfer_;
   sc.outputHdr = 0;   // this copy is for things that are not a screen
   sc.paperWhite = paperWhiteNits_;
@@ -2050,6 +2061,9 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   sc.dstSize[1] = (float)dstH;
   sc.filter = (int32_t)image.filter;
   sc.sharpen = Clamp(image.sharpen, 0.0f, 1.0f);
+  sc.scanlines = Clamp(image.scanlines, 0.0f, 1.0f);
+  sc.mask = (int32_t)Clamp(image.mask, 0, 2);
+  sc.maskStrength = Clamp(image.maskStrength, 0.0f, 1.0f);
   sc.transfer = (int32_t)hdrTransfer_;
   sc.outputHdr = hdrOutput_ ? 1 : 0;
   sc.paperWhite = paperWhiteNits_;
