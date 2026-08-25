@@ -8,6 +8,7 @@
 #include <dxgi1_6.h>
 
 #include <string>
+#include <vector>
 
 #include "common.h"
 
@@ -58,6 +59,15 @@ class D3DContext {
   // Presents. `vsync` false uses immediate presentation with tearing allowed
   // where the system supports it.
   void EndFrame(bool vsync);
+
+  // Liest den Rueckpuffer als RGBA aus, also das Bild samt allem, was darauf
+  // gezeichnet wurde. Muss vor dem Present passieren -- danach ist der Inhalt
+  // unter FLIP_DISCARD undefiniert.
+  //
+  // Nur im Acht-Bit-Modus. Ist die HDR-Ausgabe aktiv, ist der Puffer scRGB in
+  // halben Gleitkommazahlen, und ihn ohne Pruefung auf echter Hardware nach
+  // SDR umzurechnen hiesse, ungetestete Farbmathematik auszuliefern.
+  bool GrabBackBuffer(std::vector<uint8_t>* rgba, int* width, int* height);
 
   ID3D11Device* device() const { return device_.Get(); }
   ID3D11DeviceContext* context() const { return context_.Get(); }

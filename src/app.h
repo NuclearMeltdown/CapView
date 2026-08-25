@@ -126,7 +126,9 @@ class App {
   void ToggleRecording();
   // Grabs the next rendered frame and writes it to disk.
   void RequestScreenshot() { screenshotPending_ = true; }
-  void WriteScreenshot();
+  // `includeUi` false grabs the picture itself at source resolution; true grabs
+  // the finished window, overlay and all, at window resolution.
+  void WriteScreenshot(bool includeUi);
   void DrawToolbarStrip();
   void OpenFolderInExplorer(std::string* configured, const std::wstring& fallback);
   // Starts or stops the microphone to match the settings and what is going on.

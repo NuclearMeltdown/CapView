@@ -1030,26 +1030,42 @@ void App::DrawToolbarStrip() {
   }
 }
 
-void App::WriteScreenshot() {
+void App::WriteScreenshot(bool includeUi) {
   RecordSettings& rec = config_.record;
-
-  // Keeping the range only means anything when there is a range to keep, so the
-  // setting and the source both have to say so. Otherwise this is an ordinary
-  // screenshot and takes the ordinary path.
-  const bool wide = config_.app.screenshotHdr &&
-                    renderer_.hdrTransfer() != VideoRenderer::Transfer::Sdr;
 
   std::vector<uint8_t> pixels;
   std::vector<uint16_t> halfPixels;
   int width = 0, height = 0, halfStride = 0;
-  if (wide) {
-    if (!renderer_.GrabStillHalf(&halfPixels, &width, &height, &halfStride)) {
+  bool wide = false;
+  std::string note;
+
+  if (includeUi) {
+    // The whole window as it stands, which is what "with the interface" has to
+    // mean: the picture scaled into the window, the bar, the overlays. Only
+    // possible in eight bit -- an HDR back buffer is scRGB float, and the
+    // conversion out of it is not something to guess at. There, the picture
+    // itself is saved instead and the message says so.
+    if (!d3d_.GrabBackBuffer(&pixels, &width, &height)) {
+      includeUi = false;
+      note = T(" (ohne Oberfläche, HDR-Ausgabe)", " (without interface, HDR output)");
+    }
+  }
+
+  if (!includeUi) {
+    // Keeping the range only means anything when there is a range to keep, so
+    // the setting and the source both have to say so. Otherwise this is an
+    // ordinary screenshot and takes the ordinary path.
+    wide = config_.app.screenshotHdr &&
+           renderer_.hdrTransfer() != VideoRenderer::Transfer::Sdr;
+    if (wide) {
+      if (!renderer_.GrabStillHalf(&halfPixels, &width, &height, &halfStride)) {
+        Toast(T("Kein Bild zum Speichern.", "No picture to save."));
+        return;
+      }
+    } else if (!renderer_.GrabStill(&pixels, &width, &height)) {
       Toast(T("Kein Bild zum Speichern.", "No picture to save."));
       return;
     }
-  } else if (!renderer_.GrabStill(&pixels, &width, &height)) {
-    Toast(T("Kein Bild zum Speichern.", "No picture to save."));
-    return;
   }
 
   const std::wstring folder =
@@ -1083,7 +1099,7 @@ void App::WriteScreenshot() {
   // message is "it worked and it is called this".
   const size_t slash = path.find_last_of(L'\\');
   Toast(T("Screenshot: ", "Screenshot: ") +
-        ToUtf8(slash == std::wstring::npos ? path : path.substr(slash + 1)));
+        ToUtf8(slash == std::wstring::npos ? path : path.substr(slash + 1)) + note);
   CAP_LOG("Screenshot gespeichert: %s (%dx%d)", ToUtf8(path).c_str(), width, height);
 }
 
@@ -2420,10 +2436,11 @@ void App::RenderFrame() {
   renderer_.Draw(EffectiveImage(profile), fieldIndex_);
 
   // Right after the first pass, so the still is the picture that was just put on
-  // screen -- and before the UI is drawn, so the overlay never lands in it.
-  if (screenshotPending_) {
+  // screen -- and before the UI is drawn, so the overlay never lands in it. The
+  // other setting takes the same shot one step later; see below.
+  if (screenshotPending_ && !config_.record.screenshotIncludeUi) {
     screenshotPending_ = false;
-    WriteScreenshot();
+    WriteScreenshot(false);
   }
 
   ImGui_ImplDX11_NewFrame();
@@ -2437,6 +2454,14 @@ void App::RenderFrame() {
   const bool uiLayer = renderer_.BeginUiLayer();
   ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
   if (uiLayer) renderer_.CompositeUiLayer();
+
+  // The other grab point. Everything has been drawn and nothing has been
+  // presented yet, which is the only moment the back buffer holds the finished
+  // window: under the flip model its contents are undefined after the present.
+  if (screenshotPending_) {
+    screenshotPending_ = false;
+    WriteScreenshot(true);
+  }
 
   if (sink) lastFrameAgeMs_ = sink->stats().lastArrivalAgeMs;
   SyncMicrophone();

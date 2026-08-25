@@ -352,6 +352,12 @@ struct RecordSettings {
   std::string screenshotFolder;
   ScreenshotFormat screenshotFormat = ScreenshotFormat::Png;
   int jpegQuality = 92;
+  // Ob die Bedienoberflaeche mit ins Bild kommt. Aus heisst: abgegriffen wird
+  // das Zwischenbild, also die Quelle in ihrer eigenen Aufloesung, ohne
+  // Werkzeugleiste und Anzeigen. An heisst: der Rueckpuffer nach dem Zeichnen
+  // der Oberflaeche -- das ist dann ein Abbild des Fensters und hat dessen
+  // Groesse, nicht die der Quelle.
+  bool screenshotIncludeUi = false;
 };
 
 struct Profile {
