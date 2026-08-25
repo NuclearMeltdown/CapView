@@ -139,7 +139,7 @@ void SettingsWindow::Open(Config* live, const std::string& reason) {
   snapshot_ = *live;
   reason_ = reason;
   open_ = true;
-  centerNext_ = true;
+  restorePos_ = true;
   listsValid_ = false;
   renameTarget_ = -1;
   recordBuffersLoaded_ = false;
@@ -305,11 +305,44 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
                               ImGuiWindowFlags_NoBringToFrontOnFocus |
                               ImGuiWindowFlags_NoSavedSettings);
   } else {
-    if (centerNext_) {
-      ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-                                     viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
-                              ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-      centerNext_ = false;
+    // Wo das Feld zuletzt stand -- und der Rückfall in die Mitte, wenn das
+    // nicht mehr geht.
+    //
+    // ImGui führt seine Fensterlagen im Kontext, also überlebt sie das
+    // Umschalten zwischen eingebettet und freigestellt von selbst. Was sie
+    // nicht überlebt, ist ein Neustart: die imgui.ini ist abgeschaltet, damit
+    // neben der exe nichts liegt, das dort niemand erwartet. Also wird sie hier
+    // mitgeschrieben.
+    //
+    // Der Rückfall greift, wenn das Hauptfenster inzwischen kleiner ist als
+    // damals -- dann läge das Feld ganz oder überwiegend draußen, und ohne
+    // Titelleiste in Reichweite bekäme man es nicht mehr zurück.
+    if (restorePos_) {
+      restorePos_ = false;
+      const ImVec2 work = viewport->WorkPos;
+      const ImVec2 area = viewport->WorkSize;
+      const AppSettings& app = cfg().app;
+
+      const float x = (float)app.settingsPanelX;
+      const float y = (float)app.settingsPanelY;
+      const float w = (float)app.settingsPanelW;
+      const float h = (float)app.settingsPanelH;
+
+      // Hundert Pixel Titelleiste müssen greifbar bleiben, sonst ist es
+      // unerreichbar und die Mitte ist die bessere Antwort.
+      const bool haveSaved = w > 200.0f && h > 200.0f;
+      const bool reachable = haveSaved && x + 100.0f > work.x && x < work.x + area.x - 100.0f &&
+                             y >= work.y - 4.0f && y < work.y + area.y - 40.0f;
+
+      if (reachable) {
+        ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(
+            ImVec2(std::min(w, area.x), std::min(h, area.y)), ImGuiCond_Always);
+      } else {
+        ImGui::SetNextWindowPos(
+            ImVec2(work.x + area.x * 0.5f, work.y + area.y * 0.5f), ImGuiCond_Always,
+            ImVec2(0.5f, 0.5f));
+      }
     }
     ImGui::SetNextWindowSize(ImVec2(780.0f, 660.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(620.0f, 460.0f), ImVec2(FLT_MAX, FLT_MAX));
@@ -320,6 +353,17 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
     // moved the dialog, resized it and threw you back to the first tab.
     opened = ImGui::Begin(T("Einstellungen###capview_settings", "Settings###capview_settings"),
                           &stayOpen, ImGuiWindowFlags_NoCollapse);
+  }
+  if (!fillsWindow_ && opened) {
+    // Mitschreiben, solange es sichtbar ist. Billig, und es erspart einen
+    // eigenen Weg fuer "der Nutzer hat gerade losgelassen".
+    const ImVec2 pos = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    AppSettings& app = cfg().app;
+    app.settingsPanelX = (int)pos.x;
+    app.settingsPanelY = (int)pos.y;
+    app.settingsPanelW = (int)size.x;
+    app.settingsPanelH = (int)size.y;
   }
   if (!opened) {
     ImGui::End();

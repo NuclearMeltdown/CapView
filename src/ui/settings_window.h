@@ -91,6 +91,12 @@ class SettingsWindow {
   // own -- for when the dialog *is* the window rather than a panel inside one.
   void SetFillsWindow(bool on) { fillsWindow_ = on; }
 
+  // Beim naechsten Zeichnen die gemerkte Lage wieder einnehmen. Wird beim
+  // Wechsel zwischen eingebettet und freigestellt gerufen, damit das Feld dort
+  // aufgeht, wo das Fenster gerade stand -- und nicht dort, wo es selbst
+  // zuletzt lag.
+  void RestorePosition() { restorePos_ = true; }
+
   // Set by the dialog when the user asks for a full encoder test; the app runs
   // it in the background and clears the flag.
   bool takeProbeRequest();
@@ -158,7 +164,7 @@ class SettingsWindow {
   Config& cfg() { return *live_; }
 
   bool open_ = false;
-  bool centerNext_ = true;
+  bool restorePos_ = true;
   std::string reason_;
   Config* live_ = nullptr;
   Config snapshot_;  // state when the dialog opened, for Discard
