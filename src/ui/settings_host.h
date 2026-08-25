@@ -56,10 +56,6 @@ class SettingsHost {
   bool visible() const { return visible_; }
   HWND hwnd() const { return hwnd_; }
 
-  // Wie oft die Vorschau waehrend eines Fensterzugs neu gezeichnet werden darf,
-  // in Millisekunden. Wird von der gemessenen Bildrate der Quelle gesetzt: mehr
-  // als die Karte liefert hat keinen Zweck, und weniger ist willkuerlich.
-  void SetModalInterval(unsigned long ms) { modalIntervalMs_ = ms < 2 ? 2 : (ms > 250 ? 250 : ms); }
   ImGuiContext* context() const { return imgui_; }
 
   // Called while the window is being dragged or resized. Windows runs a modal
@@ -106,10 +102,10 @@ class SettingsHost {
   bool visible_ = false;
   bool closeRequested_ = false;
   bool occluded_ = false;
-  // Draws one frame from inside Windows' modal move loop, no more often than
-  // the ceiling below. See the comment on the implementation.
+  // Offers a frame from inside Windows' modal move loop. Whether one is
+  // actually drawn is the callback's decision, not this class's -- see the
+  // comment on the implementation.
   void PumpModalFrame();
-  unsigned long lastModalTick_ = 0;
   // Whether this swapchain may hand a frame straight to the screen instead of
   // waiting to be composited. Measured to be the difference between a present
   // that costs 0.2 ms and one that costs 14.
@@ -117,7 +113,6 @@ class SettingsHost {
   UINT presentFlags_ = 0;
   bool themeApplied_ = false;
   bool inFrameCallback_ = false;
-  unsigned long modalIntervalMs_ = 16;
   unsigned long lastDrawTick_ = 0;
   std::function<void()> onFrame_;
   float uiScale_ = 1.0f;
