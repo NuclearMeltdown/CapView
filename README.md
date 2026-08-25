@@ -270,13 +270,39 @@ More: [Virtual camera](../../wiki/Virtual-camera).
 
 ![The Recording tab: container, bitrate, frame rate and output folder, with screenshots and the virtual camera below them](docs/settings-recording.png)
 
-### Screenshots and profiles
+### One profile per console
+
+This is how the program is meant to be used, and it is worth setting up before
+anything else.
+
+A profile holds **everything**: the device, the card input, the video standard,
+the capture format, and every picture and audio setting. Ctrl+1 to Ctrl+9 switch
+between them.
+
+The reason is that almost nothing carries over between consoles. A SNES over
+composite wants the four-frame average and the demodulator against dot crawl, a
+native width of 256, PAL at 625 lines and 50 Hz. A Switch over HDMI wants none
+of that and 1080p at 60. Set both up once and swapping a cable is one keystroke
+rather than a tour of the settings.
+
+**Save current as …** takes whatever is set up right now and makes a profile of
+it, asking for a name with the cursor already in the field — the console's name,
+usually. Getting a second console right is then a matter of changing what is
+actually different, not of starting from defaults and rebuilding what was
+already correct.
+
+Settings that do not apply to the current source are **not applied**, not merely
+hidden. Move from the SNES to an HD console and the dot crawl filters and the
+pixel grid stop acting on the picture, so you are never left looking at
+something you cannot see a control for. The values stay in the profile, because
+the profile describes a console and that console will be back — but they are not
+restored on the way out and back, because the next analogue source may well be a
+different console.
+
+### Screenshots
 
 Screenshots are PNG or JPEG at source resolution, taken before the interface is
 drawn, and written through Windows Imaging Component — so no ffmpeg is required.
-
-A profile holds the device, input, capture format and all picture and audio
-settings. One per source, selected with Ctrl+1 to Ctrl+9.
 
 ### Updates
 

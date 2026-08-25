@@ -86,6 +86,11 @@ class App {
   // Wie lange die Anzeige hoechstens stehen darf, wenn kein Bild ankommt.
   // Haengt davon ab, ob etwas auf dem Schirm ist, das sich bewegen muss.
   double IdleFloorMs() const;
+  // Ob das Bild aus dem Analogdekoder kommt, und die Bildeinstellungen so, wie
+  // sie fuer diese Quelle gelten. Was in den Einstellungen ausgeblendet ist,
+  // darf auch nicht mehr wirken -- siehe die Umsetzung.
+  bool SourceIsAnalogue() const;
+  ImageSettings EffectiveImage(const Profile& profile) const;
   // Wie RestartAll, verwirft aber vorher, was fuer den vorherigen Eingang
   // gemessen wurde -- Videonorm und Format. Siehe die Umsetzung.
   void ReinitialiseCard();

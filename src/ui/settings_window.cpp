@@ -2702,11 +2702,17 @@ void SettingsWindow::DrawProfilesTab() {
   Config& c = cfg();
   ImGui::Spacing();
   ImGui::TextWrapped(
-      T("Ein Profil hält Gerät, Eingang, Format sowie alle Bild- und Toneinstellungen. "
-        "Für mehrere Konsolen an einer Karte einmal einrichten, danach mit Strg+Zahl "
-        "umschalten.",
-        "A profile holds the device, input, format and all picture and audio settings. "
-        "Set one up per console on the same card, then switch with Ctrl+number."));
+      T("Ein Profil hält alles: Gerät, Eingang, Videonorm, Format sowie sämtliche Bild- "
+        "und Toneinstellungen. Genau eines pro Konsole -- ein SNES über Composite will "
+        "andere Filter als eine Switch über HDMI, und keine dieser Einstellungen passt "
+        "auf beide.\n\n"
+        "Einmal einrichten, dann mit Strg+Zahl umschalten, statt bei jedem Kabelwechsel "
+        "dieselben Regler wieder von Hand zu suchen.",
+        "A profile holds everything: device, input, video standard, format and every "
+        "picture and audio setting. One per console -- a SNES over composite wants "
+        "different filters from a Switch over HDMI, and no setting suits both.\n\n"
+        "Set them up once, then switch with Ctrl+number instead of hunting for the same "
+        "controls by hand every time a cable changes."));
   ImGui::Spacing();
 
   const float listHeight =
@@ -2728,16 +2734,31 @@ void SettingsWindow::DrawProfilesTab() {
     c.activeProfile = (int)c.profiles.size() - 1;
   }
   ImGui::SameLine();
-  if (ImGui::Button(T("Duplizieren", "Duplicate"))) {
-    Profile copy = c.active();
-    copy.name += T(" (Kopie)", " (copy)");
-    c.profiles.push_back(copy);
-    c.activeProfile = (int)c.profiles.size() - 1;
+  // Der uebliche Weg, und deshalb steht er hier statt eines "Duplizieren".
+  //
+  // Eine neue Konsole anzuschliessen heisst fast nie, von vorn anzufangen: man
+  // aendert das, was anders ist, und will das Ergebnis behalten. Ein leeres
+  // Profil zwingt dagegen dazu, alles noch einmal einzustellen, was ohnehin
+  // schon richtig stand.
+  if (ImGui::Button(T("Aktuelles sichern als ...", "Save current as ..."))) {
+    renameTarget_ = -1;  // -1 heißt: ein neues anlegen statt umbenennen
+    renameBuffer_[0] = '\0';
+    namePopupFocus_ = true;
+    ImGui::OpenPopup("rename_profile");
   }
+  WrappedTooltip(T("Legt ein neues Profil mit allem an, was gerade eingestellt ist -- Gerät, "
+                   "Eingang, Format, Bild und Ton. Danach gleich den Namen eintippen, am "
+                   "besten den der Konsole.\n\n"
+                   "Das aktuelle Profil bleibt, wie es war.",
+                   "Creates a new profile holding everything as it stands -- device, input, "
+                   "format, picture and audio. Type the name straight away, ideally the "
+                   "console's.\n\n"
+                   "The profile you were on stays as it was."));
   ImGui::SameLine();
   if (ImGui::Button(T("Umbenennen", "Rename"))) {
     renameTarget_ = c.activeProfile;
     std::snprintf(renameBuffer_, sizeof(renameBuffer_), "%s", c.active().name.c_str());
+    namePopupFocus_ = true;
     ImGui::OpenPopup("rename_profile");
   }
   ImGui::SameLine();
@@ -2749,14 +2770,37 @@ void SettingsWindow::DrawProfilesTab() {
   ImGui::EndDisabled();
 
   if (ImGui::BeginPopupModal("rename_profile", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextUnformatted(T("Profil umbenennen", "Rename profile"));
+    const bool creating = renameTarget_ < 0;
+    ImGui::TextUnformatted(creating ? T("Wie soll das Profil heißen?", "What should it be called?")
+                                    : T("Profil umbenennen", "Rename profile"));
+    if (creating) {
+      ImGui::TextDisabled("%s", T("Zum Beispiel der Name der Konsole.",
+                                  "The console's name, for instance."));
+    }
+    // Der Cursor steht gleich im Feld: wer hier landet, will tippen, nicht erst
+    // hineinklicken. Nur im ersten Bild des Popups, sonst faenge es die Eingabe
+    // jedes Mal neu ein.
+    if (namePopupFocus_) {
+      ImGui::SetKeyboardFocusHere();
+      namePopupFocus_ = false;
+    }
     ImGui::SetNextItemWidth(320.0f);
-    ImGui::InputText("##name", renameBuffer_, sizeof(renameBuffer_));
+    const bool entered = ImGui::InputText("##name", renameBuffer_, sizeof(renameBuffer_),
+                                          ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::Spacing();
-    if (ImGui::Button("OK", ImVec2(100, 0))) {
-      if (renameTarget_ >= 0 && renameTarget_ < (int)c.profiles.size()) {
-        std::string trimmed = Trim(renameBuffer_);
-        if (!trimmed.empty()) c.profiles[(size_t)renameTarget_].name = trimmed;
+    if (entered || ImGui::Button("OK", ImVec2(100, 0))) {
+      const std::string trimmed = Trim(renameBuffer_);
+      if (!trimmed.empty()) {
+        if (creating) {
+          // Das gerade aktive Profil ist der aktuelle Zustand -- die
+          // Einstellungen wirken sofort und werden dorthin geschrieben.
+          Profile copy = c.active();
+          copy.name = trimmed;
+          c.profiles.push_back(copy);
+          c.activeProfile = (int)c.profiles.size() - 1;
+        } else if (renameTarget_ < (int)c.profiles.size()) {
+          c.profiles[(size_t)renameTarget_].name = trimmed;
+        }
       }
       ImGui::CloseCurrentPopup();
     }

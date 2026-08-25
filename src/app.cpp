@@ -1741,6 +1741,67 @@ void App::DetectCrop() {
   }
 }
 
+// Ob das Bild aus dem Analogdekoder kommt. Dieselbe Frage, die entscheidet, was
+// in den Einstellungen erscheint -- und sie muss dieselbe Antwort geben, sonst
+// wirkt etwas, das nirgends mehr zu sehen ist.
+//
+// Einen Dekoder zu haben heisst nicht, ihn zu benutzen: auf einer Karte, die
+// beides kann, wird er weiterhin gemeldet, waehrend das Bild vom digitalen
+// Eingang kommt. Keine Videonorm liefert mehr als 576 Zeilen, also beantwortet
+// das Bild die Frage selbst.
+bool App::SourceIsAnalogue() const {
+  const SignalKind kind = config_.active().capture.signalKind;
+  if (kind == SignalKind::Analog) return true;
+  if (kind == SignalKind::Digital) return false;
+  const bool hasDecoder = capture_.running() && capture_.capabilities().availableStandards != 0;
+  const VideoFormatInfo fmt = renderer_.sourceFormat();
+  return hasDecoder && (!fmt.valid() || fmt.height <= 576);
+}
+
+// Die Einstellungen, wie sie fuer *diese* Quelle gelten.
+//
+// Ausgeblendet muss auch abgeschaltet heissen. Wer am SNES die Kriechfilter und
+// das native Raster anhatte und dann eine HD-Konsole ansteckt, saehe sonst ein
+// Bild, das er nicht will, und faende den Regler dafuer nirgends mehr -- die
+// Einstellung ist ja gerade verschwunden, weil sie nicht passt.
+//
+// Neutralisiert wird nur die Kopie, die gezeichnet wird. Das Profil behaelt
+// seine Werte, denn es beschreibt eine Konsole, und die kommt wieder. Was es
+// nicht tut, ist sich zu merken und wiederherzustellen: die naechste analoge
+// Quelle ist vielleicht eine andere Konsole mit anderen Werten. Genau dafuer
+// gibt es Profile.
+ImageSettings App::EffectiveImage(const Profile& profile) const {
+  ImageSettings img = profile.image;
+  const VideoFormatInfo fmt = renderer_.sourceFormat();
+
+  if (!SourceIsAnalogue()) {
+    // Composite bringt diese Stoerungen mit, ein digitaler Eingang nicht. Der
+    // Demodulator wuerde einen Traeger herausrechnen, den es nicht gibt.
+    img.chromaSoft = 0;
+    img.temporalDenoise = 0.0f;
+    img.dotNotch = 0.0f;
+    // Das native Raster rechnet das Abtasten einer analogen Zeile zurueck.
+    img.nativeWidth = 0;
+    img.lineDouble = false;
+  }
+
+  // Bildroehreneffekte nach der Zeilenzahl, nicht nach analog nur digital: ein
+  // RetroTINK mit 480p ueber HDMI soll sie behalten duerfen.
+  if (fmt.valid() && fmt.height > 576) {
+    img.scanlines = 0.0f;
+    img.mask = 0;
+  }
+
+  // Halbbilder: hat die Quelle keine, darf ein von Hand gewaehlter Deinterlacer
+  // nicht trotzdem laufen. Nicht abschalten, sondern auf "nur bei interlaced"
+  // stellen -- das ist dieselbe Aussage und ueberlebt den Wechsel zurueck.
+  const bool hasFields =
+      fmt.interlaced || renderer_.detectedInterlace() == VideoRenderer::InterlaceVerdict::Interlaced;
+  if (!SourceIsAnalogue() && !hasFields) img.deinterlaceAuto = true;
+
+  return img;
+}
+
 bool App::SourceLooksInterlaced(const Profile& profile) const {
   if (!profile.image.deinterlaceAuto) return true;
   // The media type is believed when it claims interlaced -- a card that bothers
@@ -2356,7 +2417,7 @@ void App::RenderFrame() {
   // same frame the bar appears in.
   renderer_.SetTopInset(toolbarVisible_ ? (int)std::lround(ToolbarHeight()) : 0);
   UpdateHdr();
-  renderer_.Draw(profile.image, fieldIndex_);
+  renderer_.Draw(EffectiveImage(profile), fieldIndex_);
 
   // Right after the first pass, so the still is the picture that was just put on
   // screen -- and before the UI is drawn, so the overlay never lands in it.
@@ -2583,24 +2644,10 @@ void App::DrawUi() {
   settings_.SetUpdater(&updater_);
   // Auto means: analogue when the card has a decoder for it. A card that only
   // does one of the two therefore needs nobody to say which.
-  {
-    const SignalKind kind = config_.active().capture.signalKind;
-    const bool hasDecoder =
-        capture_.running() && capture_.capabilities().availableStandards != 0;
-    // Einen Dekoder zu haben heisst nicht, ihn zu benutzen. Auf einer Karte, die
-    // beides kann, sind der analoge und der digitale Eingang zwei Geraete auf
-    // einer Platine, und der Dekoder wird weiterhin gemeldet, waehrend das Bild
-    // vom digitalen Eingang kommt. Die Automatik hielt eine Switch mit 1080p60
-    // deshalb fuer eine analoge Quelle.
-    //
-    // Das Bild selbst beantwortet die Frage: keine Videonorm in der Tabelle
-    // liefert mehr als 576 Zeilen. Was hoeher ankommt, kann nicht aus dem
-    // Analogdekoder stammen, egal was die Karte sonst kann.
-    const VideoFormatInfo fmt = renderer_.sourceFormat();
-    const bool plausible = fmt.valid() ? fmt.height <= 576 : true;
-    settings_.SetAnalogueSource(kind == SignalKind::Analog ||
-                                (kind == SignalKind::Auto && hasDecoder && plausible));
-  }
+  // Dieselbe Quelle der Wahrheit, die auch entscheidet, was ueberhaupt noch
+  // gezeichnet wird. Liefen die beiden auseinander, wirkte etwas, das nirgends
+  // mehr einstellbar ist.
+  settings_.SetAnalogueSource(SourceIsAnalogue());
   settings_.SetSourceFps(renderer_.sourceFormat().fps);
   // Woraus sich entscheidet, welche Abschnitte im Reiter Bild erscheinen: die
   // Zeilenzahl fuer die Bildroehreneffekte, die Halbbilder fuer das
