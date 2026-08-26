@@ -18,13 +18,17 @@ set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
 add_library(capview_vcam SHARED
   src/vcam/vcam_dll.cpp
   src/vcam/vcam_filter.cpp
+  src/vcam/vcam_idle.cpp
   src/vcam/capview_vcam.def
+  res/vcam_dll.rc
 )
-target_include_directories(capview_vcam PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(capview_vcam PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/res")
 target_compile_definitions(capview_vcam PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+# gdi32 and user32 draw the idle picture -- see src/vcam/vcam_idle.cpp.
 target_link_libraries(capview_vcam PRIVATE
-  strmiids ole32 oleaut32 uuid advapi32)
+  strmiids ole32 oleaut32 uuid advapi32 gdi32 user32)
 if(MSVC)
   target_compile_options(capview_vcam PRIVATE /W3 /permissive- /Zc:__cplusplus /utf-8 /MP)
   set_property(TARGET capview_vcam PROPERTY MSVC_RUNTIME_LIBRARY

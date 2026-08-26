@@ -46,6 +46,19 @@ void HelpMarker(const char* text) {
   }
 }
 
+// Wie TextDisabled, aber mit Umbruch. ImGui hat beides nur einzeln: TextDisabled
+// faerbt und bricht nicht um, TextWrapped bricht um und faerbt nicht. Ein kurzer
+// Halbsatz merkt den Unterschied nie, ein ganzer Erklaersatz sofort -- er
+// schiebt das Fenster in die Breite, bis man waagerecht scrollen muss, um das
+// Ende zu lesen.
+void TextDisabledWrapped(const char* text) {
+  if (!text || !*text) return;
+  const ImVec4 grey = ImGui::GetStyle().Colors[ImGuiCol_TextDisabled];
+  ImGui::PushStyleColor(ImGuiCol_Text, grey);
+  ImGui::TextWrapped("%s", text);
+  ImGui::PopStyleColor();
+}
+
 // Combo over an enum whose labels come from a lookup function, so the list
 // follows the selected language without any table to keep in sync.
 bool ComboEnum(const char* label, int* value, int count, NameFn name, NameFn help = nullptr) {
@@ -719,10 +732,10 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
   // passend dazu.
   if (p.capture.video.empty()) {
     ImGui::Spacing();
-    ImGui::TextDisabled(
-        "%s", T("Wähle oben eine Capture-Karte. Alles Weitere richtet sich danach, was sie "
-                "liefert.",
-                "Pick a capture card above. Everything else follows from what it delivers."));
+    TextDisabledWrapped(
+        T("Wähle oben eine Capture-Karte. Alles Weitere richtet sich danach, was sie "
+          "liefert.",
+          "Pick a capture card above. Everything else follows from what it delivers."));
     return;
   }
 
@@ -1315,7 +1328,7 @@ void SettingsWindow::DrawImageTab() {
   ImGui::SameLine();
   HelpMarker(DeinterlaceHelp(deint));
   if (coSitedFields_) {
-    ImGui::TextDisabled(T("Diese Quelle braucht keine Rekonstruktion: alle Modi liefern "
+    TextDisabledWrapped(T("Diese Quelle braucht keine Rekonstruktion: alle Modi liefern "
                           "dasselbe Bild.",
                           "This source needs no reconstruction: every mode gives the same "
                           "picture."));
@@ -1723,9 +1736,9 @@ void SettingsWindow::DrawHdrBlock() {
                  "nothing there, in which case it stays on SDR and has to be set here by "
                  "hand."));
   } else {
-    ImGui::TextDisabled(
-        "%s", T("Analoge Quelle: HDR gibt es dort nicht. Was bleibt, betrifft die Anzeige.",
-                "Analogue source: there is no HDR there. What remains concerns the display."));
+    TextDisabledWrapped(
+        T("Analoge Quelle: HDR gibt es dort nicht. Was bleibt, betrifft die Anzeige.",
+          "Analogue source: there is no HDR there. What remains concerns the display."));
   }
 
   const char* outputNames[] = {T("Aus", "Off"), T("Automatisch", "Automatic"),
@@ -2334,7 +2347,7 @@ void SettingsWindow::DrawEncoderTab(FfmpegInfo* ffmpeg) {
   // help people who already know the answer.
   if (tested && IsAutoEncoder(rec.encoder)) {
     const EncoderInfo* picked = ffmpeg->Resolve(rec.encoder);
-    ImGui::TextDisabled(
+    TextDisabledWrapped(
         rec.encoder == RecordEncoder::Auto
             ? T("H.264 zuerst: läuft auf allem, auch auf älteren Fernsehern und Handys.",
                 "H.264 first: plays on anything, including older TVs and phones.")
@@ -2435,10 +2448,12 @@ void SettingsWindow::DrawVirtualCameraBlock() {
 
   ImGui::TextWrapped(T("Gibt das Bild als Webcam an andere Programme weiter -- OBS, Discord, "
                        "Teams, den Browser. Die Kamera heißt \"CapView Virtual Camera\" und "
-                       "existiert nur, solange CapView läuft.",
+                       "steht ab dem Installieren dauerhaft in der Geräteliste. Läuft CapView "
+                       "gerade nicht, zeigt sie einen Hinweis statt eines Bildes.",
                        "Offers the picture to other programs as a webcam -- OBS, Discord, "
                        "Teams, the browser. The camera is called \"CapView Virtual Camera\" "
-                       "and exists only while CapView is running."));
+                       "and stays in the device list once installed. While CapView is not "
+                       "running it shows a notice instead of a picture."));
   ImGui::Spacing();
 
   if (status != VirtualCamera::Install::Installed) {
@@ -2512,13 +2527,16 @@ void SettingsWindow::DrawVirtualCameraBlock() {
   }
 
   ImGui::Spacing();
-  ImGui::TextDisabled("%s",
-                      T("Das Bild geht so hinaus, wie es hier ankommt -- gleiche Auflösung, "
+  TextDisabledWrapped(T("Das Bild geht so hinaus, wie es hier ankommt -- gleiche Auflösung, "
                         "gleiche Bildrate. Wer weniger verlangt, bekommt es seitenrichtig "
-                        "eingepasst; schwarze Balken füllen den Rest.",
+                        "eingepasst; schwarze Balken füllen den Rest. Welches Format ein "
+                        "Programm nimmt, entscheidet es beim Öffnen der Kamera und behält es "
+                        "dann; wechselt die Quelle, muss man es dort neu öffnen.",
                         "The picture goes out as it arrives here -- same resolution, same "
                         "frame rate. Anything asking for less gets it fitted with its shape "
-                        "kept; black bars fill the rest."));
+                        "kept; black bars fill the rest. Which format a program takes it "
+                        "settles when it opens the camera and keeps from then on; if the "
+                        "source changes, reopen it there."));
 
   ImGui::Spacing();
   if (ImGui::Button(T("Kamera deinstallieren", "Uninstall camera"), ImVec2(200.0f, 0.0f))) {
@@ -2637,9 +2655,9 @@ void SettingsWindow::DrawEncoderBlock(const EncoderInfo* encoder) {
   ImGui::EndDisabled();
 
   if (!nvenc && !amf && !qsv) {
-    ImGui::TextDisabled("%s", T("Der Softwareencoder nimmt nur Ratensteuerung und "
-                                "Voreinstellung an.",
-                                "The software encoder takes only rate control and preset."));
+    TextDisabledWrapped(T("Der Softwareencoder nimmt nur Ratensteuerung und "
+                          "Voreinstellung an.",
+                          "The software encoder takes only rate control and preset."));
   }
 }
 
@@ -2703,7 +2721,7 @@ void SettingsWindow::DrawHotkeysTab() {
   }
 
   ImGui::Spacing();
-  ImGui::TextDisabled(T("Fest belegt: Esc verlässt das Vollbild und schließt Dialoge, "
+  TextDisabledWrapped(T("Fest belegt: Esc verlässt das Vollbild und schließt Dialoge, "
                         "Strg+1 bis Strg+9 wählen ein Profil, Alt+F4 beendet.",
                         "Fixed: Esc leaves fullscreen and closes dialogs, Ctrl+1 to Ctrl+9 pick "
                         "a profile, Alt+F4 quits."));

@@ -1,0 +1,7 @@
+#include "vcam_resource.h"
+
+// The mark, palette-and-run-length packed: 7.8 KiB instead of the 256 KiB the
+// raw 256x256 image would cost. It is paid for twice -- once in the DLL and
+// once again in CapView.exe, which carries the DLL as a resource of its own --
+// which is the whole reason it is packed. See tools/make_vcam_icon.py.
+IDR_VCAM_ICON RCDATA "vcam_icon.bin"
