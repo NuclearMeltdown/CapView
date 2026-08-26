@@ -271,9 +271,13 @@ void SettingsWindow::EnsureValidFormat(const DeviceProbeResult& caps) {
   if (subtypes.empty()) return;
 
   // Format from another card, or nothing set yet: pick something sensible.
+  // A subtype without a size counts as not set -- that is what re-reading the
+  // card leaves behind -- but the subtype in it is still a wish, so it is
+  // handed on rather than thrown away. Without that this would put the
+  // ordinary choice back the moment the settings page was drawn.
   if (!p.capture.format.valid() ||
       std::find(subtypes.begin(), subtypes.end(), p.capture.format.subtype) == subtypes.end()) {
-    p.capture.format = caps.caps.PickDefault();
+    p.capture.format = caps.caps.PickDefault(p.capture.format.subtype);
   }
   p.capture.format.forced =
       !caps.caps.IsAdvertised(p.capture.format.subtype, p.capture.format.width,

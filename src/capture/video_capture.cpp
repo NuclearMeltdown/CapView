@@ -234,8 +234,19 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
 
   FormatSel wanted = settings.format;
   if (!wanted.valid()) {
-    wanted = capabilities_.caps.PickDefault();
-    CAP_LOG("Kein Format konfiguriert, verwende Standard: %s", wanted.Label().c_str());
+    // A subtype without a size is what re-reading the card leaves behind: the
+    // resolution is to be found again, the pixel format is not up for grabs.
+    const std::string wish = wanted.subtype;
+    wanted = capabilities_.caps.PickDefault(wish);
+    if (wish.empty()) {
+      CAP_LOG("Kein Format konfiguriert, verwende Standard: %s", wanted.Label().c_str());
+    } else if (wanted.subtype == wish) {
+      CAP_LOG("Auflösung neu gesucht, Pixelformat %s beibehalten: %s", wish.c_str(),
+              wanted.Label().c_str());
+    } else {
+      CAP_WARN("Pixelformat %s bietet die Karte nicht mehr an, stattdessen: %s", wish.c_str(),
+               wanted.Label().c_str());
+    }
   }
 
   // "Highest available" is stored as no rate at all, and this is where it turns

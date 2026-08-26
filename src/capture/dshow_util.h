@@ -169,7 +169,13 @@ class CapsModel {
 
   // Picks a sensible starting format: highest resolution at the highest
   // advertised frame rate, preferring uncompressed formats.
-  FormatSel PickDefault() const;
+  //
+  // `preferSubtype`, when given, outranks all of that as long as the card still
+  // offers it. Re-reading a card is not a reason to lose the pixel format
+  // somebody chose: the resolution may well have changed underneath, which is
+  // the point of re-reading, but a card that could do RGB32 a moment ago can
+  // still do it now. If it cannot, the ordinary choice applies.
+  FormatSel PickDefault(const std::string& preferSubtype = std::string()) const;
 
  private:
   std::vector<CapsEntry> entries_;

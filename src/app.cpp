@@ -505,22 +505,33 @@ void App::ReinitialiseCard() {
 
   CaptureSettings& c = config_.active().capture;
   const bool hadStandard = c.videoStandard > 0;
-  const bool hadFormat = c.format.valid();
+  const std::string keptSubtype = c.format.subtype;
   c.videoStandard = -1;  // wieder suchen lassen
+
+  // Aufloesung und Bildrate wieder suchen lassen, das Pixelformat nicht. Eine
+  // Karte, die eben noch RGB32 konnte, kann es nach dem Neueinlesen immer
+  // noch, und wer es ausgewaehlt hat, will es nicht jedes Mal neu auswaehlen.
+  // Kann sie es wirklich nicht mehr, faellt die Auswahl beim Start zurueck.
   c.format = FormatSel{};
+  c.format.subtype = keptSubtype;
 
   // Die Geraeteliste ebenfalls, denn eine umgesteckte Karte kann unter einem
   // anderen Pfad auftauchen als der, den wir uns gemerkt haben.
   settings_.InvalidateDeviceLists();
 
-  CAP_LOG("Karte neu einlesen: Videonorm %s, Format %s",
+  CAP_LOG("Karte neu einlesen: Videonorm %s, Auflösung verworfen, Pixelformat %s",
           hadStandard ? "verworfen" : "war schon automatisch",
-          hadFormat ? "verworfen" : "war schon automatisch");
+          keptSubtype.empty() ? "war schon automatisch" : keptSubtype.c_str());
 
   std::string error;
   if (StartCapture(&error)) {
-    Toast(T("Karte neu eingelesen. Videonorm und Format stehen wieder auf automatisch.",
-            "Card reinitialised. Video standard and format are back to automatic."));
+    Toast(keptSubtype.empty()
+              ? T("Karte neu eingelesen. Videonorm und Format stehen wieder auf automatisch.",
+                  "Card reinitialised. Video standard and format are back to automatic.")
+              : T("Karte neu eingelesen. Videonorm und Auflösung wieder automatisch, "
+                  "Pixelformat beibehalten.",
+                  "Card reinitialised. Video standard and resolution back to automatic, "
+                  "pixel format kept."));
   } else {
     Toast(error);
   }
