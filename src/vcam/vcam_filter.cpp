@@ -61,18 +61,21 @@ const int64_t kIdleInterval = 333333;  // 30 fps
 // the range: no consumer asks for a frame every ten seconds.
 const int64_t kSlowestInterval = 10000000;  // 1 fps
 
-// Sizes offered as concrete entries alongside the source's own. Consumers come
-// in two kinds: the ones that read VIDEO_STREAM_CONFIG_CAPS and understand that
-// a range means "anything in here", and the ones that only look at the media
-// type attached to each capability and treat the list as the whole truth. The
-// ranges are for the first kind and this list is for the second, which is the
-// kind Discord is.
+// Sizes offered as concrete entries, of which only those at or below the
+// source are ever shown. Consumers come in two kinds: the ones that ask for a
+// size and negotiate it, and the ones that only look at the media type on each
+// capability and take the list for the whole truth. QueryAccept is for the
+// first kind and this list is for the second, which is the kind Discord is.
+//
+// Sizes nothing asks for are not worth carrying. 1600x900 was here and is not
+// any more: no consumer has it on a wish list, and from 1080p it is the one
+// ratio that shows the resampler working.
 struct StdSize {
   uint32_t w, h;
 };
 const StdSize kOfferedSizes[] = {
-    {3840, 2160}, {2560, 1440}, {1920, 1080}, {1600, 900}, {1280, 720},
-    {960, 540},   {854, 480},   {640, 480},   {640, 360},  {320, 240},
+    {3840, 2160}, {2560, 1440}, {1920, 1080}, {1280, 720}, {960, 540},
+    {854, 480},   {640, 480},   {640, 360},   {320, 240},
 };
 
 // ------------------------------------------------------------- media types
@@ -196,6 +199,71 @@ bool ParseMediaType(const AM_MEDIA_TYPE* mt, uint32_t* pixel, uint32_t* width, u
 
 // ------------------------------------------------------------------ scaling
 
+// Area average of one plane into a sub-rectangle of the destination. Every
+// destination pixel is the mean of the source pixels its footprint covers,
+// each weighted by how much of it is covered.
+//
+// Two taps are not enough when shrinking. Six source pixels to five
+// destination pixels -- 576 to 480, which is PAL into 640x480 -- makes the
+// sampling phase repeat as 0.1, 0.3, 0.5, 0.7, 0.9: every fifth pixel is
+// nearly a copy of one source pixel, sharp and aliased, and the one beside it
+// a half-and-half blend of two, soft. That regular alternation is what the eye
+// reads as grain, and it is worst at the ratios that are neither 1:1 nor a
+// whole number. Source pixels between the two taps are not read at all.
+//
+// Covering the whole footprint has no phase to beat against, and it costs
+// more, not less: about (srcW + dstW) x (srcH + dstH) samples against two-tap
+// bilinear's 4 x dstW x dstH, so 1.4 million instead of 1.2 for the PAL case
+// above and 5.8 instead of 3.7 for 1080p into 720p. That is worth paying on a
+// plane that is being walked and written anyway.
+template <typename S>
+void ShrinkPlane(const S* src, size_t srcStrideBytes, int srcW, int srcH, S* dst,
+                 size_t dstStrideBytes, int dstX0, int dstY0, int dstW, int dstH, int channels) {
+  // Every row has the same column footprints, so they are worked out once.
+  // 16.16 throughout, and the last edge lands exactly on srcW << 16.
+  std::vector<int64_t> edgeX((size_t)dstW + 1);
+  for (int x = 0; x <= dstW; ++x) edgeX[(size_t)x] = ((int64_t)x * srcW << 16) / dstW;
+
+  for (int y = 0; y < dstH; ++y) {
+    const int64_t fy0 = ((int64_t)y * srcH << 16) / dstH;
+    const int64_t fy1 = ((int64_t)(y + 1) * srcH << 16) / dstH;
+    S* d = (S*)((uint8_t*)dst + (size_t)(dstY0 + y) * dstStrideBytes) + (size_t)dstX0 * channels;
+
+    for (int x = 0; x < dstW; ++x) {
+      const int64_t fx0 = edgeX[(size_t)x];
+      const int64_t fx1 = edgeX[(size_t)x + 1];
+      uint64_t sum[2] = {0, 0};
+      uint64_t weight = 0;
+
+      for (int sy = (int)(fy0 >> 16); sy < srcH; ++sy) {
+        const int64_t top = (int64_t)sy << 16;
+        if (top >= fy1) break;
+        const int64_t bottom = top + 65536;
+        const uint64_t wy = (uint64_t)((bottom < fy1 ? bottom : fy1) - (top > fy0 ? top : fy0));
+        if (wy == 0) continue;
+        const S* row = (const S*)((const uint8_t*)src + (size_t)sy * srcStrideBytes);
+
+        for (int sx = (int)(fx0 >> 16); sx < srcW; ++sx) {
+          const int64_t left = (int64_t)sx << 16;
+          if (left >= fx1) break;
+          const int64_t right = left + 65536;
+          const uint64_t wx = (uint64_t)((right < fx1 ? right : fx1) - (left > fx0 ? left : fx0));
+          if (wx == 0) continue;
+          // At most 2^16 either way, so the product is at most 2^32 and a
+          // 16-bit sample carries it to 2^48. The sums stay well inside 64.
+          const uint64_t w = wy * wx;
+          weight += w;
+          for (int c = 0; c < channels; ++c) sum[c] += w * (uint64_t)row[(size_t)sx * channels + c];
+        }
+      }
+
+      if (weight == 0) weight = 1;  // cannot happen; division cannot be left to chance
+      for (int c = 0; c < channels; ++c)
+        d[(size_t)x * channels + c] = (S)((sum[c] + weight / 2) / weight);
+    }
+  }
+}
+
 // Bilinear resample of one plane into a sub-rectangle of the destination.
 // `channels` is 1 for luma and 2 for the interleaved chroma pair, which is the
 // only difference between the two planes of an NV12 picture.
@@ -203,6 +271,16 @@ template <typename S>
 void ScalePlane(const S* src, size_t srcStrideBytes, int srcW, int srcH, S* dst,
                 size_t dstStrideBytes, int dstX0, int dstY0, int dstW, int dstH, int channels) {
   if (srcW <= 0 || srcH <= 0 || dstW <= 0 || dstH <= 0) return;
+
+  // Shrinking is what this filter does nearly always, now that nothing above
+  // the source is offered, and shrinking wants every source pixel looked at.
+  // Enlarging still wants two taps: a footprint smaller than one source pixel
+  // averages nothing and would come out point sampled.
+  if (dstW <= srcW && dstH <= srcH && (dstW != srcW || dstH != srcH)) {
+    ShrinkPlane<S>(src, srcStrideBytes, srcW, srcH, dst, dstStrideBytes, dstX0, dstY0, dstW,
+                   dstH, channels);
+    return;
+  }
 
   // Whole-number scaling is the common case -- OBS takes the source untouched
   // -- and deserves not to go through the interpolator at all.
