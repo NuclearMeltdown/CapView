@@ -804,14 +804,20 @@ bool CapsModel::IsAdvertised(const std::string& subtype, int width, int height, 
   return false;
 }
 
-FormatSel CapsModel::PickDefault() const {
+FormatSel CapsModel::PickDefault(const std::string& preferSubtype) const {
   FormatSel best;
   long long bestScore = -1;
   for (const CapsEntry& e : entries_) {
+    // A named subtype beats everything below it, and everything below it still
+    // decides between the entries that carry it. The area term tops out around
+    // 2^33 at 4K and the renderer bonus sits at 2^40, so 2^42 clears both.
+    const long long wishBonus =
+        (!preferSubtype.empty() && e.subtypeLabel == preferSubtype) ? 1LL << 42 : 0;
     // Prefer formats the renderer can take without a decoder in the graph.
     const long long formatBonus = IsRendererSubtype(e.subtype) ? 1LL << 40 : 0;
     const double fps = e.maxFps > 0.0 ? e.maxFps : e.defaultFps;
-    const long long score = formatBonus + (long long)e.width * e.height * 1000 + (long long)(fps * 10);
+    const long long score =
+        wishBonus + formatBonus + (long long)e.width * e.height * 1000 + (long long)(fps * 10);
     if (score > bestScore) {
       bestScore = score;
       best.subtype = e.subtypeLabel;
