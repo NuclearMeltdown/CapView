@@ -749,7 +749,8 @@ class Pin : public IPin, public IAMStreamConfig, public IKsPropertySet, public I
   HRESULT NegotiateAllocator(IMemInputPin* input);
   static DWORD WINAPI ThreadEntry(void* self);
   void ThreadLoop();
-  void CurrentSource(uint32_t* w, uint32_t* h, int64_t* interval, uint32_t* pixel);
+  void CurrentSource(uint32_t* w, uint32_t* h, int64_t* interval, uint32_t* pixel,
+                     bool* live = nullptr);
 
   Filter* owner_;
   IPin* connected_ = nullptr;
@@ -1001,12 +1002,15 @@ STDMETHODIMP_(ULONG) Pin::AddRef() { return owner_->AddRef(); }
 STDMETHODIMP_(ULONG) Pin::Release() { return owner_->Release(); }
 
 // What the source looks like right now, or the idle stand-in when CapView is
-// not running. Everything the pin offers is derived from this.
-void Pin::CurrentSource(uint32_t* w, uint32_t* h, int64_t* interval, uint32_t* pixel) {
+// not running. Everything the pin offers is derived from this. `live` says
+// which of the two it was, because a real source and a stand-in are worth
+// offering differently: the first is a measurement, the second is a guess.
+void Pin::CurrentSource(uint32_t* w, uint32_t* h, int64_t* interval, uint32_t* pixel, bool* live) {
   *w = kIdleWidth;
   *h = kIdleHeight;
   *interval = kIdleInterval;
   *pixel = kPixelNv12;
+  if (live) *live = false;
 
   if (!reader_.EnsureControl()) return;
   ControlBlock* cb = reader_.control();
@@ -1014,6 +1018,7 @@ void Pin::CurrentSource(uint32_t* w, uint32_t* h, int64_t* interval, uint32_t* p
   if (cb->sourceWidth >= 2 && cb->sourceHeight >= 2) {
     *w = cb->sourceWidth & ~1u;
     *h = cb->sourceHeight & ~1u;
+    if (live) *live = true;
   }
   if (cb->sourceInterval100ns > 0) *interval = cb->sourceInterval100ns;
   *pixel = cb->sourcePixel == kPixelP010 ? kPixelP010 : kPixelNv12;
@@ -1024,7 +1029,8 @@ void Pin::BuildTypeList(std::vector<AM_MEDIA_TYPE>* out) {
 
   uint32_t srcW, srcH, srcPixel;
   int64_t interval;
-  CurrentSource(&srcW, &srcH, &interval, &srcPixel);
+  bool live = false;
+  CurrentSource(&srcW, &srcH, &interval, &srcPixel, &live);
 
   // The source's own shape leads, because a consumer that takes the first thing
   // offered should get the picture untouched. That is the whole point of this
@@ -1051,13 +1057,19 @@ void Pin::BuildTypeList(std::vector<AM_MEDIA_TYPE>* out) {
   if (srcPixel == kPixelP010) add(kPixelP010, srcW, srcH);
   add(kPixelNv12, srcW, srcH);
 
-  // Then the ordinary sizes, for consumers that read the list rather than the
-  // ranges. Nothing larger than the source, because upscaling here would only
-  // move work from the consumer to us and lose nothing on the way -- except
-  // that consumers with a fixed wish list need their wish to be in the list, so
-  // 720p is offered even from a 576i source.
-  const uint32_t ceilingW = srcW > 1280 ? srcW : 1280;
-  const uint32_t ceilingH = srcH > 720 ? srcH : 720;
+  // Then the ordinary sizes, and nothing above the source. Offering more than
+  // there is looked harmless -- the consumer would get it upscaled -- and was
+  // not: a program picks the biggest entry it likes and then keeps that choice
+  // for as long as it holds the camera. So a 576i console offered 720p was a
+  // 576i console shown at 720p forever, in a list that still said 720p after
+  // the console had changed, because the list was not describing the source.
+  // A camera that advertises only what it has cannot be pinned that way.
+  //
+  // While CapView is not running there is no source to be smaller than, so the
+  // usual list is offered whole. A consumer that opens the camera before
+  // CapView starts should not be stuck at the stand-in's shape afterwards.
+  const uint32_t ceilingW = live ? srcW : 1920;
+  const uint32_t ceilingH = live ? srcH : 1080;
   for (const StdSize& s : kOfferedSizes) {
     if (s.w > ceilingW || s.h > ceilingH) continue;
     add(kPixelNv12, s.w, s.h);
@@ -1344,10 +1356,15 @@ STDMETHODIMP Pin::GetStreamCaps(int index, AM_MEDIA_TYPE** mt, BYTE* caps) {
   int64_t srcInterval;
   CurrentSource(&srcW, &srcH, &srcInterval, &srcPixel);
 
-  // The range, which is the reason this filter exists in the shape it does. A
-  // consumer that understands VIDEO_STREAM_CONFIG_CAPS never has to find its
-  // wish in a list: it states what it wants and gets it, scaled here, in its
-  // own process, at no cost to anybody else reading the same camera.
+  // Each entry describes itself and nothing else, the way a webcam's driver
+  // does. It used to describe a range instead -- 32x32 up to 1920x1080 -- on
+  // the argument that a consumer which reads ranges could then ask for
+  // anything. What it actually did was fill OBS's resolution list with sizes
+  // the camera did not have: 32x32 at one end, 1920x1080 at the other, both
+  // still offered from a 576i console, and both still there after restarting
+  // OBS, because they were never a description of the source in the first
+  // place. Asking for something in between still works -- QueryAccept takes
+  // it -- it is just no longer advertised as though it were a mode.
   auto* c = (VIDEO_STREAM_CONFIG_CAPS*)caps;
   ::ZeroMemory(c, sizeof(*c));
   c->guid = FORMAT_VideoInfo;
@@ -1360,12 +1377,14 @@ STDMETHODIMP Pin::GetStreamCaps(int index, AM_MEDIA_TYPE** mt, BYTE* caps) {
   c->CropGranularityY = 1;
   c->CropAlignX = 1;
   c->CropAlignY = 1;
-  c->MinOutputSize.cx = 32;
-  c->MinOutputSize.cy = 32;
-  c->MaxOutputSize.cx = (LONG)(srcW > 1920 ? srcW : 1920);
-  c->MaxOutputSize.cy = (LONG)(srcH > 1080 ? srcH : 1080);
+  c->MinOutputSize.cx = (LONG)w;
+  c->MinOutputSize.cy = (LONG)h;
+  c->MaxOutputSize.cx = (LONG)w;
+  c->MaxOutputSize.cy = (LONG)h;
   // Two, because chroma is half resolution in both directions and an odd edge
-  // has no chroma sample to call its own.
+  // has no chroma sample to call its own. Nought would say "fixed" and is what
+  // the documentation asks for when the two sizes are equal, but consumers
+  // divide by this without looking, so it stays a number that can be divided by.
   c->OutputGranularityX = 2;
   c->OutputGranularityY = 2;
   c->StretchTapsX = 2;

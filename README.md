@@ -274,11 +274,16 @@ Virtual Camera**, at the source's own resolution and the source's own frame
 rate. Not a list of sizes: a 240p SNES goes out as 240p, a 1080p60 Switch as
 1080p60, and if you ever put 8K at 120 in front of it, that is what comes out.
 
-Programs that cannot take that get what they ask for instead. The camera
-advertises a continuous range, so Discord asking for 720p60 gets 720p60 --
-scaled and letterboxed inside Discord's own process, at no cost to anything else
-reading the same camera. Every consumer negotiates for itself, and the settings
-page lists them by name while they read.
+Programs that cannot take that get one of the ordinary sizes below it -- 640x480
+and the rest -- scaled and letterboxed inside their own process, at no cost to
+anything else reading the same camera. Every consumer negotiates for itself, and
+the settings page lists them by name while they read.
+
+Nothing above the source is offered. A camera that advertises more than it has
+is a camera that misleads: the program picks the largest entry, keeps that
+choice for as long as it holds the camera, and goes on listing it after the
+console has changed. So a 576i console offers 576i and smaller, and a program
+wanting 1080p from it upscales at its own end, where that work belongs.
 
 An HDR source is additionally offered as ten bit P010, with the eight bit form
 right behind it so that programs which have never heard of an HDR webcam still
