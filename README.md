@@ -275,7 +275,7 @@ rate. Not a list of sizes: a 240p SNES goes out as 240p, a 1080p60 Switch as
 1080p60, and if you ever put 8K at 120 in front of it, that is what comes out.
 
 Programs that cannot take that get what they ask for instead. The camera
-advertises a continuous range, so Discord asking for 720p30 gets 720p30 --
+advertises a continuous range, so Discord asking for 720p60 gets 720p60 --
 scaled and letterboxed inside Discord's own process, at no cost to anything else
 reading the same camera. Every consumer negotiates for itself, and the settings
 page lists them by name while they read.
@@ -286,6 +286,19 @@ find something they understand.
 
 The cost is a one-time install with a UAC prompt, because a DirectShow filter is
 registered machine-wide. There is an uninstall button next to it.
+
+Being registered machine-wide also means the camera stays in every device list
+once installed, whether CapView is running or not -- the same as OBS's virtual
+camera. While nothing is feeding it, it shows a picture that says so instead of
+black.
+
+A program settles its format once, when it opens the camera, and keeps it for as
+long as it holds it open. Swapping a 1080p console for a 576i one changes what
+CapView publishes straight away, but a program already reading goes on asking
+for the size it negotiated, so it keeps getting the new picture fitted into the
+old shape. Reopening the camera there picks the new size up. In OBS that means
+setting **Resolution/FPS Type** to **Device Default** -- on *Custom* it asks for
+the size written in the box and nothing else.
 
 More: [Virtual camera](../../wiki/Virtual-camera).
 

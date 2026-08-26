@@ -20,6 +20,7 @@
 #include <new>
 #include <vector>
 
+#include "vcam/vcam_idle.h"
 #include "vcam/vcam_shared.h"
 
 namespace cap {
@@ -588,8 +589,38 @@ class FrameReader {
     return true;
   }
 
-  // Black, in whichever layout the consumer negotiated. Used before the first
-  // picture arrives and whenever CapView is not running.
+  // True while CapView is feeding the camera. What it separates is a picture
+  // that is expected and momentarily missing -- a torn read, the moment before
+  // the first frame -- from one that is not coming at all. The first deserves
+  // black, because it lasts a frame or two. The second deserves an explanation.
+  bool ProducerAlive() {
+    if (!EnsureControl()) return false;
+    return control_->producerAlive != 0;
+  }
+
+  // The idle picture: drawn once for a given shape and kept. Laying out text
+  // thirty times a second to say the same thing would be thirty times too many.
+  void Idle(uint8_t* dst, uint32_t dstW, uint32_t dstH, uint32_t pixel) {
+    if (idleW_ != dstW || idleH_ != dstH || idlePixel_ != pixel) {
+      idleW_ = dstW;
+      idleH_ = dstH;
+      idlePixel_ = pixel;
+      idle_.assign(ImageBytes(pixel, dstW, dstH), 0);
+      idleReady_ = RenderIdlePicture(idle_.data(), dstW, dstH, pixel);
+      // Whatever went wrong will go wrong again at this size, so the attempt is
+      // not repeated every frame -- and the buffer is given back rather than
+      // held for a picture that is never drawn.
+      if (!idleReady_) std::vector<uint8_t>().swap(idle_);
+    }
+    if (idleReady_) {
+      ::memcpy(dst, idle_.data(), idle_.size());
+    } else {
+      Blank(dst, dstW, dstH, pixel);
+    }
+  }
+
+  // Black, in whichever layout the consumer negotiated. Used while a picture is
+  // expected, and as the fallback when the idle picture cannot be drawn.
   static void Blank(uint8_t* dst, uint32_t dstW, uint32_t dstH, uint32_t pixel) {
     const size_t stride = (size_t)dstW * BytesPerSample(pixel);
     uint8_t* chroma = dst + stride * dstH;
@@ -643,6 +674,10 @@ class FrameReader {
   DWORD lastControlTry_ = 0;
   std::vector<uint8_t> staging_;
   std::vector<uint8_t> converted_;  // only used when the two layouts disagree
+
+  std::vector<uint8_t> idle_;
+  uint32_t idleW_ = 0, idleH_ = 0, idlePixel_ = 0;
+  bool idleReady_ = false;
 };
 
 }  // namespace
@@ -1464,7 +1499,11 @@ void Pin::ThreadLoop() {
       uint32_t frameIndex = 0;
       const bool got = reader_.ReadInto(buffer, width_, height_, pixel_, &frameIndex);
       if (!got) {
-        FrameReader::Blank(buffer, width_, height_, pixel_);
+        if (reader_.ProducerAlive()) {
+          FrameReader::Blank(buffer, width_, height_, pixel_);
+        } else {
+          reader_.Idle(buffer, width_, height_, pixel_);
+        }
         haveLast = false;
       } else {
         if (!haveLast || frameIndex != lastFrameIndex) ++fresh;
