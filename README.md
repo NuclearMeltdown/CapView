@@ -306,11 +306,9 @@ old shape. Reopening the camera there picks the new size up.
 **Whatever program you read the camera with, leave its resolution on automatic
 and do not pick a size by hand.** In OBS that is **Resolution/FPS Type: Device
 Default**; on *Custom* it asks for the size written in the box and nothing else,
-and it caches the sizes it saw when the box was last opened -- swap down from
-1080p to 576i and the old list stays there until OBS is restarted. Turning the
-device off and on again is not enough. Discord needs no more than the camera off
-and back on. On automatic none of that arises: the program takes whatever the
-camera offers first, which is the source's own shape.
+whatever the console is now doing. After changing console, disable the device
+and enable it again and OBS picks the new size up. Discord needs no more than
+the camera off and back on.
 
 More: [Virtual camera](../../wiki/Virtual-camera).
 
