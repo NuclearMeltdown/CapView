@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(CapView LANGUAGES CXX RC VERSION 1.0.0)
+project(CapView LANGUAGES CXX RC VERSION 3.0.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,20 +11,20 @@ endif()
 
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
 
-# The virtual camera's media source. A DLL of its own because Windows loads it
-# into the Frame Server service, not into CapView -- see src/vcam/vcam_shared.h.
-# It is registered under HKLM, so installing it needs administrator rights while
-# using the camera afterwards does not.
+# The virtual camera's DirectShow source filter. A DLL of its own because it
+# does not run in CapView: DirectShow loads it into whichever application opened
+# the camera -- see src/vcam/vcam_shared.h. Registration goes to HKLM, so
+# installing the camera needs administrator rights while using it does not.
 add_library(capview_vcam SHARED
   src/vcam/vcam_dll.cpp
-  src/vcam/vcam_source.cpp
+  src/vcam/vcam_filter.cpp
   src/vcam/capview_vcam.def
 )
 target_include_directories(capview_vcam PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_definitions(capview_vcam PRIVATE
   UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(capview_vcam PRIVATE
-  mfplat mfuuid mf ole32 oleaut32 uuid advapi32 ksuser strmiids)
+  strmiids ole32 oleaut32 uuid advapi32)
 if(MSVC)
   target_compile_options(capview_vcam PRIVATE /W3 /permissive- /Zc:__cplusplus /utf-8 /MP)
   set_property(TARGET capview_vcam PROPERTY MSVC_RUNTIME_LIBRARY
@@ -103,7 +103,6 @@ target_link_libraries(CapView PRIVATE
   strmiids ole32 oleaut32 uuid
   winmm avrt dwmapi shlwapi shcore winhttp bcrypt windowscodecs
   user32 gdi32 advapi32 comdlg32 propsys
-  mfplat mfuuid mfsensorgroup
 )
 
 if(MSVC)
@@ -115,10 +114,10 @@ if(MSVC)
   target_link_options(CapView PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
 endif()
 
-# The media source rides inside the executable as a resource, and the executable
-# lays it down when the camera is installed. Shipping it as a loose second file
-# meant the two could be from different builds -- which happened, because Windows
-# locks the file while the camera is in use and replacing it failed silently.
+# The filter rides inside the executable as a resource, and the executable lays
+# it down when the camera is installed. Shipping it as a loose second file meant
+# the two could be from different builds -- which happened, because Windows locks
+# the file while the camera is in use and replacing it failed silently.
 set(VCAM_DLL_PATH "${CMAKE_BINARY_DIR}/bin/capview_vcam.dll")
 file(TO_NATIVE_PATH "${VCAM_DLL_PATH}" VCAM_DLL_NATIVE)
 string(REPLACE "\\" "\\\\" VCAM_DLL_ESCAPED "${VCAM_DLL_NATIVE}")
@@ -167,3 +166,24 @@ set_target_properties(CapView PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
   RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
 )
+
+# Diagnostic console tool: a consumer for the virtual camera. Loads the filter
+# DLL directly, so it needs neither an installation nor administrator rights,
+# and reports what a real consumer would see -- offered formats, the negotiated
+# one, the frame rate that actually arrived, and whether the picture was blank.
+add_executable(capview_vcam_test src/tools/vcam_test.cpp)
+target_include_directories(capview_vcam_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_definitions(capview_vcam_test PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(capview_vcam_test PRIVATE strmiids ole32 oleaut32 uuid)
+if(MSVC)
+  target_compile_options(capview_vcam_test PRIVATE /W3 /permissive- /Zc:__cplusplus /utf-8)
+  set_property(TARGET capview_vcam_test PROPERTY MSVC_RUNTIME_LIBRARY
+               "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+set_target_properties(capview_vcam_test PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin"
+)
+add_dependencies(capview_vcam_test capview_vcam)

@@ -402,7 +402,9 @@ Profile ReadProfile(const json::Value& v) {
   const json::Value& i = v["image"];
   p.image.filter = ReadEnum<ScaleFilter>(i, "filter", 5, ScaleFilter::Bilinear);
   p.image.sharpen = (float)Clamp(i["sharpen"].AsNumber(0.0), 0.0, 1.0);
-  p.image.nativeWidth = Clamp(i["nativeWidth"].AsInt(0), 0, 4096);
+  // 16384 rather than a round number: it is the longest texture edge D3D11
+  // can address, so nothing this program could draw fits above it anyway.
+  p.image.nativeWidth = Clamp(i["nativeWidth"].AsInt(0), 0, 16384);
   p.image.scanlines = (float)Clamp(i["scanlines"].AsNumber(0.0), 0.0, 0.5);
   p.image.mask = Clamp(i["mask"].AsInt(0), 0, 2);
   p.image.maskStrength = (float)Clamp(i["maskStrength"].AsNumber(0.35), 0.0, 0.5);
@@ -417,10 +419,10 @@ Profile ReadProfile(const json::Value& v) {
   p.image.avoidGhosting = i["avoidGhosting"].AsBool(false);
   p.image.dotNotch = (float)i["dotNotch"].AsNumber(0.0);
   p.image.aspect = ReadEnum<AspectMode>(i, "aspect", 5, AspectMode::Source);
-  p.image.cropLeft = Clamp(i["cropLeft"].AsInt(0), 0, 4096);
-  p.image.cropRight = Clamp(i["cropRight"].AsInt(0), 0, 4096);
-  p.image.cropTop = Clamp(i["cropTop"].AsInt(0), 0, 4096);
-  p.image.cropBottom = Clamp(i["cropBottom"].AsInt(0), 0, 4096);
+  p.image.cropLeft = Clamp(i["cropLeft"].AsInt(0), 0, 16384);
+  p.image.cropRight = Clamp(i["cropRight"].AsInt(0), 0, 16384);
+  p.image.cropTop = Clamp(i["cropTop"].AsInt(0), 0, 16384);
+  p.image.cropBottom = Clamp(i["cropBottom"].AsInt(0), 0, 16384);
   p.image.range = ReadEnum<ColorRange>(i, "range", 3, ColorRange::Auto);
   p.image.matrix = ReadEnum<ColorMatrix>(i, "matrix", 3, ColorMatrix::Auto);
 
@@ -503,7 +505,13 @@ std::string FormatSel::Label() const {
     }
   }
   std::string out = Format("%dx%d", width, height);
-  if (!fpsText.empty()) out += " @ " + fpsText + " Hz";
+  if (!fpsText.empty()) {
+    out += " @ " + fpsText + " Hz";
+  } else if (width > 0) {
+    // No rate stored is not "unknown", it is the request to take whatever the
+    // card tops out at. Saying so beats a label that quietly omits the rate.
+    out += T(" @ höchste verfügbare", " @ highest available");
+  }
   if (!subtype.empty()) out += "  " + subtype;
   if (forced) out += T("  [erzwungen]", "  [forced]");
   return out;

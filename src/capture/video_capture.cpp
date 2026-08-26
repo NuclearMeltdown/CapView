@@ -238,6 +238,22 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
     CAP_LOG("Kein Format konfiguriert, verwende Standard: %s", wanted.Label().c_str());
   }
 
+  // "Highest available" is stored as no rate at all, and this is where it turns
+  // into one. Late on purpose: the number then comes from the card that is
+  // actually in front of us, so the setting survives a console switching from
+  // 576i50 to 480p60 without anyone editing it. If the card names no rate the
+  // zero simply stays, and the driver's own default interval is left in place.
+  if (wanted.fps <= 0.0) {
+    const double top = capabilities_.caps.HighestFps(wanted.subtype, wanted.width, wanted.height);
+    if (top > 0.0) {
+      wanted.fps = top;
+      CAP_LOG("Höchste verfügbare Bildrate für %dx%d %s: %.3f fps", wanted.width, wanted.height,
+              wanted.subtype.c_str(), top);
+    } else {
+      CAP_LOG("Höchste verfügbare Bildrate: Karte meldet keine, Treiberstandard bleibt stehen");
+    }
+  }
+
   sink_ = FrameSink::Create();
   if (!sink_) return fail("Sink-Filter konnte nicht erstellt werden");
 

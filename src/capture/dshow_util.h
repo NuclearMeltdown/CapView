@@ -137,9 +137,14 @@ struct ResolutionOption {
   bool forced = false;
 };
 
+// `highest` marks the entry that does not name a rate at all: it stands for
+// whatever the card turns out to top out at, and is resolved when the card is
+// opened rather than when it is picked. A number written down today is wrong
+// the moment the console changes mode; this one is not.
 struct FpsOption {
-  double fps = 0.0;
+  double fps = 0.0;  // 0 together with `highest`: resolved on open
   bool forced = false;
+  bool highest = false;
 };
 
 // Derives the three dropdown lists (format / resolution / frame rate) from a
@@ -154,6 +159,10 @@ class CapsModel {
   std::vector<std::string> Subtypes() const;
   std::vector<ResolutionOption> Resolutions(const std::string& subtype) const;
   std::vector<FpsOption> FpsList(const std::string& subtype, int width, int height) const;
+
+  // The highest rate the driver claims for this combination, or 0 when it
+  // claims none. This is what a stored fps of 0 turns into on open.
+  double HighestFps(const std::string& subtype, int width, int height) const;
 
   // True when the combination is advertised by the driver as-is.
   bool IsAdvertised(const std::string& subtype, int width, int height, double fps) const;

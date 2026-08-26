@@ -2,17 +2,20 @@
 
 // CapView's end of the virtual camera.
 //
-// Two things live here that are easy to confuse. Installing puts the media
-// source's DLL into the registry, needs administrator rights, and is done once.
+// Two things live here that are easy to confuse. Installing puts the DirectShow
+// filter's DLL into the registry, needs administrator rights, and is done once.
 // Turning the camera on happens afterwards under the ordinary user account and
-// needs no rights at all -- MFVirtualCameraAccess_CurrentUser is explicitly
-// allowed to a normal user, as long as the device categories stay the standard
-// ones.
+// needs no rights at all: it creates a shared section and starts publishing
+// into it.
 //
-// Windows 11 only. MFCreateVirtualCamera arrived in build 22000 and there is no
-// equivalent before it; a DirectShow filter would have been the alternative,
-// but those are invisible to everything that captures through Media Foundation,
-// which by now is the Camera app, Teams and the browsers.
+// What this class does *not* do any more is decide what the camera looks like.
+// CapView 2.x scaled and letterboxed every frame into one of three hardcoded
+// sizes at thirty frames a second, in this process, once -- so a 576i50 SNES
+// arrived in OBS as a stretched 1080p30. Now the picture is published exactly
+// as it is displayed, at the rate it arrives, and each consumer's own copy of
+// the filter fits it to whatever that consumer asked for. OBS takes it
+// untouched; Discord, which will not go above 720p30, gets that; neither costs
+// the other anything.
 
 #include <windows.h>
 
@@ -22,17 +25,26 @@
 #include <thread>
 #include <vector>
 
-struct IMFVirtualCamera;
-
 namespace cap {
 
 class VirtualCamera {
  public:
   enum class Install {
-    Missing,      // the source is not registered
-    Installed,    // registered and the file is where the registry says
-    Stale,        // registered, but pointing at a file that is not there
-    Unsupported,  // not Windows 11
+    Missing,    // the filter is not registered
+    Installed,  // registered, and pointing at this build's file
+    Stale,      // registered, but pointing at another build's file or none
+  };
+
+  // One application reading the camera, as its own copy of the filter reports
+  // itself. The name comes for free: the filter runs inside that application.
+  struct Consumer {
+    std::string name;
+    unsigned long pid = 0;
+    int width = 0;
+    int height = 0;
+    double fps = 0.0;
+    bool wide = false;
+    bool streaming = false;
   };
 
   ~VirtualCamera();
@@ -41,44 +53,37 @@ class VirtualCamera {
   VirtualCamera& operator=(const VirtualCamera&) = delete;
   VirtualCamera() = default;
 
-  // Whether this Windows can host a virtual camera at all.
-  static bool Supported();
-
   // Where the registration stands right now. Cheap enough to call per frame of
   // UI, but it does touch the registry, so the settings tab caches it.
   static Install Status();
 
   // Both raise a UAC prompt and wait for it. False with `error` filled when the
-  // user declines or regsvr32 fails. The DLL is expected beside CapView.exe.
+  // user declines or regsvr32 fails.
   static bool InstallSource(std::string* error);
+  static bool UninstallSource(std::string* error);
 
   // Deletes the copies left behind by earlier installs. Called once at start,
   // when whatever had them open has usually let go.
   static void CleanUpOldSources();
 
-  // Whether the camera should advertise its ten bit form at all. This has to
-  // reach a DLL living inside a service, so it is a file in ProgramData rather
-  // than a setting -- see vcam_shared.h. Takes effect when a consumer next
-  // opens the camera, not the moment it is switched.
-  static void SetWideOffered(bool offered);
-
-  // Which of the two the consumer settled on. The caller feeds whichever ring
-  // matches; there is no converting between them after the fact.
+  // Whether to publish the ten bit picture when there is one. Takes effect on
+  // the next frame; consumers already connected are converted rather than cut
+  // off, which is the filter's business, not this one's.
+  void SetWideOffered(bool offered);
   bool wantsWide() const { return wantsWide_.load(std::memory_order_relaxed); }
 
-  // The ten bit path. `packed` is one uint32 per pixel as DXGI writes
-  // R10G10B10A2 -- already PQ encoded and already BT.2020, because the shader
-  // that produced it for the recorder had to do that anyway.
-  void PushFrameWide(const uint8_t* packed, int stride, int width, int height);
-  static bool UninstallSource(std::string* error);
-
-  // Turning the camera on and off.
+  // What the camera would publish right now: the size CapView is showing, the
+  // rate the source runs at, and whether the picture would be the ten bit one.
   //
-  // Starting returns at once and finishes on a thread of its own. It has to:
-  // MFCreateVirtualCamera hands the work to the frame server, which loads the
-  // media source, and that is a service starting a DLL -- measured in hundreds
-  // of milliseconds on a good day and seconds when Windows is having a think.
-  // On the render thread that is a visible freeze.
+  // Called whether or not anybody is watching, and that is the point. A
+  // consumer reads all of this the moment it connects, before it has asked for
+  // a single frame. Left until the first picture, every consumer would
+  // negotiate against a placeholder and OBS would get 720p from a 1080p source.
+  void SetSourceShape(int width, int height, double fps, bool wide);
+
+  // Turning the camera on and off. Starting is quick now -- a section and a
+  // thread, no service to wake -- but the asynchronous shape is kept because
+  // the settings tab is written against it.
   void StartAsync();
   void Stop();
   bool running() const { return running_.load(std::memory_order_relaxed); }
@@ -87,42 +92,38 @@ class VirtualCamera {
   // Takes the reason the last start failed, once. Empty means it did not.
   bool takeError(std::string* out);
 
-  // True while an application is actually reading the camera. Until then
-  // pushing frames costs nothing, so callers need not check first.
+  // True while at least one application is actually reading the camera. Until
+  // then pushing frames costs nothing, so callers need not check first.
   bool consumed() const { return consumed_.load(std::memory_order_relaxed); }
 
-  // The installed media source is from a different build than this executable
-  // and the two cannot agree on the shape of what they share. Reported rather
-  // than worked around: the picture would be black either way, and only saying
-  // so turns that into something the user can act on.
-  bool sourceOutdated() const { return outdated_.load(std::memory_order_relaxed); }
-
-  // Hands over one displayed frame, RGBA8, top row first. Returns immediately:
-  // the copy is cheap and the conversion happens on a thread of its own, so the
-  // render loop is never waiting on a webcam.
+  // Hands over one displayed frame, RGBA8, top row first, at whatever size
+  // CapView is showing. Returns immediately: the copy is cheap and the
+  // conversion happens on a thread of its own.
   void PushFrame(const uint8_t* rgba, int stride, int width, int height);
 
-  // What the consuming application asked for, or 0x0 when nobody is reading.
-  void wanted(int* width, int* height, int* fps) const;
+  // The ten bit path. `packed` is one uint32 per pixel as DXGI writes
+  // R10G10B10A2 -- already PQ encoded and already BT.2020, because the shader
+  // that produced it for the recorder had to do that anyway.
+  void PushFrameWide(const uint8_t* packed, int stride, int width, int height);
+
+  // Who is reading, and in what. Empty when nobody is.
+  void consumers(std::vector<Consumer>* out) const;
 
  private:
   void WorkerLoop();
   bool StartBlocking(std::string* error);
-  bool AttachShared();
-  void DetachShared();
-  void Publish(const uint8_t* rgba, int stride, int width, int height);
-  void PublishWide(const uint8_t* packed, int stride, int width, int height);
-
-  IMFVirtualCamera* camera_ = nullptr;
-  bool mfStarted_ = false;
+  bool CreateControl(std::string* error);
+  void DestroyControl();
+  bool EnsureFrameSection(uint32_t width, uint32_t height, uint32_t pixel);
+  void Publish(const uint8_t* pixels, int stride, int width, int height, uint32_t pixel);
+  void WakeConsumers();
+  void PruneConsumers();
 
   std::atomic<bool> running_{false};
   std::atomic<bool> consumed_{false};
-  std::atomic<bool> outdated_{false};
   std::atomic<bool> wantsWide_{false};
   std::atomic<bool> quit_{false};
   std::atomic<bool> starting_{false};
-  std::thread starter_;
   std::mutex errorMutex_;
   std::string startError_;
 
@@ -135,17 +136,38 @@ class VirtualCamera {
   std::vector<uint8_t> pending_;
   int pendingWidth_ = 0;
   int pendingHeight_ = 0;
+  bool pendingWide_ = false;
   bool pendingFull_ = false;
 
-  HANDLE section_ = nullptr;
-  void* view_ = nullptr;
-  std::vector<uint8_t> scratch_;
+  // The control section, which lives as long as the camera is on.
+  HANDLE controlSection_ = nullptr;
+  void* controlView_ = nullptr;
+
+  // The frame section, which lives as long as the source keeps its shape. A
+  // mapped section cannot grow, so a new size means a new one and a generation
+  // number that tells the consumers to look again.
+  HANDLE frameSection_ = nullptr;
+  void* frameView_ = nullptr;
+  uint32_t frameWidth_ = 0;
+  uint32_t frameHeight_ = 0;
+  uint32_t framePixel_ = 0;
+  uint32_t generation_ = 0;
+  uint32_t writeIndex_ = 0;
+  uint32_t published_ = 0;
+
+  // One per consumer slot, created up front. Auto-reset, so a published picture
+  // wakes each reader exactly once; a single shared event cannot do that.
+  HANDLE consumerWake_[8] = {};
+
+  // The shape, remembered here as well as in the control block: it is known
+  // before the camera is started and has to survive until there is somewhere
+  // to write it.
+  std::atomic<int64_t> sourceInterval_{333333};
+  std::atomic<uint32_t> sourceWidth_{0};
+  std::atomic<uint32_t> sourceHeight_{0};
+  std::atomic<uint32_t> sourcePixel_{0};
+
   unsigned long lastReport_ = 0;
-  // The sign of life from the other side: how many samples it had served when
-  // last looked, and when that number last moved. A count that stands still is
-  // a camera nobody is reading.
-  uint32_t lastServed_ = 0;
-  unsigned long lastServedTick_ = 0;
 };
 
 }  // namespace cap
