@@ -269,13 +269,22 @@ this machine and the four that did not — and the settings it is given](docs/se
 
 ### Virtual camera
 
-The picture can be offered to other programs as a webcam under the name
-*CapView*, at 1080p, 720p or 480p in NV12. Built on Media Foundation, which
-reaches strictly more programs than DirectShow: the Windows Camera app, packaged
-apps and the current Teams see only frame-server cameras.
+The picture can be offered to other programs as a webcam called **CapView
+Virtual Camera**, at the source's own resolution and the source's own frame
+rate. Not a list of sizes: a 240p SNES goes out as 240p, a 1080p60 Switch as
+1080p60, and if you ever put 8K at 120 in front of it, that is what comes out.
 
-The cost is **Windows 11** (build 22000), and a one-time install with a UAC
-prompt, because Windows loads the media source into a service and it has to be
+Programs that cannot take that get what they ask for instead. The camera
+advertises a continuous range, so Discord asking for 720p30 gets 720p30 --
+scaled and letterboxed inside Discord's own process, at no cost to anything else
+reading the same camera. Every consumer negotiates for itself, and the settings
+page lists them by name while they read.
+
+An HDR source is additionally offered as ten bit P010, with the eight bit form
+right behind it so that programs which have never heard of an HDR webcam still
+find something they understand.
+
+The cost is a one-time install with a UAC prompt, because a DirectShow filter is
 registered machine-wide. There is an uninstall button next to it.
 
 More: [Virtual camera](../../wiki/Virtual-camera).
@@ -345,7 +354,7 @@ no external dependencies; Dear ImGui is vendored in `third_party/`.
 build.bat
 ```
 
-The result is `CapView.exe` in the repository root, just under 2 MB, linked
+The result is `CapView.exe` in the repository root, about 2 MB, linked
 against the static CRT. `build.bat keep` retains the build tree for incremental
 rebuilds, and `build.bat debug` produces a debug configuration.
 
@@ -385,8 +394,10 @@ More: [ffmpeg](../../wiki/ffmpeg).
 
 - **A card grants its capture pin to one process at a time.** If OBS holds it,
   CapView cannot open it, and the other way round.
-- **The virtual camera needs Windows 11.** `MFCreateVirtualCamera` does not
-  exist before build 22000.
+- **The virtual camera is not visible to packaged apps.** Its shared memory
+  lives in the session namespace, which an app container cannot see -- so the
+  Windows Camera app and Store builds of Teams do not find it. Everything that
+  loads DirectShow normally does: OBS, Discord, browsers, vMix, XSplit.
 - **The HDR display path is untested on real HDR hardware.** The maths is
   checked against the standards and the tone mapped path is verified; the scRGB
   output has never been run against an HDR monitor.

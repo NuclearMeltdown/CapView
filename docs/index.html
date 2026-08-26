@@ -121,7 +121,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
       <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/CapView">Source on GitHub</a>
       <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/CapView/wiki">Documentation</a>
     </div>
-    <p class="sub">One file, just under 2&nbsp;MB. No installer, nothing written to the registry.</p>
+    <p class="sub">One file, about 2&nbsp;MB. No installer, nothing written to the registry.</p>
   </div>
 </header>
 
@@ -186,7 +186,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
     <div class="grid">
       <div class="card"><h3>Recording</h3><p>H.264, H.265 or AV1 through NVENC, Quick Sync, AMF, x264 or x265. The audio is the master clock, so the output is constant frame rate and does not drift — measured at 1&nbsp;ms over 15&nbsp;seconds.</p></div>
       <div class="card"><h3>Encoder controls</h3><p>Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass, under one set of names translated into each vendor's own.</p></div>
-      <div class="card"><h3>Virtual camera</h3><p>Offer the picture to Discord, OBS, Teams or a browser. Built on Media Foundation, which reaches strictly more programs than DirectShow. Needs Windows&nbsp;11.</p></div>
+      <div class="card"><h3>Virtual camera</h3><p>Offer the picture to OBS, Discord or a browser at the source's own resolution and frame rate &mdash; and to anything that cannot take that, at whatever it asks for instead.</p></div>
       <div class="card"><h3>High dynamic range</h3><p>PQ and HLG are decoded to linear light, tone mapped with BT.2390 for an ordinary screen or passed through as scRGB for an HDR one.</p></div>
       <div class="card"><h3>Screenshots</h3><p>PNG or JPEG at source resolution through Windows Imaging Component, so no ffmpeg is needed. JPEG&nbsp;XR keeps the HDR range and needs none either; AVIF does. A switch grabs the finished window instead, interface and all.</p></div>
       <div class="card"><h3>Profiles</h3><p>Device, input, capture format and every picture and audio setting, one per source, on Ctrl+1 to Ctrl+9.</p></div>
@@ -200,7 +200,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
     <p class="lead">Scenes, overlays, compositing and streaming are not here and are not planned. For those, use OBS — and note that a card grants its capture pin to one process at a time, so the two cannot hold the same card at once.</p>
     <table>
       <tr><th>Requirement</th><th></th></tr>
-      <tr><td>Windows 10 or later</td><td>Windows 11 for the virtual camera</td></tr>
+      <tr><td>Windows 10 or later</td><td>the virtual camera installs with one UAC prompt</td></tr>
       <tr><td>A DirectShow capture device</td><td>almost every card, including USB ones</td></tr>
       <tr><td>ffmpeg</td><td>for recording and AVIF screenshots, fetched by a button</td></tr>
     </table>
