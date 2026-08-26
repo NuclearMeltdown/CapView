@@ -2112,12 +2112,7 @@ void App::UpdateVirtualCamera() {
     }
   }
 
-  // Written where it is cheap to notice a change; the media source reads it
-  // when a consumer next opens the camera.
-  if (config_.app.cameraHdr != cameraHdrOffered_) {
-    cameraHdrOffered_ = config_.app.cameraHdr;
-    VirtualCamera::SetWideOffered(cameraHdrOffered_);
-  }
+  virtualCamera_.SetWideOffered(config_.app.cameraHdr);
 
   const bool want = config_.app.virtualCamera;
   if (want && !virtualCamera_.running() && !virtualCamera_.starting()) {
@@ -2134,19 +2129,18 @@ void App::UpdateVirtualCamera() {
     Toast(startError);
   }
 
-  // Said once, not once a frame.
-  if (virtualCamera_.sourceOutdated() && !virtualCameraMismatchSaid_) {
-    virtualCameraMismatchSaid_ = true;
-    Toast(T("Die Kameraquelle stammt aus einer anderen Version. Im Reiter Werkzeuge "
-            "neu installieren.",
-            "The camera source is from a different build. Install it again on the Tools tab."));
-  }
-  if (!virtualCamera_.sourceOutdated()) virtualCameraMismatchSaid_ = false;
+  // What the camera would hand out right now, written whether or not anybody is
+  // listening. A consumer reads all of this the moment it connects -- before it
+  // has asked for a frame -- so it has to be there beforehand rather than be
+  // discovered from the first picture.
+  const VideoFormatInfo& format = renderer_.sourceFormat();
+  const bool wide = config_.app.cameraHdr &&
+                    renderer_.hdrTransfer() != VideoRenderer::Transfer::Sdr;
+  virtualCamera_.SetSourceShape(renderer_.outputWidth(), renderer_.outputHeight(), format.fps,
+                                wide);
 
-  int w = 0, h = 0, fps = 0;
-  virtualCamera_.wanted(&w, &h, &fps);
-  settings_.SetVirtualCameraState(virtualCamera_.running(), virtualCamera_.consumed(), w, h, fps,
-                                  virtualCamera_.sourceOutdated());
+  virtualCamera_.consumers(&virtualCameraConsumers_);
+  settings_.SetVirtualCameraState(virtualCamera_.running(), virtualCameraConsumers_);
 }
 
 void App::ShowVolumeOsd() {
@@ -2229,12 +2223,15 @@ int App::Run() {
     DrawSettingsWindowed();
 
     // Wait for the next captured frame, a pending second field, or input.
-    // 16, not 8. This is the ceiling on how often the whole preview pipeline
-    // runs -- video shaders, colour work, readbacks for the recorder and the
-    // camera, a present -- and with the settings open it was redrawing the same
-    // captured field up to a hundred and twenty-five times a second for the
-    // sake of the dialog feeling responsive. The dialog has had a redraw clock
-    // of its own since it became a window, so it no longer needs this.
+    //
+    // This bounds how long the loop *sleeps*, not how often it draws. It used
+    // to be both, back when any wake-up redrew the preview -- 16 rather than 8
+    // was the ceiling that stopped the settings dialog from driving the whole
+    // video pipeline at a hundred and twenty-five times a second for the sake
+    // of feeling responsive. Since the redraw became conditional on a picture
+    // having arrived, the ceiling is gone: a source delivering two hundred and
+    // forty frames signals the event two hundred and forty times and gets two
+    // hundred and forty redraws, and this timeout never comes into it.
     // Short while the dialog is open, because that is what keeps *it* smooth;
     // it no longer costs the preview anything, since a wake-up without a
     // picture no longer redraws the preview.
@@ -2865,6 +2862,7 @@ void App::DrawContextMenu() {
   }
   if (ImGui::MenuItem(T("Screenshot", "Screenshot"), sc(HotkeyAction::Screenshot))) RequestScreenshot();
   if (ImGui::MenuItem(T("Aufnahme neu starten", "Restart capture"), sc(HotkeyAction::RestartCapture))) RestartAll(true);
+  if (ImGui::MenuItem(T("Karte neu einlesen", "Reinitialise card"), sc(HotkeyAction::ReinitCard))) ReinitialiseCard();
   if (ImGui::MenuItem(T("Beenden", "Quit"), "Alt+F4")) ::PostMessageW(hwnd_, WM_CLOSE, 0, 0);
 
   ImGui::EndPopup();
@@ -2920,6 +2918,9 @@ bool App::HandleKeyDown(WPARAM key) {
       return true;
     case HotkeyAction::RestartCapture:
       RestartAll(true);
+      return true;
+    case HotkeyAction::ReinitCard:
+      ReinitialiseCard();
       return true;
     case HotkeyAction::Record:
       ToggleRecording();

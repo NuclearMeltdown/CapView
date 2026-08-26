@@ -18,6 +18,7 @@ enum class HotkeyAction {
   Settings,
   Stats,
   RestartCapture,
+  ReinitCard,
   Record,
   Screenshot,
   Mute,

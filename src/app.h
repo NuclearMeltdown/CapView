@@ -317,8 +317,8 @@ class App {
   SettingsHost settingsHost_;
   Updater updater_;
   VirtualCamera virtualCamera_;
-  bool virtualCameraMismatchSaid_ = false;
-  bool cameraHdrOffered_ = false;
+  // Refilled once a frame rather than allocated once a frame.
+  std::vector<VirtualCamera::Consumer> virtualCameraConsumers_;
   // What woke the main loop last time round, and when it last drew. Together
   // they keep the preview paced by the picture rather than by the message
   // queue -- see the comment at the call to RenderFrame.

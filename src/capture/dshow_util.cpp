@@ -680,83 +680,124 @@ std::vector<ResolutionOption> CapsModel::Resolutions(const std::string& subtype)
   return out;
 }
 
-std::vector<FpsOption> CapsModel::FpsList(const std::string& subtype, int width, int height) const {
-  std::vector<FpsOption> out;
-  double rangeMin = 0.0, rangeMax = 0.0;
-  bool haveRange = false;
+namespace {
 
-  // Frame rates advertised for exactly this resolution.
-  for (const CapsEntry& e : entries_) {
+// The union of the frame-rate ranges the driver reports for one format at one
+// resolution. `borrowed` says the numbers came from a different resolution
+// because none covered the one asked about -- they are then an educated guess
+// rather than a promise, and the UI says so.
+struct FpsRange {
+  double min = 0.0;
+  double max = 0.0;
+  bool have = false;
+  bool borrowed = false;
+};
+
+// Widens `r` to include one entry's range.
+void Widen(FpsRange* r, const CapsEntry& e) {
+  if (!r->have) {
+    r->min = e.minFps;
+    r->max = e.maxFps;
+    r->have = true;
+  } else {
+    r->min = std::min(r->min, e.minFps);
+    r->max = std::max(r->max, e.maxFps);
+  }
+}
+
+// What the driver says about this format at this resolution.
+FpsRange ReportedRange(const std::vector<CapsEntry>& entries, const std::string& subtype,
+                       int width, int height) {
+  FpsRange r;
+  for (const CapsEntry& e : entries) {
     if (e.subtypeLabel != subtype) continue;
     const bool sameRes = (e.width == width && e.height == height);
     const bool coversRes = width >= e.minWidth && width <= e.maxWidth && height >= e.minHeight &&
                            height <= e.maxHeight;
-    if (!sameRes && !coversRes) continue;
-
-    if (!haveRange) {
-      rangeMin = e.minFps;
-      rangeMax = e.maxFps;
-      haveRange = true;
-    } else {
-      rangeMin = std::min(rangeMin, e.minFps);
-      rangeMax = std::max(rangeMax, e.maxFps);
-    }
-    if (sameRes && e.defaultFps > 0.0) {
-      bool dup = false;
-      for (const FpsOption& f : out) {
-        if (FpsNear(f.fps, e.defaultFps)) { dup = true; break; }
-      }
-      if (!dup) out.push_back({e.defaultFps, false});
-    }
+    if (sameRes || coversRes) Widen(&r, e);
   }
+  if (r.have) return r;
 
-  // No entry covers this resolution (it is a forced one): fall back to the
-  // union of the ranges reported for this format, so the rate list is still
-  // useful instead of being entirely speculative.
-  if (!haveRange) {
-    for (const CapsEntry& e : entries_) {
-      if (e.subtypeLabel != subtype) continue;
-      if (!haveRange) {
-        rangeMin = e.minFps;
-        rangeMax = e.maxFps;
-        haveRange = true;
-      } else {
-        rangeMin = std::min(rangeMin, e.minFps);
-        rangeMax = std::max(rangeMax, e.maxFps);
-      }
-    }
+  // Nothing covers this resolution, so it is one the user forced. Borrow the
+  // union of everything reported for the format: an educated guess beats an
+  // empty dropdown, as long as it is labelled as one.
+  for (const CapsEntry& e : entries) {
+    if (e.subtypeLabel == subtype) Widen(&r, e);
   }
+  r.borrowed = r.have;
+  return r;
+}
 
-  // Standard rates inside the advertised range are offered as-is. Above it,
-  // rates up to twice the advertised maximum are offered as forced -- that is
-  // the "card claims 1080p30 but actually does 1080p60" case. Going further
-  // than that would only fill the list with values that cannot work.
-  // A card that already advertises 120 is a high refresh capture card, so the
-  // doubling reaches 240 and covers 144 and 165 on the way.
-  const double forcedCeiling =
-      haveRange ? std::min(rangeMax * 2.0 + 0.05, 241.0) : 241.0;
-  for (double f : kStandardFps) {
-    bool dup = false;
+}  // namespace
+
+std::vector<FpsOption> CapsModel::FpsList(const std::string& subtype, int width, int height) const {
+  std::vector<FpsOption> out;
+  const FpsRange range = ReportedRange(entries_, subtype, width, height);
+
+  auto known = [&out](double fps) {
     for (const FpsOption& o : out) {
-      if (FpsNear(o.fps, f)) { dup = true; break; }
+      if (FpsNear(o.fps, fps)) return true;
     }
-    if (dup) continue;
-    if (haveRange && f >= rangeMin - 0.05 && f <= rangeMax + 0.05) {
-      out.push_back({f, false});
-    } else if (f <= forcedCeiling && (!haveRange || f > rangeMax)) {
-      out.push_back({f, true});
+    return false;
+  };
+
+  // Rates named outright for exactly this resolution.
+  for (const CapsEntry& e : entries_) {
+    if (e.subtypeLabel != subtype) continue;
+    if (e.width != width || e.height != height) continue;
+    if (e.defaultFps > 0.0 && !known(e.defaultFps)) out.push_back({e.defaultFps, false, false});
+  }
+
+  // Standard rates that fall inside the advertised range. These are not
+  // inventions: a DirectShow range is the driver's own claim that it accepts
+  // anything between the two ends, and 48 inside 25..59.94 is as much a promise
+  // as 25 is. What used to sit here as well -- everything up to twice the
+  // advertised maximum, on the theory that a card claiming 30 might secretly do
+  // 60 -- is gone. It filled the list with rates no card had ever mentioned,
+  // and on an input that reports no range at all it marked every single entry
+  // from 25 to 119.88 "not reported", which is a dropdown that tells you
+  // nothing. Anyone who wants to gamble on an unlisted rate can still type it
+  // in by hand, and then it is their guess rather than ours.
+  if (range.have) {
+    for (double f : kStandardFps) {
+      if (f < range.min - 0.05 || f > range.max + 0.05) continue;
+      if (!known(f)) out.push_back({f, range.borrowed, false});
     }
+    // The top of the range itself, when no standard rate happened to land on
+    // it. A card topping out at 47.5 should still offer 47.5.
+    if (range.max > 0.0 && !known(range.max)) out.push_back({range.max, range.borrowed, false});
   }
 
   std::sort(out.begin(), out.end(),
             [](const FpsOption& a, const FpsOption& b) { return a.fps > b.fps; });
+
+  // Above the numbers, the entry that is not a number. It leads because it is
+  // the right answer for almost everyone: it cannot go stale when the console
+  // switches from 576i50 to 480p60.
+  out.insert(out.begin(), FpsOption{0.0, false, true});
   return out;
+}
+
+double CapsModel::HighestFps(const std::string& subtype, int width, int height) const {
+  const FpsRange range = ReportedRange(entries_, subtype, width, height);
+  double best = range.have ? range.max : 0.0;
+  // A discrete entry can name a rate above its own range when a driver fills
+  // the two fields inconsistently. Taking the larger keeps "highest" honest.
+  for (const CapsEntry& e : entries_) {
+    if (e.subtypeLabel != subtype) continue;
+    if (e.width != width || e.height != height) continue;
+    best = std::max(best, e.defaultFps);
+  }
+  return best;
 }
 
 bool CapsModel::IsAdvertised(const std::string& subtype, int width, int height, double fps) const {
   for (const CapsEntry& e : entries_) {
     if (e.subtypeLabel != subtype) continue;
     if (e.width != width || e.height != height) continue;
+    // "Highest available" names no rate of its own, so it is advertised exactly
+    // when the resolution is -- whatever comes back is the driver's own number.
+    if (fps <= 0.0) return true;
     if (FpsNear(e.defaultFps, fps)) return true;
     if (fps >= e.minFps - 0.05 && fps <= e.maxFps + 0.05) return true;
   }

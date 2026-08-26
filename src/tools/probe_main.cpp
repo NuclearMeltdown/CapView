@@ -465,7 +465,11 @@ void PrintVideoDevices() {
         std::vector<FpsOption> fps = probed.caps.FpsList(sub, r.width, r.height);
         std::printf("   fps:");
         for (const auto& f : fps) {
-          std::printf(" %.2f%s", f.fps, f.forced ? "*" : "");
+          if (f.highest) {
+            std::printf(" [höchste=%.2f]", probed.caps.HighestFps(sub, r.width, r.height));
+          } else {
+            std::printf(" %.2f%s", f.fps, f.forced ? "*" : "");
+          }
         }
         std::printf("\n");
       }

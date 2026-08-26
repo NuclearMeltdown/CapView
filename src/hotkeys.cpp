@@ -9,6 +9,10 @@ Hotkeys::Hotkeys() {
   (*this)[HotkeyAction::Settings].vk = VK_F2;
   (*this)[HotkeyAction::Stats].vk = VK_F1;
   (*this)[HotkeyAction::RestartCapture].vk = VK_F5;
+  // Shift+F5 next to F5, the way a browser puts the hard reload next to the
+  // ordinary one: same key, more thrown away.
+  (*this)[HotkeyAction::ReinitCard].vk = VK_F5;
+  (*this)[HotkeyAction::ReinitCard].shift = true;
   (*this)[HotkeyAction::Record].vk = VK_F9;
   (*this)[HotkeyAction::Screenshot].vk = VK_F10;
   (*this)[HotkeyAction::Mute].vk = 'M';
@@ -29,6 +33,7 @@ const char* HotkeyActionName(HotkeyAction action) {
     case HotkeyAction::Settings: return T("Einstellungen", "Settings");
     case HotkeyAction::Stats: return T("Statistik", "Statistics");
     case HotkeyAction::RestartCapture: return T("Aufnahme neu starten", "Restart capture");
+    case HotkeyAction::ReinitCard: return T("Karte neu einlesen", "Reinitialise card");
     case HotkeyAction::Record: return T("Aufnahme starten/stoppen", "Start/stop recording");
     case HotkeyAction::Screenshot: return T("Screenshot", "Screenshot");
     case HotkeyAction::Mute: return T("Stumm", "Mute");
@@ -44,6 +49,7 @@ const char* HotkeyActionKey(HotkeyAction action) {
     case HotkeyAction::Settings: return "settings";
     case HotkeyAction::Stats: return "stats";
     case HotkeyAction::RestartCapture: return "restartCapture";
+    case HotkeyAction::ReinitCard: return "reinitCard";
     case HotkeyAction::Record: return "record";
     case HotkeyAction::Screenshot: return "screenshot";
     case HotkeyAction::Mute: return "mute";

@@ -107,6 +107,8 @@ void LevelMeter(const char* id, float peak, bool active) {
 }
 
 std::string FpsLabel(double fps) {
+  // Zero is the stored form of "highest available" -- a mode, not a rate.
+  if (fps <= 0.0) return T("Höchste verfügbare", "Highest available");
   std::string s = Format("%.2f", fps);
   if (CurrentLanguage() == Language::German) {
     for (char& c : s) {
@@ -201,14 +203,10 @@ int SettingsWindow::takeVirtualCameraRequest() {
   return request;
 }
 
-void SettingsWindow::SetVirtualCameraState(bool running, bool consumed, int width, int height,
-                                           int fps, bool sourceOutdated) {
+void SettingsWindow::SetVirtualCameraState(bool running,
+                                           const std::vector<VirtualCamera::Consumer>& consumers) {
   vcamRunning_ = running;
-  vcamConsumed_ = consumed;
-  vcamOutdated_ = sourceOutdated;
-  vcamWidth_ = width;
-  vcamHeight_ = height;
-  vcamFps_ = fps;
+  vcamConsumers_ = consumers;
 }
 
 void SettingsWindow::Close() {
@@ -947,6 +945,9 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
           fmt.width = res.front().width;
           fmt.height = res.front().height;
         }
+        // The rate goes back to "highest available" rather than to a number
+        // carried over from a format that may not offer it. That entry leads
+        // the list, so taking the first unforced one lands on it.
         for (const FpsOption& f : caps.caps.FpsList(s, fmt.width, fmt.height)) {
           if (!f.forced) {
             fmt.fps = f.fps;
@@ -988,22 +989,31 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
   ImGui::SetNextItemWidth(-260.0f);
   if (ImGui::BeginCombo(T("Bildrate", "Frame rate"), FpsLabel(fmt.fps).c_str())) {
     bool forcedSection = false;
+    bool namedSection = false;
     for (const FpsOption& f : fpsOptions) {
+      if (!f.highest && !namedSection) {
+        namedSection = true;
+        ImGui::SeparatorText(T("Gemeldet", "Reported"));
+      }
       if (f.forced && !forcedSection) {
         forcedSection = true;
-        ImGui::SeparatorText(T("Nicht gemeldet", "Not reported"));
+        ImGui::SeparatorText(T("Für diese Auflösung nicht gemeldet",
+                               "Not reported for this resolution"));
       }
-      const bool selected = std::fabs(f.fps - fmt.fps) < 0.05;
+      const bool selected =
+          f.highest ? (fmt.fps <= 0.0) : (fmt.fps > 0.0 && std::fabs(f.fps - fmt.fps) < 0.05);
       if (ImGui::Selectable(FpsLabel(f.fps).c_str(), selected) && !selected) fmt.fps = f.fps;
       if (selected) ImGui::SetItemDefaultFocus();
     }
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  HelpMarker(T("\"Nicht gemeldet\": nicht in der Treiberliste, funktioniert meist trotzdem. "
-               "Bei Ablehnung fällt CapView zurück.",
-               "\"Not reported\": absent from the driver list, usually works anyway. "
-               "CapView falls back if rejected."));
+  HelpMarker(T("\"Höchste verfügbare\" nimmt beim Öffnen der Karte deren Maximum und bleibt "
+               "richtig, wenn die Quelle den Modus wechselt. Darunter steht, was der Treiber "
+               "meldet. Etwas anderes erzwingen: unten von Hand eingeben.",
+               "\"Highest available\" takes the card's maximum when it is opened and stays "
+               "right when the source changes mode. Below it is what the driver reports. "
+               "To force something else, enter it by hand below."));
   ImGui::EndDisabled();
 
   ImGui::Checkbox(T("Werte von Hand eingeben", "Enter values manually"), &customFormat_);
@@ -1020,9 +1030,13 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
       customFps_ = fpsInput;
     }
     if (ImGui::Button(T("Anwenden##customfmt", "Apply##customfmt"))) {
-      fmt.width = Clamp(customWidth_, 16, 8192);
-      fmt.height = Clamp(customHeight_, 16, 8192);
-      fmt.fps = Clamp(customFps_, 1.0, 480.0);
+      // The ends are the longest edge D3D11 can address and a rate no display
+      // hardware reaches, not a judgement about what is sensible. This is the
+      // box for forcing something the driver never mentioned; the point of it
+      // is that CapView does not argue.
+      fmt.width = Clamp(customWidth_, 16, 16384);
+      fmt.height = Clamp(customHeight_, 16, 16384);
+      fmt.fps = Clamp(customFps_, 1.0, 1000.0);
     }
     ImGui::Unindent();
   }
@@ -2139,8 +2153,10 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   ImGui::SliderInt(T("Bitrate", "Bitrate"), &rec.bitrateKbps, 1000, 100000, "%d kbit/s");
 
   // Recording faster than the card delivers would only duplicate frames, so the
-  // ceiling is the source rate rather than an arbitrary 240.
-  const int maxFps = sourceFps_ > 1.0 ? (int)std::lround(sourceFps_) : 240;
+  // ceiling is the source rate. The number below it is only reached when the
+  // rate is not known yet, and it is a slider end rather than a limit -- the
+  // unbounded setting is 0, "same as source", which takes whatever arrives.
+  const int maxFps = sourceFps_ > 1.0 ? (int)std::lround(sourceFps_) : 1000;
   if (rec.fps > (double)maxFps) rec.fps = (double)maxFps;
   int fps = (int)std::lround(rec.fps);
   ImGui::SetNextItemWidth(-260.0f);
@@ -2417,20 +2433,12 @@ void SettingsWindow::DrawVirtualCameraBlock() {
   }
   const auto status = (VirtualCamera::Install)vcamStatus_;
 
-  if (status == VirtualCamera::Install::Unsupported) {
-    ImGui::TextWrapped(T("Virtuelle Kameras gibt es erst ab Windows 11. Davor bietet Windows "
-                         "keine Schnittstelle dafür an, die moderne Programme auch sehen.",
-                         "Virtual cameras need Windows 11. Before that Windows offers no "
-                         "interface for one that modern programs can actually see."));
-    return;
-  }
-
-  ImGui::TextWrapped(T("Gibt das Bild als Webcam an andere Programme weiter -- Discord, OBS, "
-                       "Teams, den Browser. Die Kamera heißt \"CapView\" und existiert nur, "
-                       "solange CapView läuft.",
-                       "Offers the picture to other programs as a webcam -- Discord, OBS, "
-                       "Teams, the browser. The camera is called \"CapView\" and exists only "
-                       "while CapView is running."));
+  ImGui::TextWrapped(T("Gibt das Bild als Webcam an andere Programme weiter -- OBS, Discord, "
+                       "Teams, den Browser. Die Kamera heißt \"CapView Virtual Camera\" und "
+                       "existiert nur, solange CapView läuft.",
+                       "Offers the picture to other programs as a webcam -- OBS, Discord, "
+                       "Teams, the browser. The camera is called \"CapView Virtual Camera\" "
+                       "and exists only while CapView is running."));
   ImGui::Spacing();
 
   if (status != VirtualCamera::Install::Installed) {
@@ -2440,16 +2448,17 @@ void SettingsWindow::DrawVirtualCameraBlock() {
                 "CapView verschoben. Einmal neu installieren setzt das gerade.",
                 "The camera source is registered but points nowhere -- CapView was probably "
                 "moved. Installing once more puts that right.")
-            : T("Einmalig zu installieren. Windows lädt die Kameraquelle in einen "
-                "Systemdienst, deshalb muss sie systemweit registriert werden und Windows "
-                "fragt nach Administratorrechten. Das Benutzen danach braucht keine. Die "
-                "Quelle steckt im Programm und wird beim Installieren danebengelegt -- "
-                "es gibt also keine zweite Datei, um die man sich kümmern müsste.",
-                "To be installed once. Windows loads the camera source into a system "
-                "service, so it has to be registered machine-wide and Windows will ask for "
-                "administrator rights. Using it afterwards needs none. The source travels "
-                "inside the program and is laid down when installing -- so there is no "
-                "second file to look after."));
+            : T("Einmalig zu installieren. Die Kameraquelle wird von jedem Programm "
+                "geladen, das die Kamera öffnet, deshalb muss sie systemweit registriert "
+                "werden und Windows fragt nach Administratorrechten. Das Benutzen danach "
+                "braucht keine. Die Quelle steckt im Programm und wird beim Installieren "
+                "danebengelegt -- es gibt also keine zweite Datei, um die man sich kümmern "
+                "müsste.",
+                "To be installed once. The camera source is loaded by every program that "
+                "opens the camera, so it has to be registered machine-wide and Windows will "
+                "ask for administrator rights. Using it afterwards needs none. The source "
+                "travels inside the program and is laid down when installing -- so there is "
+                "no second file to look after."));
     ImGui::Spacing();
     if (ImGui::Button(T("Kamera installieren", "Install camera"), ImVec2(200.0f, 0.0f))) {
       virtualCameraRequest_ = 1;
@@ -2458,41 +2467,58 @@ void SettingsWindow::DrawVirtualCameraBlock() {
     return;
   }
 
-  if (vcamOutdated_) {
-    ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.35f, 1.0f), "%s",
-                       T("Die installierte Kameraquelle stammt aus einer anderen Version "
-                         "als dieses Programm. Unten neu installieren.",
-                         "The installed camera source is from a different build than this "
-                         "program. Install it again below."));
-    ImGui::TextDisabled("%s",
-                        T("Ein Klick genügt: die passende Fassung steckt im Programm. Eine "
-                          "festgehaltene alte Datei wird beiseite gelegt.",
-                          "One click is enough: the matching version is inside the program. "
-                          "A locked old file is moved aside."));
-    ImGui::Spacing();
-  }
-
   bool on = cfg().app.virtualCamera;
   if (ImGui::Checkbox(T("Virtuelle Kamera einschalten", "Turn the virtual camera on"), &on)) {
     cfg().app.virtualCamera = on;
   }
 
   if (vcamRunning_) {
-    if (vcamConsumed_ && vcamWidth_ > 0) {
-      ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
-                         T("Ein Programm liest gerade mit -- %d x %d, %d Bilder/s.",
-                           "Something is reading it -- %d x %d at %d fps."),
-                         vcamWidth_, vcamHeight_, vcamFps_);
-    } else {
+    if (vcamConsumers_.empty()) {
       ImGui::TextDisabled("%s", T("Läuft, bisher liest niemand mit.",
                                   "Running; nothing is reading it yet."));
+    } else {
+      ImGui::Spacing();
+      // Every reader gets its own row, because every reader gets its own
+      // format. OBS taking the source untouched while Discord takes 720p30 is
+      // the normal case, not an oddity, and one line could only lie about it.
+      if (ImGui::BeginTable("vcamconsumers", 3,
+                            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn(T("Programm", "Program"), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(T("Format", "Format"), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(T("Status", "State"), ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+        for (const VirtualCamera::Consumer& c : vcamConsumers_) {
+          ImGui::TableNextRow();
+          ImGui::TableNextColumn();
+          ImGui::TextUnformatted(c.name.empty() ? "?" : c.name.c_str());
+          if (ImGui::IsItemHovered()) ImGui::SetTooltip("PID %lu", c.pid);
+          ImGui::TableNextColumn();
+          if (c.width > 0 && c.height > 0) {
+            ImGui::Text("%d x %d @ %.4g%s", c.width, c.height, c.fps, c.wide ? " HDR" : "");
+          } else {
+            ImGui::TextDisabled("%s", T("noch offen", "not settled"));
+          }
+          ImGui::TableNextColumn();
+          if (c.streaming) {
+            ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f), "%s",
+                               T("liest mit", "reading"));
+          } else {
+            ImGui::TextDisabled("%s", T("verbunden", "connected"));
+          }
+        }
+        ImGui::EndTable();
+      }
     }
   }
 
   ImGui::Spacing();
-  ImGui::TextDisabled("%s", T("Das Bild wird seitenrichtig eingepasst, schwarze Balken "
-                              "füllen den Rest.",
-                              "The picture keeps its shape; black bars fill the rest."));
+  ImGui::TextDisabled("%s",
+                      T("Das Bild geht so hinaus, wie es hier ankommt -- gleiche Auflösung, "
+                        "gleiche Bildrate. Wer weniger verlangt, bekommt es seitenrichtig "
+                        "eingepasst; schwarze Balken füllen den Rest.",
+                        "The picture goes out as it arrives here -- same resolution, same "
+                        "frame rate. Anything asking for less gets it fitted with its shape "
+                        "kept; black bars fill the rest."));
 
   ImGui::Spacing();
   if (ImGui::Button(T("Kamera deinstallieren", "Uninstall camera"), ImVec2(200.0f, 0.0f))) {

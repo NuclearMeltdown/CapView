@@ -20,6 +20,7 @@ struct ImGuiContext;
 #include "record/ffmpeg_locator.h"
 #include "record/remuxer.h"
 #include "ui/file_dialog.h"
+#include "vcam/virtual_camera.h"
 
 namespace cap {
 
@@ -118,9 +119,11 @@ class SettingsWindow {
   // The virtual camera. 0 = nothing wanted, 1 = install the source, 2 = remove
   // it. Both raise a UAC prompt, so the app does it rather than the UI thread.
   int takeVirtualCameraRequest();
-  // What the app knows and the settings cannot see for themselves.
-  void SetVirtualCameraState(bool running, bool consumed, int width, int height, int fps,
-                             bool sourceOutdated);
+  // What the app knows and the settings cannot see for themselves. One entry
+  // per application reading the camera, each with the format it negotiated for
+  // itself -- which is the shape of the thing now rather than a detail: there
+  // is one filter instance per consumer and they routinely disagree.
+  void SetVirtualCameraState(bool running, const std::vector<VirtualCamera::Consumer>& consumers);
   void SetCarrierPeriod(float samples) { carrierPeriod_ = samples > 1.5f ? samples : 3.045f; }
 
   void SetHdrState(bool displayCapable, bool outputActive, float displayPeak, int sourceTransfer) {
@@ -237,8 +240,7 @@ class SettingsWindow {
   int vcamStatus_ = 0;
   double vcamStatusChecked_ = -10.0;
   bool vcamRunning_ = false;
-  bool vcamConsumed_ = false;
-  bool vcamOutdated_ = false;
+  std::vector<VirtualCamera::Consumer> vcamConsumers_;
   // What the dot crawl slider currently amounts to. Passed in because it
   // depends on the video standard and the captured width, neither of which the
   // settings know.
@@ -254,9 +256,6 @@ class SettingsWindow {
   bool hdrOutputActive_ = false;
   float hdrDisplayPeak_ = 100.0f;
   int hdrSourceTransfer_ = 0;  // 0 SDR, 1 PQ, 2 HLG
-  int vcamWidth_ = 0;
-  int vcamHeight_ = 0;
-  int vcamFps_ = 0;
   double sourceFps_ = 0.0;
   int sourceHeight_ = 0;  // 0 = noch nichts gemessen
   bool sourceInterlaced_ = false;

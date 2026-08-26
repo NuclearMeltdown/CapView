@@ -1,31 +1,36 @@
-// The DLL wrapper around the media source: what COM needs to find it, and what
-// regsvr32 needs to install and remove it.
+// The DLL wrapper around the DirectShow source filter: what COM needs to find
+// it, and what regsvr32 needs to install and remove it.
 //
-// Registration has to go to HKLM, not HKCU. The Frame Server and the Frame
-// Server Monitor are services and load this under their own accounts, so a
-// per-user registration would simply not be visible to them. That is the whole
-// reason installing the camera asks for administrator rights and running it
-// does not.
+// Two registrations, not one. The CLSID keys are what COM uses to turn a class
+// id into this file; the filter mapper entry is what makes the camera appear in
+// the device lists applications actually browse. Either one alone gets you a
+// camera that exists but nobody can find, or a name in a list that fails to
+// open.
+//
+// It goes to HKLM. Not because a service needs to see it any more -- the Media
+// Foundation source this replaces ran in the frame server and that was the
+// reason back then -- but because IFilterMapper2 has no root parameter and
+// writes where it writes. That is what the elevation prompt on installing the
+// camera is for; running it needs nothing.
 
 #include <windows.h>
 
+#include <dshow.h>
 #include <olectl.h>
 #include <strsafe.h>
 
 #include <string>
 
+#include "vcam/vcam_filter.h"
 #include "vcam/vcam_shared.h"
-#include "vcam/vcam_source.h"
 
 namespace {
 
 HMODULE g_module = nullptr;
 
-const wchar_t kFriendlyName[] = L"CapView Virtual Camera Source";
-
-std::wstring KeyPath(const wchar_t* suffix) {
+std::wstring KeyPath(const wchar_t* clsid, const wchar_t* suffix) {
   std::wstring path = L"Software\\Classes\\CLSID\\";
-  path += cap::vcam::kSourceClsidString;
+  path += clsid;
   if (suffix) path += suffix;
   return path;
 }
@@ -42,38 +47,87 @@ LONG WriteValue(HKEY root, const std::wstring& subKey, const wchar_t* name,
   return status;
 }
 
-}  // namespace
-
-// Persuades the frame server to let go of whatever media source it has mapped.
-//
-// This lives here rather than in CapView for one reason: regsvr32 is already
-// running elevated when it calls into this file, and stopping a service needs
-// exactly those rights. CapView has none and cannot get them without asking a
-// second time.
-//
-// It is needed because a service does not reread a DLL it already has open.
-// Naming each build differently stops two of them being mistaken for one
-// another, but the service still has to be made to go and look -- and the only
-// thing that reliably does that is starting it over. It comes back by itself
-// the moment an application next asks for a camera, so there is nothing to
-// start here.
-void StopFrameServer() {
-  SC_HANDLE manager = ::OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
-  if (!manager) return;
-  SC_HANDLE service =
-      ::OpenServiceW(manager, L"FrameServer", SERVICE_STOP | SERVICE_QUERY_STATUS);
-  if (service) {
-    SERVICE_STATUS status = {};
-    ::ControlService(service, SERVICE_CONTROL_STOP, &status);
-    for (int i = 0; i < 40; ++i) {
-      if (!::QueryServiceStatus(service, &status)) break;
-      if (status.dwCurrentState == SERVICE_STOPPED) break;
-      ::Sleep(100);
-    }
-    ::CloseServiceHandle(service);
-  }
-  ::CloseServiceHandle(manager);
+// Removes a class and its InprocServer32. The child goes first: RegDeleteKeyW
+// will not remove a key that still has subkeys, and a half-deleted class points
+// at a file that is about to go away.
+void DeleteClass(const wchar_t* clsid) {
+  ::RegDeleteKeyW(HKEY_LOCAL_MACHINE, KeyPath(clsid, L"\\InprocServer32").c_str());
+  ::RegDeleteKeyW(HKEY_LOCAL_MACHINE, KeyPath(clsid, nullptr).c_str());
 }
+
+// Everything CapView 2.x left in the registry.
+//
+// That version registered a Media Foundation source, which is a different
+// mechanism end to end: a different class id, and a name under the frame
+// server's list of virtual cameras rather than an entry in the DirectShow
+// filter mapper. Neither is touched by installing this one, so both are removed
+// by hand -- otherwise the old camera keeps appearing in device lists, pointing
+// at a DLL that no longer exists, and every application that tries it gets an
+// error instead of a picture.
+void RemoveLegacyRegistration() {
+  DeleteClass(cap::vcam::kLegacySourceClsidString);
+
+  // The frame server's list. Entries are named after the camera, and CapView
+  // 2.x made one called "CapView Virtual Camera".
+  HKEY cameras = nullptr;
+  const wchar_t kVirtualCameras[] =
+      L"SOFTWARE\\Microsoft\\Windows Media Foundation\\Platform\\VirtualCameras";
+  if (::RegOpenKeyExW(HKEY_LOCAL_MACHINE, kVirtualCameras, 0, KEY_READ | KEY_WRITE, &cameras) ==
+      ERROR_SUCCESS) {
+    ::RegDeleteTreeW(cameras, cap::vcam::kFilterName);
+    ::RegCloseKey(cameras);
+  }
+}
+
+// Registers or removes the entry the device enumerator reads.
+HRESULT MapFilter(bool add) {
+  IFilterMapper2* mapper = nullptr;
+  HRESULT hr = ::CoCreateInstance(CLSID_FilterMapper2, nullptr, CLSCTX_INPROC_SERVER,
+                                  IID_IFilterMapper2, (void**)&mapper);
+  if (FAILED(hr)) return hr;
+
+  if (!add) {
+    hr = mapper->UnregisterFilter(&CLSID_VideoInputDeviceCategory, cap::vcam::kFilterName,
+                                  cap::vcam::CLSID_CapViewFilter);
+    mapper->Release();
+    return hr;
+  }
+
+  // The subtype is left open. What the pin actually offers depends on what
+  // CapView has in front of it right now, and pinning a list here would be a
+  // second, staler answer to a question the pin already answers properly.
+  REGPINTYPES types = {};
+  types.clsMajorType = &MEDIATYPE_Video;
+  types.clsMinorType = &MEDIASUBTYPE_NULL;
+
+  REGFILTERPINS pins = {};
+  pins.strName = const_cast<LPWSTR>(L"Capture");
+  pins.bRendered = FALSE;
+  pins.bOutput = TRUE;
+  pins.bZero = FALSE;
+  pins.bMany = FALSE;
+  pins.clsConnectsToFilter = &CLSID_NULL;
+  pins.strConnectsToPin = nullptr;
+  pins.nMediaTypes = 1;
+  pins.lpMediaType = &types;
+
+  REGFILTER2 filter = {};
+  filter.dwVersion = 1;
+  // A capture device is chosen, never auto-connected into. Any merit above
+  // MERIT_DO_NOT_USE would invite the graph builder to wire this camera into
+  // arbitrary graphs on its own, which is how a virtual camera ends up in a
+  // recording nobody asked to put it in.
+  filter.dwMerit = MERIT_DO_NOT_USE;
+  filter.cPins = 1;
+  filter.rgPins = &pins;
+
+  hr = mapper->RegisterFilter(cap::vcam::CLSID_CapViewFilter, cap::vcam::kFilterName, nullptr,
+                              &CLSID_VideoInputDeviceCategory, cap::vcam::kFilterName, &filter);
+  mapper->Release();
+  return hr;
+}
+
+}  // namespace
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
   if (reason == DLL_PROCESS_ATTACH) {
@@ -86,8 +140,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
 STDAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void** out) {
   if (!out) return E_POINTER;
   *out = nullptr;
-  if (clsid != cap::vcam::CLSID_CapViewSource) return CLASS_E_CLASSNOTAVAILABLE;
-  return cap::vcam::CreateSourceClassFactory(riid, out);
+  if (clsid != cap::vcam::CLSID_CapViewFilter) return CLASS_E_CLASSNOTAVAILABLE;
+  return cap::vcam::CreateFilterClassFactory(riid, out);
 }
 
 STDAPI DllCanUnloadNow() { return cap::vcam::LiveObjectCount() == 0 ? S_OK : S_FALSE; }
@@ -96,36 +150,45 @@ STDAPI DllRegisterServer() {
   wchar_t path[MAX_PATH] = {};
   if (::GetModuleFileNameW(g_module, path, MAX_PATH) == 0) return SELFREG_E_CLASS;
 
-  LONG status = WriteValue(HKEY_LOCAL_MACHINE, KeyPath(nullptr), nullptr, kFriendlyName);
+  const wchar_t* clsid = cap::vcam::kFilterClsidString;
+  LONG status = WriteValue(HKEY_LOCAL_MACHINE, KeyPath(clsid, nullptr), nullptr,
+                           cap::vcam::kFilterName);
   if (status == ERROR_SUCCESS) {
-    status = WriteValue(HKEY_LOCAL_MACHINE, KeyPath(L"\\InprocServer32"), nullptr, path);
+    status = WriteValue(HKEY_LOCAL_MACHINE, KeyPath(clsid, L"\\InprocServer32"), nullptr, path);
   }
   if (status == ERROR_SUCCESS) {
-    // "Both" because the frame server may create this from either kind of
-    // apartment, and the object is written to be safe in either.
-    status = WriteValue(HKEY_LOCAL_MACHINE, KeyPath(L"\\InprocServer32"), L"ThreadingModel",
-                        L"Both");
+    // "Both" because a consumer may create this from either kind of apartment
+    // and the filter is written to be safe in either.
+    status = WriteValue(HKEY_LOCAL_MACHINE, KeyPath(clsid, L"\\InprocServer32"),
+                        L"ThreadingModel", L"Both");
   }
   if (status == ERROR_ACCESS_DENIED) return E_ACCESSDENIED;
   if (status != ERROR_SUCCESS) return SELFREG_E_CLASS;
-  StopFrameServer();
+
+  // regsvr32 has already initialised COM for this thread, but the camera is
+  // also installed from CapView's own elevated helper, so this does not assume.
+  const HRESULT initialised = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const HRESULT hr = MapFilter(true);
+  if (SUCCEEDED(hr)) RemoveLegacyRegistration();
+  if (SUCCEEDED(initialised)) ::CoUninitialize();
+
+  if (FAILED(hr)) {
+    DeleteClass(clsid);
+    return hr == E_ACCESSDENIED ? E_ACCESSDENIED : SELFREG_E_CLASS;
+  }
   return S_OK;
 }
 
 STDAPI DllUnregisterServer() {
-  // Delete the child first: RegDeleteKeyW will not remove a key that still has
-  // subkeys, and leaving InprocServer32 behind would leave the class half
-  // registered and pointing at a file that is about to go away.
-  const std::wstring inproc = KeyPath(L"\\InprocServer32");
-  LONG inner = ::RegDeleteKeyW(HKEY_LOCAL_MACHINE, inproc.c_str());
-  LONG outer = ::RegDeleteKeyW(HKEY_LOCAL_MACHINE, KeyPath(nullptr).c_str());
+  const HRESULT initialised = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  const HRESULT hr = MapFilter(false);
+  RemoveLegacyRegistration();
+  if (SUCCEEDED(initialised)) ::CoUninitialize();
 
-  if (inner == ERROR_ACCESS_DENIED || outer == ERROR_ACCESS_DENIED) return E_ACCESSDENIED;
-  // Already gone counts as removed -- uninstalling twice is not a failure.
-  if ((inner == ERROR_SUCCESS || inner == ERROR_FILE_NOT_FOUND) &&
-      (outer == ERROR_SUCCESS || outer == ERROR_FILE_NOT_FOUND)) {
-    StopFrameServer();
-    return S_OK;
-  }
-  return SELFREG_E_CLASS;
+  DeleteClass(cap::vcam::kFilterClsidString);
+
+  // Already gone counts as removed: uninstalling twice is not a failure, and
+  // neither is uninstalling something that a previous attempt half removed.
+  if (hr == E_ACCESSDENIED) return E_ACCESSDENIED;
+  return S_OK;
 }
