@@ -258,8 +258,11 @@ bool App::CreateMainWindow(HINSTANCE instance, int showCmd) {
                                    ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
   if (!wc.hIcon) wc.hIcon = ::LoadIconW(nullptr, IDI_APPLICATION);
   if (!::RegisterClassExW(&wc)) {
-    ::MessageBoxW(nullptr, L"Fensterklasse konnte nicht registriert werden.", L"CapView",
-                  MB_ICONERROR);
+    ::MessageBoxW(nullptr,
+                  ToWide(T("Fensterklasse konnte nicht registriert werden.",
+                           "The window class could not be registered."))
+                      .c_str(),
+                  L"CapView", MB_ICONERROR);
     return false;
   }
 
@@ -273,7 +276,11 @@ bool App::CreateMainWindow(HINSTANCE instance, int showCmd) {
   hwnd_ = ::CreateWindowExW(0, kWindowClass, kWindowTitle, WS_OVERLAPPEDWINDOW, x, y, width,
                             height, nullptr, nullptr, instance, this);
   if (!hwnd_) {
-    ::MessageBoxW(nullptr, L"Fenster konnte nicht erstellt werden.", L"CapView", MB_ICONERROR);
+    ::MessageBoxW(
+        nullptr,
+        ToWide(T("Fenster konnte nicht erstellt werden.", "The window could not be created."))
+            .c_str(),
+        L"CapView", MB_ICONERROR);
     return false;
   }
 
@@ -484,7 +491,7 @@ void App::StartAudio() {
   std::string err;
   if (!audio_.Start(input, p.audio, &err)) {
     CAP_WARN("Ton konnte nicht gestartet werden: %s", err.c_str());
-    Toast("Ton konnte nicht gestartet werden: " + err);
+    Toast(T("Ton konnte nicht gestartet werden: ", "Sound could not be started: ") + err);
   }
   delayLine_.Configure(std::max(0, -p.audio.avOffsetMs));
 }
@@ -563,7 +570,7 @@ double App::IdleFloorMs() const {
 void App::RestartAll(bool userRequested) {
   std::string error;
   if (StartCapture(&error)) {
-    if (userRequested) Toast("Aufnahme neu gestartet");
+    if (userRequested) Toast(T("Aufnahme neu gestartet", "Capture restarted"));
   } else if (userRequested) {
     Toast(error);
   }
@@ -2300,7 +2307,7 @@ void App::Tick() {
     std::string error;
     if (StartCapture(&error)) {
       CAP_LOG("Wieder verbunden nach %d Versuchen", retryCount_);
-      Toast("Wieder verbunden");
+      Toast(T("Wieder verbunden", "Reconnected"));
     } else {
       captureError_ = error;
       // Back off once it is clear this is not a brief hiccup.

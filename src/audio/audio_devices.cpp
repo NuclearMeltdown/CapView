@@ -9,6 +9,8 @@
 
 #include <algorithm>
 
+#include "i18n.h"
+
 namespace cap {
 namespace {
 
@@ -143,7 +145,7 @@ std::vector<AudioDeviceInfo> EnumerateWasapi(bool capture) {
       // Not every driver fills this in; the matcher copes with an empty value.
       info.instanceId = ToUpper(ReadStringProperty(store.Get(), PKEY_Device_InstanceId));
     }
-    if (info.name.empty()) info.name = "Unbenanntes Audiogerät";
+    if (info.name.empty()) info.name = T("Unbenanntes Audiogerät", "Unnamed audio device");
     info.isDefault = !defaultId.empty() && info.id == defaultId;
     devices.push_back(std::move(info));
   }
