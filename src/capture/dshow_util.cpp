@@ -397,7 +397,7 @@ std::vector<VideoDeviceInfo> EnumerateDShowCategory(const GUID& category) {
       ::CoTaskMemFree(display);
     }
 
-    if (info.name.empty()) info.name = "Unbenanntes Gerät";
+    if (info.name.empty()) info.name = T("Unbenanntes Gerät", "Unnamed device");
     if (info.id.empty()) info.id = info.monikerName;
     devices.push_back(std::move(info));
 
@@ -990,21 +990,21 @@ std::string PhysicalConnectorName(long physicalType) {
     case PhysConn_Video_AUX: return "AUX";
     case PhysConn_Video_1394: return "FireWire";
     case PhysConn_Video_USB: return "USB";
-    case PhysConn_Video_VideoDecoder: return "Video-Decoder";
-    case PhysConn_Video_VideoEncoder: return "Video-Encoder";
+    case PhysConn_Video_VideoDecoder: return T("Video-Decoder", "Video decoder");
+    case PhysConn_Video_VideoEncoder: return T("Video-Encoder", "Video encoder");
     case PhysConn_Video_SCART: return "SCART";
-    case PhysConn_Video_Black: return "Schwarz (kein Eingang)";
+    case PhysConn_Video_Black: return T("Schwarz (kein Eingang)", "Black (no input)");
     case PhysConn_Audio_Tuner: return "Audio Tuner";
     case PhysConn_Audio_Line: return "Audio Line-In";
-    case PhysConn_Audio_Mic: return "Mikrofon";
+    case PhysConn_Audio_Mic: return T("Mikrofon", "Microphone");
     case PhysConn_Audio_AESDigital: return "AES/EBU";
     case PhysConn_Audio_SPDIFDigital: return "S/PDIF";
     case PhysConn_Audio_SCSI: return "Audio SCSI";
     case PhysConn_Audio_AUX: return "Audio AUX";
     case PhysConn_Audio_1394: return "Audio FireWire";
     case PhysConn_Audio_USB: return "Audio USB";
-    case PhysConn_Audio_AudioDecoder: return "Audio-Decoder";
-    default: return Format("Eingang Typ %ld", physicalType);
+    case PhysConn_Audio_AudioDecoder: return T("Audio-Decoder", "Audio decoder");
+    default: return Format(T("Eingang Typ %ld", "Input type %ld"), physicalType);
   }
 }
 

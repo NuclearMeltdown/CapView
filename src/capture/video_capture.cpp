@@ -192,23 +192,30 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
     return false;
   };
 
-  if (settings.video.empty()) return fail("Kein Videogerät ausgewählt");
+  if (settings.video.empty())
+    return fail(T("Kein Videogerät ausgewählt", "No video device selected"));
 
   std::string err;
   if (!CreateGraph(&graph_, &builder_, &err)) return fail(err);
 
   captureFilter_ = CreateVideoFilter(settings.video, &capabilities_.device);
   if (!captureFilter_) {
-    return fail("Videogerät '" +
+    return fail(T("Videogerät '", "Video device '") +
                 (settings.video.name.empty() ? settings.video.id : settings.video.name) +
-                "' nicht gefunden. Ist die Capture-Karte angeschlossen?");
+                T("' nicht gefunden. Ist die Capture-Karte angeschlossen?",
+                  "' not found. Is the capture card plugged in?"));
   }
 
   HRESULT hr = graph_->AddFilter(captureFilter_.Get(), L"Capture");
-  if (FAILED(hr)) return fail("Capture-Filter konnte nicht eingefügt werden: " + HrToString(hr));
+  if (FAILED(hr))
+    return fail(T("Capture-Filter konnte nicht eingefügt werden: ",
+                  "The capture filter could not be added: ") +
+                HrToString(hr));
 
   capturePin_ = FindCapturePin(builder_.Get(), captureFilter_.Get());
-  if (!capturePin_) return fail("Das Gerät hat keinen brauchbaren Capture-Pin");
+  if (!capturePin_)
+    return fail(T("Das Gerät hat keinen brauchbaren Capture-Pin",
+                  "The device has no usable capture pin"));
 
   // Before the formats are read, not after: the standard decides how many lines
   // the card will produce, and therefore which formats it advertises at all.
@@ -266,10 +273,15 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
   }
 
   sink_ = FrameSink::Create();
-  if (!sink_) return fail("Sink-Filter konnte nicht erstellt werden");
+  if (!sink_)
+    return fail(T("Sink-Filter konnte nicht erstellt werden",
+                  "The sink filter could not be created"));
 
   hr = graph_->AddFilter(sink_.Get(), L"CapView Sink");
-  if (FAILED(hr)) return fail("Sink-Filter konnte nicht eingefügt werden: " + HrToString(hr));
+  if (FAILED(hr))
+    return fail(T("Sink-Filter konnte nicht eingefügt werden: ",
+                  "The sink filter could not be added: ") +
+                HrToString(hr));
 
   IPin* sinkPin = static_cast<IPin*>(sink_->pin());
 
@@ -332,14 +344,17 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
   }
 
   if (FAILED(hr = graph_.As(&control_))) {
-    return fail("IMediaControl nicht verfügbar: " + HrToString(hr));
+    return fail(T("IMediaControl nicht verfügbar: ", "IMediaControl not available: ") +
+                HrToString(hr));
   }
   graph_.As(&events_);
 
   hr = control_->Run();
   if (FAILED(hr)) {
-    return fail("Der Graph konnte nicht gestartet werden (" + HrToString(hr) +
-                "). Benutzt ein anderes Programm die Karte gerade?");
+    return fail(T("Der Graph konnte nicht gestartet werden (",
+                  "The graph could not be started (") +
+                HrToString(hr) + T("). Benutzt ein anderes Programm die Karte gerade?",
+                                   "). Is another program using the card right now?"));
   }
 
   VideoFormatInfo info = sink_->format();
@@ -385,21 +400,23 @@ bool VideoCapture::PumpEvents(std::string* message) {
         // p2 == 0 means the device went away; == 1 means it came back.
         if (p2 == 0) {
           fatal = true;
-          if (message) *message = "Das Aufnahmegerät wurde entfernt.";
+          if (message)
+            *message = T("Das Aufnahmegerät wurde entfernt.", "The capture device was removed.");
         }
         break;
       case EC_ERRORABORT:
       case EC_ERRORABORTEX:
         fatal = true;
         if (message) {
-          *message = "Der Capture-Graph wurde mit einem Fehler abgebrochen (" +
+          *message = T("Der Capture-Graph wurde mit einem Fehler abgebrochen (",
+                       "The capture graph was aborted with an error (") +
                      HrToString((HRESULT)p1) + ").";
         }
         break;
       case EC_COMPLETE:
       case EC_USERABORT:
         fatal = true;
-        if (message) *message = "Der Stream wurde beendet.";
+        if (message) *message = T("Der Stream wurde beendet.", "The stream ended.");
         break;
       default: break;
     }
@@ -407,7 +424,7 @@ bool VideoCapture::PumpEvents(std::string* message) {
   }
   if (!fatal && sink_ && sink_->ended()) {
     fatal = true;
-    if (message) *message = "Die Karte liefert keine Daten mehr.";
+    if (message) *message = T("Die Karte liefert keine Daten mehr.", "The card stopped sending data.");
   }
   return fatal;
 }

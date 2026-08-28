@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "capture/dshow_util.h"
+#include "i18n.h"
 
 namespace cap {
 namespace {
@@ -500,11 +501,14 @@ bool DShowAudioCapture::Start(const DeviceRef& device, AudioSinkFn sink, std::st
     return false;
   };
 
-  if (!sink) return fail("Kein Ziel für die Audiodaten");
+  if (!sink) return fail(T("Kein Ziel für die Audiodaten", "No destination for the audio data"));
 
   HRESULT hr = ::CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER,
                                   IID_PPV_ARGS(&graph_));
-  if (FAILED(hr)) return fail("Audiograph konnte nicht erstellt werden: " + HrToString(hr));
+  if (FAILED(hr))
+    return fail(T("Audiograph konnte nicht erstellt werden: ",
+                  "The audio graph could not be created: ") +
+                HrToString(hr));
 
   // The device reference points at a DirectShow audio input; look it up by the
   // same rules as a video device.
@@ -516,30 +520,43 @@ bool DShowAudioCapture::Start(const DeviceRef& device, AudioSinkFn sink, std::st
     }
   }
   if (!source) {
-    return fail("Audioeingang '" + (device.name.empty() ? device.id : device.name) +
-                "' wurde nicht gefunden");
+    return fail(T("Audioeingang '", "Audio input '") +
+                (device.name.empty() ? device.id : device.name) +
+                T("' wurde nicht gefunden", "' was not found"));
   }
   sourceFilter_ = source;
 
   hr = graph_->AddFilter(sourceFilter_.Get(), L"Audio Capture");
-  if (FAILED(hr)) return fail("Audiofilter konnte nicht eingefügt werden: " + HrToString(hr));
+  if (FAILED(hr))
+    return fail(T("Audiofilter konnte nicht eingefügt werden: ",
+                  "The audio filter could not be added: ") +
+                HrToString(hr));
 
   ComPtr<IPin> outPin = FindPinByDirection(sourceFilter_.Get(), PINDIR_OUTPUT);
-  if (!outPin) return fail("Der Audioeingang hat keinen Ausgangs-Pin");
+  if (!outPin)
+    return fail(T("Der Audioeingang hat keinen Ausgangs-Pin",
+                  "The audio input has no output pin"));
   ApplyBestAudioFormat(outPin.Get());
 
   auto* sinkFilter = new (std::nothrow) AudioSinkFilter(std::move(sink));
-  if (!sinkFilter) return fail("Audio-Sink konnte nicht erstellt werden");
+  if (!sinkFilter)
+    return fail(T("Audio-Sink konnte nicht erstellt werden",
+                  "The audio sink could not be created"));
   sinkFilter_.Attach(static_cast<IBaseFilter*>(sinkFilter));  // constructed with refcount 1
 
   hr = graph_->AddFilter(sinkFilter_.Get(), L"CapView Audio Sink");
-  if (FAILED(hr)) return fail("Audio-Sink konnte nicht eingefügt werden: " + HrToString(hr));
+  if (FAILED(hr))
+    return fail(T("Audio-Sink konnte nicht eingefügt werden: ",
+                  "The audio sink could not be added: ") +
+                HrToString(hr));
 
   IPin* sinkPin = static_cast<IPin*>(sinkFilter->pin());
   hr = graph_->ConnectDirect(outPin.Get(), sinkPin, nullptr);
   if (FAILED(hr)) hr = graph_->Connect(outPin.Get(), sinkPin);
   if (FAILED(hr)) {
-    return fail("Der Audioeingang liefert kein verwertbares Format (" + HrToString(hr) + ")");
+    return fail(T("Der Audioeingang liefert kein verwertbares Format (",
+                  "The audio input offers no usable format (") +
+                HrToString(hr) + ")");
   }
 
   // Same reasoning as the video graph: without a clock nothing gets scheduled,
@@ -548,10 +565,14 @@ bool DShowAudioCapture::Start(const DeviceRef& device, AudioSinkFn sink, std::st
   if (SUCCEEDED(graph_.As(&mediaFilter))) mediaFilter->SetSyncSource(nullptr);
 
   if (FAILED(hr = graph_.As(&control_))) {
-    return fail("IMediaControl nicht verfügbar: " + HrToString(hr));
+    return fail(T("IMediaControl nicht verfügbar: ", "IMediaControl not available: ") +
+                HrToString(hr));
   }
   hr = control_->Run();
-  if (FAILED(hr)) return fail("Der Audiograph konnte nicht gestartet werden: " + HrToString(hr));
+  if (FAILED(hr))
+    return fail(T("Der Audiograph konnte nicht gestartet werden: ",
+                  "The audio graph could not be started: ") +
+                HrToString(hr));
 
   format_ = sinkFilter->format();
   return true;
