@@ -215,7 +215,8 @@ std::string PhysicalConnectorName(long physicalType);
 //
 // Values are the AnalogVideo_* bitmask from the DirectShow headers.
 
-// Everything a card might offer, in a fixed order, so an index can be stored.
+// Everything a card might offer, common variants first. The config stores the
+// bitmask value rather than the index, so the order is a presentation choice.
 int VideoStandardCount();
 long VideoStandardValue(int index);
 const char* VideoStandardName(int index);
@@ -224,11 +225,41 @@ int VideoStandardIndexOf(long value);
 // 525 or 625, or 0 when unknown. Derived from the standard, not measured.
 int VideoStandardLines(long value);
 
+// The same list again, collapsed to the eight that actually look different on a
+// baseband input. The letters behind PAL and SECAM describe the RF channel, not
+// the picture, so offering them separately asks the user a question that has no
+// answer. Groups are for the pickers only: what gets stored is still a concrete
+// AnalogVideo_* value.
+int VideoStandardGroupCount();
+const char* VideoStandardGroupName(int index);
+// One sentence on line count, subcarrier and where it is used. Follows the
+// selected language.
+const char* VideoStandardGroupHint(int index);
+// The group a concrete value belongs to, or -1 for 0, -1 and anything unknown.
+int VideoStandardGroupOf(long value);
+// The value to apply for a group, chosen from what the card offers. Zero when
+// the card offers none of the group's members.
+long VideoStandardGroupPick(int index, long available);
+
 // What the card says it can do, as a bitmask. Zero when it has no analogue
 // decoder -- a pure HDMI input does not.
 long AvailableVideoStandards(IBaseFilter* filter);
 long CurrentVideoStandard(IBaseFilter* filter);
 bool SetVideoStandard(IBaseFilter* filter, long standard);
+
+// Put the card's own brightness, contrast, saturation, hue and the rest back to
+// the neutral values the driver itself declares, and leave them there.
+//
+// Not a nicety. Whatever those are set to is applied before the frame reaches
+// us, so a decoder sitting on a lifted black level or a contrast boost means
+// there is no clean picture anywhere in the program to go back to -- and the
+// damage is the kind that cannot be undone afterwards, because it has already
+// clipped. CapView does these four in the shader instead, where the original is
+// still there underneath and a recording can be made without them.
+//
+// Silent when the card has no such controls, which a pure HDMI input usually
+// does not. Returns how many properties were actually moved.
+int NeutraliseProcAmp(IBaseFilter* filter);
 
 // Whether the decoder has locked onto a signal: 1 yes, 0 no, -1 when the card
 // cannot say. This one is genuinely measured -- the decoder loses the lock when
@@ -240,11 +271,50 @@ int VideoStandardLocked(IBaseFilter* filter);
 // The order automatic selection tries, filtered to what `available` offers.
 // One variant per line count and colour system: the PAL letters differ only in
 // sound carrier, which is nothing to do with the picture.
-std::vector<long> AutoStandardCandidates(long available);
+//
+// `region` sagt, welche Normen ueberhaupt in der Naehe des Nutzers vorkommen;
+// sie stehen vorn. Das ist die einzige Auskunft, die die Reihenfolge innerhalb
+// einer Zeilenzahl begruenden kann -- der Lock kann PAL 60 und NTSC M nicht
+// trennen, also entscheidet die Reihenfolge, und ohne diese Angabe entschiede
+// sie fuer alle gleich. Dahinter stehen trotzdem alle uebrigen: eine falsch
+// eingestellte Region soll langsamer sein, nicht aussichtslos.
+//
+// `lastGood` ist die Norm, die zuletzt eingerastet war, oder 0. Ist sie
+// gesetzt, stehen ihr Partner (dieselbe Farbe, andere Bildfrequenz) und dann
+// sie selbst vor allem anderen -- die zwei Faelle, in denen ein Lock verloren
+// geht, ohne dass jemand das Kabel gezogen hat. `preferred`, wenn angegeben,
+// bekommt die Anzahl dieser vorgezogenen Eintraege; der Aufrufer gibt ihnen
+// mehr Zeit als einem gewoehnlichen Kandidaten.
+std::vector<long> AutoStandardCandidates(long available, VideoRegion region,
+                                         long lastGood = 0, int* preferred = nullptr);
+
+// Alle Normen derselben Zeilenzahl, `standard` selbst zuerst, dahinter die
+// uebrigen in der Reihenfolge der Region. Leer, wenn die Zeilenzahl unbekannt
+// ist.
+//
+// Genau hier sitzt die Luecke, die der Lock offenlaesst: er meldet nur einen
+// waagerechten Lock, und 625/50 zerfaellt in PAL B, SECAM B und PAL N, 525/60
+// in PAL 60, NTSC M, NTSC M (Japan), PAL M und NTSC 4.43. Waagerecht sehen die
+// jeweils gleich aus. Rastet die Karte ein, ist damit die Zeilenzahl geklaert
+// und sonst nichts -- und was von den uebrigen stimmt, sagt allein das Bild.
+//
+// Hier stand vorher `VideoStandardColourAlternative`, die *eine* Gegennorm mit
+// dem anderen Farbtraeger. Das war zu wenig, und zwar aus einem Grund, der in
+// der Tabelle steht: `VideoStandardSubcarrierSamples` kennt nur zwei Werte,
+// 3,58 und 4,43 MHz, und SECAM faellt darin mit PAL B zusammen. Wer von SECAM B
+// aus nach dem anderen Traeger fragte, bekam PAL N -- die richtige Antwort
+// PAL B wurde uebersprungen, weil sie denselben Traeger hat. Die falsche
+// SECAM-Dekodierung eines PAL-Signals war so nicht zu reparieren.
+std::vector<long> VideoStandardColourCandidates(long standard, long available,
+                                                VideoRegion region);
 
 // Label for a stored setting: 0 "leave alone", -1 "automatic", otherwise the
-// standard's name. Follows the selected language for the first two.
+// standard's name. Follows the selected language for the first two. This is the
+// exact one, for logs and for the readout that says what the card really took.
 std::string VideoStandardSettingName(long setting);
+// The same, but naming the group instead of the variant. This is what the
+// pickers show, so that what they echo back is something they also offered.
+std::string VideoStandardPickerName(long setting);
 
 // How many samples of a 720 pixel line one cycle of the colour subcarrier
 // occupies. This is what the dot crawl filter needs to know: the crawl *is* the

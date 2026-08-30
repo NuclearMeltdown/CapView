@@ -58,6 +58,16 @@ void DrawStatusCard(const std::string& title, const std::string& detail, bool sp
 // Fades out over its lifetime; `age` and `duration` are in seconds.
 void DrawToast(const std::string& text, double age, double duration);
 
+// Standard search, shown on the picture itself while it runs.
+//
+// It used to live only in the settings dialog, and that is the one place where
+// nobody is looking: the search runs right after the source is switched, when
+// the eye is on the picture and the dialog is closed. What is visible there
+// without this is a picture that changes standard every few seconds for no
+// stated reason. Top centre, clear of the statistics panel (top left), the
+// recording dot (the corners) and the toasts (bottom centre).
+void DrawSearchIndicator(const std::string& text);
+
 // Volume readout with a bar, parked in the chosen corner. Shown for a moment
 // after every change so the level is visible without opening anything.
 void DrawVolumeOsd(float volume, bool muted, OsdCorner corner, double age, double duration);

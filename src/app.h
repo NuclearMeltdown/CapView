@@ -94,6 +94,11 @@ class App {
   // Wie RestartAll, verwirft aber vorher, was fuer den vorherigen Eingang
   // gemessen wurde -- Videonorm und Format. Siehe die Umsetzung.
   void ReinitialiseCard();
+  // Die gemerkte Aufloesung loslassen, wenn die neue Norm eine andere
+  // Zeilenzahl hat -- 720x576 und 720x480 lassen sich nicht gegeneinander
+  // austauschen. Wahr, wenn wirklich etwas verworfen wurde. Siehe die
+  // Umsetzung; vor jedem Graphenbau nach einem Normwechsel zu rufen.
+  bool ReleaseStandardBoundFormat(int newLines);
 
   void OpenSettings(const std::string& reason);
 
@@ -161,6 +166,7 @@ class App {
   // it up for free.
   void StartSignalWatch();
   void StopSignalWatch();
+  void UpdateSignalWatch();
 
   // Draws the settings into their own window when that is switched on.
   // Returns true when it took care of them, so the in-picture panel is skipped.
@@ -345,10 +351,39 @@ class App {
   int standardCandidate_ = -1;      // index into the candidate list, -1 = not searching
   int64_t standardLostQpc_ = 0;     // when the lock was first missing
   int64_t standardNextTryQpc_ = 0;  // not before this
+  // Wann die aktuell probierte Norm gesetzt wurde. Nur zum Messen: daraus wird
+  // im Log die Zeit, die der Decoder zum Einfangen gebraucht hat, und die ist
+  // der einzige Weg, die Wartefrist zu begruenden statt zu raten.
+  int64_t standardSetQpc_ = 0;
   int standardSweeps_ = 0;          // completed passes through the list without a lock
+  long standardLastGood_ = 0;       // die zuletzt eingerastete Norm, 0 = noch keine
+  // Die Zeilenzahl, unter der das laufende Format ausgesucht wurde. Aus der
+  // Karte beim Graphenbau, nicht aus dem Profil -- dort kann "automatisch"
+  // stehen. Siehe ReleaseStandardBoundFormat.
+  int appliedStandardLines_ = 0;
+
+  // Farbpruefung. Siehe App::VerifyStandardColour.
+  long colourCheckedStandard_ = 0;  // fuer diese Norm ist die Sache entschieden
+  // Der Rundgang durch die Normen derselben Zeilenzahl. Leer, solange keiner
+  // laeuft; sonst die Kandidaten, der Zeiger auf den gerade gemessenen und die
+  // beiden Messreihen dazu (-1 = keine Messung zustande gekommen).
+  std::vector<long> colourCandidates_;
+  std::vector<float> colourEnergies_;
+  std::vector<float> colourDarks_;
+  int colourIndex_ = 0;
+  int64_t colourSettleUntilQpc_ = 0;    // bis dahin gehoeren die Bilder noch der alten
+  int64_t colourStartedQpc_ = 0;        // seit wann auf eine Messung gewartet wird
+  int64_t colourRetryQpc_ = 0;          // vor diesem Zeitpunkt nicht noch einmal
+  int colourAttempts_ = 0;              // unentschiedene Anlaeufe fuer diese Norm
   std::thread signalWatch_;
   std::atomic<bool> signalWatchRun_{false};
   std::atomic<int> signalLocked_{-1};
+  // Die Norm, die der Wachthread im selben Atemzug wie den Lock von der Karte
+  // gelesen hat. Sie steht hier und nicht in `capabilities_`, weil sie sich
+  // waehrend der Suche mehrmals aendert, ohne dass der Graph neu gebaut wird --
+  // und weil die beiden Angaben, aus derselben Abfrage genommen, gar nicht mehr
+  // auseinanderlaufen koennen.
+  std::atomic<long> signalStandard_{0};
   // Counts up every time the watcher stores a reading. The automatic search
   // notes it down when it changes the standard and then ignores anything older:
   // otherwise it judges the new standard by a measurement taken before it was

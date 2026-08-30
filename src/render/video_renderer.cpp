@@ -1028,6 +1028,293 @@ void VideoRenderer::ResetAnalysis() {
   signalFramesSeen_ = 0;
   signalSinceTick_ = 0;
   signalPrev_.clear();
+
+  ResetChroma();
+}
+
+bool VideoRenderer::ChromaLayout(ChromaPlanes* planes) const {
+  // Alle YUV-Formate, die hier ankommen koennen. Hier stand einmal nur das
+  // gepackte 4:2:2 mit der Begruendung, ein Analogdecoder liefere die planaren
+  // nicht -- das stimmt fuer diese Karte, ist aber die falsche Frage: die
+  // Farbmessung haengt am Format des Bildes, nicht an der Herkunft, und eine
+  // Karte, die NV12 liefert, hat sonst gar keine.
+  //
+  // MJPG fehlt nicht: es kommt hier nie an. Der Graph haengt dafuer einen
+  // Decoder davor (siehe video_capture.cpp), und was hier eintrifft, ist
+  // dessen Ausgabe -- also eines der Formate unten.
+  const size_t w = (size_t)source_.width;
+  const size_t h = (size_t)source_.height;
+  if (w < 2 || h < 2) return false;
+
+  ChromaPlanes r;
+  switch (kind_) {
+    case FormatKind::Yuy2:
+    case FormatKind::Yvyu:
+    case FormatKind::Uyvy: {
+      // Gepacktes 4:2:2. Vier Bytes decken zwei Bildpunkte ab, die beiden
+      // Farbdifferenzen liegen zwischen deren Luma. Nur waagerecht
+      // unterabgetastet -- jede Bildzeile hat ihre eigene Farbe.
+      if (kind_ == FormatKind::Yuy2) {         // Y U Y V
+        r.yOff = 0; r.uOff = 1; r.vOff = 3;
+      } else if (kind_ == FormatKind::Yvyu) {  // Y V Y U
+        r.yOff = 0; r.uOff = 3; r.vOff = 1;
+      } else {                                 // U Y V Y
+        r.yOff = 1; r.uOff = 0; r.vOff = 2;
+      }
+      r.yPitch = r.uPitch = r.vPitch = w * 2;
+      r.yStep = 2;
+      r.uStep = r.vStep = 4;
+      r.cxShift = 1;
+      r.cyShift = 0;
+      r.needed = w * 2 * h;
+      break;
+    }
+    case FormatKind::Nv12: {
+      // Halbplanar 4:2:0: erst die ganze Lumaebene, dahinter eine Ebene mit U
+      // und V im Wechsel und halber Hoehe. Eine Farbzeile gilt fuer zwei
+      // Bildzeilen, daher cyShift.
+      r.yOff = 0;
+      r.yPitch = w;
+      r.yStep = 1;
+      r.uOff = w * h;
+      r.vOff = w * h + 1;
+      r.uPitch = r.vPitch = w;
+      r.uStep = r.vStep = 2;
+      r.cxShift = r.cyShift = 1;
+      r.needed = w * h + w * (h / 2);
+      break;
+    }
+    case FormatKind::Planar420: {
+      // Voll planar 4:2:0: drei getrennte Ebenen, die beiden Farbebenen je ein
+      // Viertel so gross. YV12 legt V vor U, I420 und IYUV umgekehrt -- das
+      // steht schon in planarUvSwapped_.
+      const size_t cw = w / 2, ch = h / 2;
+      const size_t first = w * h;
+      const size_t second = first + cw * ch;
+      r.yOff = 0;
+      r.yPitch = w;
+      r.yStep = 1;
+      r.uOff = planarUvSwapped_ ? second : first;
+      r.vOff = planarUvSwapped_ ? first : second;
+      r.uPitch = r.vPitch = cw;
+      r.uStep = r.vStep = 1;
+      r.cxShift = r.cyShift = 1;
+      r.needed = second + cw * ch;
+      break;
+    }
+    case FormatKind::P010: {
+      // Wie NV12, nur sechzehn Bit je Probe. Gelesen wird das obere Byte, und
+      // das ist hier kein Verlust an der richtigen Stelle: P010 parkt die zehn
+      // Bits oben, das obere Byte sind also genau deren obere acht, und die
+      // Farbmitte bleibt die Farbmitte (512 -> 0x8000 -> 128). Gemessen wird
+      // ohnehin ein Blockmittel, die fehlenden zwei Bit fallen darin nicht auf.
+      r.yOff = 1;
+      r.yPitch = w * 2;
+      r.yStep = 2;
+      r.uOff = w * h * 2 + 1;
+      r.vOff = w * h * 2 + 3;
+      r.uPitch = r.vPitch = w * 2;
+      r.uStep = r.vStep = 4;
+      r.cxShift = r.cyShift = 1;
+      r.needed = w * h * 2 + w * (h / 2) * 2;
+      break;
+    }
+    default:
+      // RGB laeuft ueber einen eigenen Weg, siehe AnalyzeChroma -- und das ist
+      // an dieser Karte nicht der Ausnahmefall, sondern der Regelfall.
+      return false;
+  }
+  *planes = r;
+  return true;
+}
+
+// Jedes achte Bild. Die Messung laeuft dauerhaft mit, also muss sie billig
+// sein; gebraucht wird kein genauer Wert, sondern die Unterscheidung "farbig"
+// von "grau".
+static const int kChromaSampleEvery = 8;
+
+// Gemessen wird nicht die Farbe eines Pixels, sondern die eines Bloecks --
+// und das ist der ganze Trick.
+//
+// Der naheliegende Weg, den mittleren Abstand von der Farbmitte zu nehmen,
+// funktioniert naemlich nicht, und zwar genau in dem Fall, fuer den die Messung
+// da ist. Steht der falsche Farbtraeger, ist das Bild grau mit Regenbogengries
+// darin, und dieser Gries ist pixelweise kraeftig bunt: am 29.08. an einem
+// GameCube gemessen, der als NTSC M (Japan) statt PAL 60 dekodiert wurde, kam
+// pixelweise 0,132 heraus -- ein Wert, den ein farbiges Bild kaum uebertrifft.
+// Der Gries ist die Schwebung zwischen 4,43 und 3,58 MHz, und die ist bunt.
+//
+// Was ihn von Farbe trennt, ist nicht die Staerke, sondern der Zusammenhalt.
+// Ein rotes Kart bleibt rot, wenn man darueber mittelt; die Schwebung
+// durchlaeuft in sechzehn Bildpunkten einen ganzen Farbkreis und mittelt sich
+// zu grau weg. Sechzehn, weil die Schwebung von 0,85 MHz bei 13,5 MHz Abtastung
+// eine Periode von knapp sechzehn Proben hat -- ein schmalerer Block erwischte
+// nur einen Teil davon und liesse einen Rest stehen.
+static const int kChromaBlockW = 16;
+static const int kChromaBlockH = 4;
+// Nicht jeder Block, sondern ein Raster daraus. Fuer 720x480 sind das gut
+// fuenfhundert Bloecke, und mehr sagt ueber "ist da Farbe" nichts Neues.
+static const int kChromaBlockStepX = 32;
+static const int kChromaBlockStepY = 16;
+
+// Ab wann ein Block als dunkel zaehlt, auf der Luma-Skala 0..255.
+//
+// Schwarz liegt im begrenzten Bereich bei 16, und darueber muss Platz bleiben:
+// gemeint sind nicht nur die schwarzen Bloecke, sondern das dunkle Ende
+// ueberhaupt -- Schatten, Nachthimmel, der Rahmen um ein Menue. Mitten darf
+// nicht hinein, denn dort *gehoert* Farbe hin.
+static const int kChromaDarkLuma = 56;
+
+// Wie viele dunkle Bloecke es mindestens braucht, damit ihr Mittel etwas
+// aussagt. Ein Bild, das durchweg hell ist, hat schlicht kein dunkles Ende,
+// und dann muss die Pruefung schweigen statt zu raten.
+static const uint64_t kChromaDarkBlocksWanted = 200;
+// Genug, dass ein einzelnes graues Titelbild die Auskunft nicht traegt. Bei
+// jedem achten Bild und 30 Bildern je Sekunde sind das knapp drei Sekunden.
+static const int kChromaFramesWanted = 10;
+
+void VideoRenderer::AnalyzeChroma(const FrameView& frame) {
+  if (++chromaFramesSeen_ % kChromaSampleEvery != 0) return;
+
+  const int w = source_.width;
+  const int h = source_.height;
+  if (w < 16 || h < 16) return;
+
+  // Die oberen und unteren Zehntel bleiben aussen vor. Dort steht bei einer
+  // analogen Quelle der Rand: Austastluecke, Kopfrauschen eines Bandes, der
+  // schwarze Balken eines Letterbox-Bildes. Alles davon ist farblos, und alles
+  // davon wuerde den Mittelwert genau in die Richtung ziehen, in die er nicht
+  // gezogen werden darf -- gemessen wird ja, ob das Bild grau ist.
+  const int y0 = h / 10;
+  const int y1 = h - h / 10;
+  uint64_t sum = 0;
+  uint64_t count = 0;
+
+  uint64_t darkSum = 0;
+  uint64_t darkCount = 0;
+
+  ChromaPlanes cp;
+  size_t step = 4;
+  if (ChromaLayout(&cp)) {
+    if (cp.needed > frame.size) return;
+    for (int by = y0; by + kChromaBlockH <= y1; by += kChromaBlockStepY) {
+      for (int bx = 0; bx + kChromaBlockW <= w; bx += kChromaBlockStepX) {
+        int su = 0, sv = 0, sy = 0, n = 0;
+        for (int y = by; y < by + kChromaBlockH; y += 2) {
+          const uint8_t* yRow = frame.data + cp.yOff + (size_t)y * cp.yPitch;
+          const size_t cy = (size_t)(y >> cp.cyShift);
+          const uint8_t* uRow = frame.data + cp.uOff + cy * cp.uPitch;
+          const uint8_t* vRow = frame.data + cp.vOff + cy * cp.vPitch;
+          for (int x = bx; x < bx + kChromaBlockW; x += 2) {
+            const size_t cx = (size_t)(x >> cp.cxShift);
+            su += (int)uRow[cx * cp.uStep];
+            sv += (int)vRow[cx * cp.vStep];
+            // Beide Bildpunkte, die sich diese Farbprobe teilen. Die
+            // Helligkeit soll ueber demselben Stueck Bild stehen wie die
+            // Farbe, sonst entscheidet an einer Kante der Zufall.
+            sy += ((int)yRow[(size_t)x * cp.yStep] + (int)yRow[(size_t)(x + 1) * cp.yStep]) / 2;
+            ++n;
+          }
+        }
+        if (n == 0) continue;
+        const int cu = su / n - 128;
+        const int cv = sv / n - 128;
+        // Auf 128 bezogen, den groessten Abstand von der Farbmitte, den ein
+        // Byte hergibt; beide Differenzen zusammen landen damit auf derselben
+        // Skala 0..255 wie der RGB-Weg unten.
+        const uint64_t block = (uint64_t)((cu < 0 ? -cu : cu) + (cv < 0 ? -cv : cv));
+        sum += block;
+        count += 1;
+        if (sy / n < kChromaDarkLuma) {
+          darkSum += block;
+          darkCount += 1;
+        }
+      }
+    }
+  } else if (kind_ == FormatKind::Rgb) {
+    // Die Karte rechnet dann selbst nach RGB um, und danach heisst farblos
+    // schlicht R = G = B. Das ist sogar der sauberere Weg: greift der
+    // Farbkiller im Decoder, kommen die drei Kanaele exakt gleich heraus, und
+    // der Abstand zwischen groesstem und kleinstem ist nicht ungefaehr null,
+    // sondern null.
+    //
+    // Dieser Zweig ist nicht der Sonderfall. Die SA7160 liefert am
+    // Composite-Eingang RGB32, und ohne ihn haette die Farbpruefung genau dort
+    // nie eine Messung zustande gebracht, wo sie gebraucht wird.
+    step = source_.subtypeLabel == "RGB24" ? 3 : 4;
+    const size_t pitch = (size_t)w * step;
+    if (pitch * (size_t)h > frame.size) return;
+    for (int by = y0; by + kChromaBlockH <= y1; by += kChromaBlockStepY) {
+      for (int bx = 0; bx + kChromaBlockW <= w; bx += kChromaBlockStepX) {
+        int sr = 0, sg = 0, sb = 0, n = 0;
+        for (int y = by; y < by + kChromaBlockH; y += 2) {
+          const uint8_t* row = frame.data + (size_t)y * pitch;
+          for (int x = bx; x < bx + kChromaBlockW; x += 2) {
+            const uint8_t* px = row + (size_t)x * step;
+            sb += px[0];
+            sg += px[1];
+            sr += px[2];
+            ++n;
+          }
+        }
+        if (n == 0) continue;
+        const int r = sr / n, g = sg / n, b = sb / n;
+        const int hi = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        const int lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
+        sum += (uint64_t)(hi - lo);
+        count += 1;
+        // Luma zurueckgerechnet statt einfach die Helligkeit genommen. Die
+        // Karte hat mit BT.601 nach RGB gerechnet, dieselben Gewichte holen Y
+        // exakt wieder heraus -- und zwar das Y des Signals, nicht das des
+        // Farbfehlers. Rotes Schwarz (R 60, G 10, B 10) ergibt so 25 und
+        // bleibt dunkel; als Mittelwert der drei Kanaele waeren es 27, als
+        // groesster Kanal schon 60, und damit fiele der Block genau dann aus
+        // der Messung, wenn er gebraucht wird.
+        const int luma = (299 * r + 587 * g + 114 * b) / 1000;
+        if (luma < kChromaDarkLuma) {
+          darkSum += (uint64_t)(hi - lo);
+          darkCount += 1;
+        }
+      }
+    }
+  } else {
+    return;
+  }
+  if (count == 0) return;
+
+  chromaSum_ += sum;
+  chromaCount_ += count;
+  chromaDarkSum_ += darkSum;
+  chromaDarkCount_ += darkCount;
+  ++chromaFramesAnalysed_;
+}
+
+float VideoRenderer::chromaEnergy() const {
+  if (chromaFramesAnalysed_ < kChromaFramesWanted || chromaCount_ == 0) return -1.0f;
+  // Beide Wege liefern einen Wert im Bereich 0..255 je Block, siehe
+  // AnalyzeChroma. Die Zahlen sind nicht auf denselben Farbton geeicht -- der
+  // RGB-Weg faellt bei gleichem Bild etwas hoeher aus --, aber darum geht es
+  // nicht: unterschieden wird farbig von grau, und grau ist auf beiden Wegen
+  // dieselbe Null.
+  return (float)((double)chromaSum_ / (double)chromaCount_ / 255.0);
+}
+
+float VideoRenderer::darkChromaEnergy() const {
+  if (chromaFramesAnalysed_ < kChromaFramesWanted) return -1.0f;
+  // Eigene Untergrenze: die Gesamtmessung hat immer Bloecke, diese hier nicht
+  // unbedingt. Ein helles Standbild ohne dunkle Stelle darf keine Aussage
+  // erfinden, es muss "weiss nicht" sagen duerfen.
+  if (chromaDarkCount_ < kChromaDarkBlocksWanted) return -1.0f;
+  return (float)((double)chromaDarkSum_ / (double)chromaDarkCount_ / 255.0);
+}
+
+void VideoRenderer::ResetChroma() {
+  chromaFramesSeen_ = 0;
+  chromaFramesAnalysed_ = 0;
+  chromaSum_ = 0;
+  chromaCount_ = 0;
+  chromaDarkSum_ = 0;
+  chromaDarkCount_ = 0;
 }
 
 bool VideoRenderer::LumaLayout(size_t* offset, size_t* step) const {
@@ -1037,6 +1324,11 @@ bool VideoRenderer::LumaLayout(size_t* offset, size_t* step) const {
     case FormatKind::Uyvy: *offset = 1; *step = 2; return true;
     case FormatKind::Nv12:
     case FormatKind::Planar420: *offset = 0; *step = 1; return true;
+    // Das obere Byte der sechzehn. P010 parkt die zehn Bits oben, das obere
+    // Byte sind also deren obere acht -- dieselbe Skala wie bei allen anderen,
+    // weshalb auch die 16/235-Grenzen der Pegelerkennung weiter stimmen. Ohne
+    // diese Zeile war P010 das einzige Format, in dem gar nichts gemessen wird.
+    case FormatKind::P010: *offset = 1; *step = 2; return true;
     case FormatKind::Rgb:
       // Green stands in for luma. It carries most of it, and it costs one read
       // instead of three.
@@ -1384,6 +1676,7 @@ bool VideoRenderer::UploadFrame(const FrameView& frame) {
   AnalyzeInterlace(frame);
   AnalyzeContentBounds(frame);
   AnalyzeSignal(frame);
+  AnalyzeChroma(frame);
 
   // Before anything is written over: the frame currently in the planes moves
   // into the ring. One copy, whatever the depth. Skipped entirely unless

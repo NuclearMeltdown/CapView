@@ -55,6 +55,38 @@ enum class ColorMatrix { Auto, BT601, BT709 };
 enum class SignalKind { Auto, Analog, Digital };
 const int kSignalKindCount = 3;
 
+// Wo der Nutzer wohnt -- und damit, welche Videonormen ueberhaupt in Frage
+// kommen.
+//
+// Das ist keine Bequemlichkeit, sondern die einzige verlaessliche Auskunft, die
+// es an dieser Stelle gibt. Der Lock der Karte misst nur die Zeilenfrequenz;
+// PAL 60 und NTSC M sind beide 525/60 und unterscheiden sich allein im
+// Farbtraeger, den er gar nicht anfasst. Wer zuerst gefragt wird, gewinnt also,
+// und ohne diese Angabe entscheidet die Reihenfolge einer festen Liste, in
+// welchem Land jemand zu wohnen hat.
+//
+// Deshalb steht das hier und nicht im Profil: ein Profil beschreibt ein Geraet,
+// das hier beschreibt den Menschen davor. Wer eine importierte Konsole hat,
+// stellt deren Norm im Profil von Hand ein -- dafuer ist die Auswahl da.
+// `None` ist keine Region, sondern die Weigerung, eine zu nennen: dann wird
+// nichts vorgezogen und die Suche laeuft in der Reihenfolge, in der die Normen
+// auf der Welt vorkommen (siehe kCommon und kRare in dshow_util.cpp). Das ist
+// die richtige Antwort fuer jemanden, an dessen Karte gemischtes Material
+// haengt -- eine Sammlung importierter Konsolen hat keinen Wohnort --, und es
+// ist zugleich die Einstellung, mit der sich das Verhalten *ohne* Region
+// nachstellen laesst, wenn die Region einmal verdaechtigt wird.
+enum class VideoRegion {
+  Auto,          // aus der Laendereinstellung von Windows
+  None,          // keine Bevorzugung, nur die allgemeine Reihenfolge
+  PalEurope,     // PAL B/G/I/D, 625/50 mit 4,43 MHz
+  NtscAmerica,   // NTSC M, 525/60 mit 3,58 MHz
+  NtscJapan,     // dasselbe mit anderem Schwarzpegel
+  Secam,         // SECAM, 625/50
+  PalBrazil,     // PAL M, 525/60 mit 3,58 MHz
+  PalArgentina,  // PAL N, 625/50 mit 3,58 MHz
+};
+const int kVideoRegionCount = 8;
+
 enum class AudioSource { Embedded, Manual, None };
 
 enum class OsdCorner { TopLeft, TopRight, BottomLeft, BottomRight };
@@ -150,6 +182,11 @@ const char* DeinterlaceName(int index);
 const char* FieldOrderName(int index);
 const char* RotationName(int index);
 const char* SignalKindName(int index);
+const char* VideoRegionName(int index);
+// Was `VideoRegion::Auto` bedeutet: die Region aus der Laendereinstellung von
+// Windows, oder PalEurope, wenn sich daraus nichts machen laesst. Gibt nie
+// wieder Auto zurueck.
+VideoRegion ResolveVideoRegion(VideoRegion region);
 const char* AspectName(int index);
 const char* ColorRangeName(int index);
 const char* ColorMatrixName(int index);
@@ -370,6 +407,11 @@ struct Profile {
 struct AppSettings {
   Theme theme = Theme::Dark;
   Language language = Language::English;
+  // In welchem Land der Nutzer wohnt. Bestimmt, in welcher Reihenfolge die
+  // automatische Normerkennung die analogen Videonormen durchprobiert -- siehe
+  // VideoRegion und AutoStandardCandidates. Steht hier und nicht im Profil,
+  // weil man nicht je Geraet in einem anderen Land wohnt.
+  VideoRegion videoRegion = VideoRegion::Auto;
   // Drives the whole palette: buttons, sliders, borders and the shade of the
   // window background are all derived from this one colour. 0xRRGGBB.
   unsigned accentColor = 0x8B5CF6;  // violet
