@@ -5,8 +5,8 @@
 IDI_CAPVIEW ICON "capview.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 3, 0, 0, 0
-PRODUCTVERSION 3, 0, 0, 0
+FILEVERSION 3, 1, 0, 0
+PRODUCTVERSION 3, 1, 0, 0
 FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
 FILEFLAGS 0
 FILEOS VOS_NT_WINDOWS32
@@ -18,11 +18,11 @@ BEGIN
         BLOCK "040704b0"
         BEGIN
             VALUE "FileDescription", "CapView"
-            VALUE "FileVersion", "3.0.0.0"
+            VALUE "FileVersion", "3.1.0.0"
             VALUE "InternalName", "CapView"
             VALUE "OriginalFilename", "CapView.exe"
             VALUE "ProductName", "CapView"
-            VALUE "ProductVersion", "3.0.0.0"
+            VALUE "ProductVersion", "3.1.0.0"
         END
     END
     BLOCK "VarFileInfo"
