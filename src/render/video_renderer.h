@@ -119,11 +119,18 @@ class VideoRenderer {
   bool sourceInterlaced() const { return source_.interlaced; }
 
   // Effective size after cropping.
-  // Size of the picture this produces: cropped, line doubled and rotated. This
-  // is what the recorder and the screenshots get, so it is the size that counts
-  // everywhere outside the shader.
-  int outputWidth() const { return outputWidth_; }
-  int outputHeight() const { return outputHeight_; }
+  // Size of the picture this hands out: cropped, line doubled, rotated, and --
+  // unless that was switched off -- resampled to square pixels. This is what
+  // the recorder, the screenshots and the virtual camera get, so it is the size
+  // that counts everywhere outside the shader.
+  //
+  // Not the same as the intermediate's size any more. The window has always
+  // been able to show non-square pixels for free, by drawing into a rectangle
+  // of the right shape; a file has nowhere to put that, so on the way out the
+  // picture is resampled instead. On HDMI the two sizes are equal and nothing
+  // happens.
+  int outputWidth() const { return deliveryWidth_ > 0 ? deliveryWidth_ : outputWidth_; }
+  int outputHeight() const { return deliveryHeight_ > 0 ? deliveryHeight_ : outputHeight_; }
 
   // ---- readback for recording ----
   //
@@ -315,8 +322,40 @@ class VideoRenderer {
   bool CreateStates(std::string* error);
   bool CreateSourceTextures(std::string* error);
   bool EnsureIntermediate(int width, int height);
-  bool EnsureSdrCopy(int width, int height);
-  void RenderSdrCopy();
+  // The pass between the intermediate and everything that is not the window.
+  // "half" picks the linear light target, which is what the PQ recording and
+  // the wide screenshot read; the other one is an ordinary eight bit picture.
+  bool EnsureDelivery(int width, int height, bool half);
+  bool RenderDelivery(bool half);
+  void ComputeDeliverySize(const ImageSettings& image);
+  // Shape the picture should be seen in, as width over height. Cropping,
+  // rotation and the media type's own aspect all land here; the window and the
+  // delivery pass then each get there their own way.
+  double TargetAspect(const ImageSettings& image) const;
+  bool deliveryResize() const {
+    return deliveryWidth_ != outputWidth_ || deliveryHeight_ != outputHeight_;
+  }
+  // Whether any knob is off its centre. Four comparisons rather than a flag, so
+  // that a user who zeroes the sliders again gets the pass switched back off
+  // instead of paying for it until the next restart.
+  bool procAmpActive() const {
+    return deliveryBrightness_ != 0.0f || deliveryContrast_ != 1.0f ||
+           deliverySaturation_ != 1.0f || deliveryHue_ != 0.0f;
+  }
+  // Whether the pass has to run at all. Three separate reasons, and any one of
+  // them is enough: the picture has to change shape, it has to come down out of
+  // HDR, or the user wants the picture controls in the file as well. The third
+  // is why this is not simply deliveryResize().
+  bool deliveryNeeded() const {
+    return deliveryResize() || hdrTransfer_ != Transfer::Sdr ||
+           (deliveryProcAmp_ && procAmpActive());
+  }
+  // The same question for the linear light target, where the HDR reason drops
+  // out: that path is not coming down to SDR, it stays wide, so a source that
+  // is already the right shape with the knobs centred has nothing to do.
+  bool deliveryHalfNeeded() const {
+    return deliveryResize() || (deliveryProcAmp_ && procAmpActive());
+  }
   void ReleaseSourceTextures();
 
   bool UploadPacked(const FrameView& frame);
@@ -395,10 +434,21 @@ class VideoRenderer {
   VideoFormatInfo source_;
   bool tenBitContainer_ = false;
   DXGI_FORMAT intermediateFormat_ = DXGI_FORMAT_R8G8B8A8_UNORM;
-  ComPtr<ID3D11Texture2D> sdrCopy_;
-  ComPtr<ID3D11RenderTargetView> sdrCopyRtv_;
-  int sdrCopyWidth_ = 0;
-  int sdrCopyHeight_ = 0;
+  // Where the picture goes when it is leaving for something that is not the
+  // window and cannot be handed the intermediate as it stands -- because it
+  // needs square pixels, or because it is eight bit and the intermediate is
+  // not.
+  ComPtr<ID3D11Texture2D> delivery_;
+  ComPtr<ID3D11RenderTargetView> deliveryRtv_;
+  int deliveryTexWidth_ = 0;
+  int deliveryTexHeight_ = 0;
+  // The same, still in linear light: a resample that must not be tone mapped
+  // on the way, because a PQ recording and a wide screenshot come off it.
+  ComPtr<ID3D11Texture2D> deliveryHalf_;
+  ComPtr<ID3D11RenderTargetView> deliveryHalfRtv_;
+  ComPtr<ID3D11ShaderResourceView> deliveryHalfSrv_;
+  int deliveryHalfTexWidth_ = 0;
+  int deliveryHalfTexHeight_ = 0;
   Transfer hdrTransfer_ = Transfer::Sdr;
   bool hdrWideGamut_ = false;
   bool hdrOutput_ = false;
@@ -413,6 +463,26 @@ class VideoRenderer {
   int croppedHeight_ = 0;
   int outputWidth_ = 0;
   int outputHeight_ = 0;
+  // Size the picture leaves at, and the filter that gets it there. Worked out
+  // once per frame in Draw, because that is the only place holding the settings;
+  // the readback and the stills run outside it and read these.
+  int deliveryWidth_ = 0;
+  int deliveryHeight_ = 0;
+  int deliveryFilter_ = 0;
+  // The picture controls, cached from the same place and for the same reason.
+  // Kept in radians already, because the shader wants them that way and Draw is
+  // the one place that runs per frame anyway.
+  float deliveryBrightness_ = 0.0f;
+  float deliveryContrast_ = 1.0f;
+  float deliverySaturation_ = 1.0f;
+  float deliveryHue_ = 0.0f;
+  bool deliveryProcAmp_ = false;  // the user wants them past the window too
+  // Last sizes written to the log, so the line appears when it changes rather
+  // than sixty times a second.
+  int loggedDeliveryW_ = -1;
+  int loggedDeliveryH_ = -1;
+  int loggedOutW_ = -1;
+  int loggedOutH_ = -1;
   RECT videoRect_ = {};
   int topInset_ = 0;
   double carrierSamples_ = 3.0449;  // PAL, the common case here

@@ -79,6 +79,15 @@ struct ScaleCB {
   float maskStrength;  // 0..1
   int32_t nativeWidth; // pixels the source really has across, 0 = leave alone
   float linePitch;     // output rows per real picture line; 0 disables scanlines
+
+  int32_t passthrough; // resample only: no display effects, no transfer, no clamp
+  float brightness;    // -1..1 added, or stops of exposure in linear light
+  float contrast;      // 0..2 around a pivot; 1 neutral
+  float saturation;    // 0..2; 1 neutral
+
+  float hue;           // radians
+  int32_t procAmp;     // apply the four above in this pass
+  float pad[2];
 };
 static_assert(sizeof(ScaleCB) % 16 == 0, "constant buffer must be 16 byte aligned");
 
@@ -644,8 +653,21 @@ bool VideoRenderer::GrabStillHalf(std::vector<uint16_t>* out, int* width, int* h
   if (!intermediate_ || !ctx_ || hdrTransfer_ == Transfer::Sdr) return false;
   if (intermediateFormat_ != DXGI_FORMAT_R16G16B16A16_FLOAT) return false;
 
+  // Square pixels here too, and in linear light so nothing about the range is
+  // decided on the way. A still is allowed the extra pass; it happens when
+  // somebody presses a key, not sixty times a second.
+  ID3D11Texture2D* from = intermediate_.Get();
+  int fromW = intermediateWidth_;
+  int fromH = intermediateHeight_;
+  if (deliveryHalfNeeded()) {
+    if (!RenderDelivery(true)) return false;
+    from = deliveryHalf_.Get();
+    fromW = deliveryWidth_;
+    fromH = deliveryHeight_;
+  }
+
   D3D11_TEXTURE2D_DESC td = {};
-  intermediate_->GetDesc(&td);
+  from->GetDesc(&td);
   td.Usage = D3D11_USAGE_STAGING;
   td.BindFlags = 0;
   td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
@@ -655,17 +677,17 @@ bool VideoRenderer::GrabStillHalf(std::vector<uint16_t>* out, int* width, int* h
   if (FAILED(CAP_HR(ctx_->device()->CreateTexture2D(&td, nullptr, &staging)))) return false;
 
   ID3D11DeviceContext* dc = ctx_->context();
-  dc->CopyResource(staging.Get(), intermediate_.Get());
+  dc->CopyResource(staging.Get(), from);
 
   D3D11_MAPPED_SUBRESOURCE mapped = {};
   if (FAILED(CAP_HR(dc->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped)))) return false;
 
-  out->resize((size_t)mapped.RowPitch / sizeof(uint16_t) * intermediateHeight_);
+  out->resize((size_t)mapped.RowPitch / sizeof(uint16_t) * fromH);
   memcpy(out->data(), mapped.pData, out->size() * sizeof(uint16_t));
   dc->Unmap(staging.Get(), 0);
 
-  *width = intermediateWidth_;
-  *height = intermediateHeight_;
+  *width = fromW;
+  *height = fromH;
   *strideBytes = (int)mapped.RowPitch;
   return true;
 }
@@ -712,8 +734,18 @@ bool VideoRenderer::EnsureHdrRecord(int width, int height) {
 
 void VideoRenderer::QueueHdrReadback() {
   if (!hdrWideActive() || !intermediate_ || !ctx_) return;
-  if (!EnsureHdrRecord(intermediateWidth_, intermediateHeight_)) return;
+  if (!EnsureHdrRecord(deliveryWidth_, deliveryHeight_)) return;
   if (hdrReadWrite_ == hdrReadMapped_) return;
+
+  // Resample first, in linear light, and only then lay on the PQ curve. The
+  // other way round would interpolate between PQ coded values, which are not
+  // proportional to anything, and every soft edge would end up at the wrong
+  // brightness.
+  ID3D11ShaderResourceView* wideSource = intermediateSrv_.Get();
+  if (deliveryHalfNeeded()) {
+    if (!RenderDelivery(true)) return;
+    wideSource = deliveryHalfSrv_.Get();
+  }
 
   ID3D11DeviceContext* dc = ctx_->context();
 
@@ -737,7 +769,7 @@ void VideoRenderer::QueueHdrReadback() {
   dc->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   dc->VSSetShader(vs_.Get(), nullptr, 0);
   dc->PSSetShader(psHdrRecord_.Get(), nullptr, 0);
-  ID3D11ShaderResourceView* srv[] = {intermediateSrv_.Get()};
+  ID3D11ShaderResourceView* srv[] = {wideSource};
   dc->PSSetShaderResources(0, 1, srv);
   ID3D11SamplerState* samp[] = {sampPoint_.Get()};
   dc->PSSetSamplers(0, 1, samp);
@@ -778,50 +810,78 @@ void VideoRenderer::ReleaseHdrReadback() {
   hdrReadMapped_ = -1;
 }
 
-bool VideoRenderer::EnsureSdrCopy(int width, int height) {
+bool VideoRenderer::EnsureDelivery(int width, int height, bool half) {
   width = std::max(1, width);
   height = std::max(1, height);
-  if (sdrCopy_ && sdrCopyWidth_ == width && sdrCopyHeight_ == height) return true;
 
-  sdrCopyRtv_.Reset();
-  sdrCopy_.Reset();
+  ComPtr<ID3D11Texture2D>& tex = half ? deliveryHalf_ : delivery_;
+  ComPtr<ID3D11RenderTargetView>& rtv = half ? deliveryHalfRtv_ : deliveryRtv_;
+  int& haveW = half ? deliveryHalfTexWidth_ : deliveryTexWidth_;
+  int& haveH = half ? deliveryHalfTexHeight_ : deliveryTexHeight_;
+  if (tex && haveW == width && haveH == height) return true;
+
+  if (half) deliveryHalfSrv_.Reset();
+  rtv.Reset();
+  tex.Reset();
+  haveW = 0;
+  haveH = 0;
 
   D3D11_TEXTURE2D_DESC td = {};
   td.Width = (UINT)width;
   td.Height = (UINT)height;
   td.MipLevels = 1;
   td.ArraySize = 1;
-  td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  td.Format = half ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
   td.SampleDesc.Count = 1;
   td.Usage = D3D11_USAGE_DEFAULT;
+  // The half float one is read again afterwards, by the shader that lays the PQ
+  // curve over it. The eight bit one is only ever copied out.
   td.BindFlags = D3D11_BIND_RENDER_TARGET;
+  if (half) td.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
 
   ID3D11Device* dev = ctx_->device();
-  if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &sdrCopy_)))) return false;
-  if (FAILED(CAP_HR(dev->CreateRenderTargetView(sdrCopy_.Get(), nullptr, &sdrCopyRtv_)))) {
+  if (FAILED(CAP_HR(dev->CreateTexture2D(&td, nullptr, &tex)))) return false;
+  if (FAILED(CAP_HR(dev->CreateRenderTargetView(tex.Get(), nullptr, &rtv)))) {
+    tex.Reset();
     return false;
   }
-  sdrCopyWidth_ = width;
-  sdrCopyHeight_ = height;
+  if (half &&
+      FAILED(CAP_HR(dev->CreateShaderResourceView(tex.Get(), nullptr, &deliveryHalfSrv_)))) {
+    rtv.Reset();
+    tex.Reset();
+    return false;
+  }
+  haveW = width;
+  haveH = height;
   return true;
 }
 
-void VideoRenderer::RenderSdrCopy() {
-  if (hdrTransfer_ == Transfer::Sdr) return;
-  if (!EnsureSdrCopy(intermediateWidth_, intermediateHeight_)) return;
+// The picture on its way out of the window's world. Two jobs in one pass,
+// either of which can be the only reason it runs: resample to square pixels,
+// and -- when the source is HDR and the destination is not -- lay the tone
+// curve over it. It reuses the scaling shader because that shader already
+// knows both, and there is no reason to keep a second copy of either.
+bool VideoRenderer::RenderDelivery(bool half) {
+  if (!intermediate_ || !ctx_) return false;
+  if (deliveryWidth_ <= 0 || deliveryHeight_ <= 0) return false;
+  if (!EnsureDelivery(deliveryWidth_, deliveryHeight_, half)) return false;
 
   ID3D11DeviceContext* dc = ctx_->context();
 
   ScaleCB sc = {};
   sc.srcSize[0] = (float)intermediateWidth_;
   sc.srcSize[1] = (float)intermediateHeight_;
-  sc.dstSize[0] = (float)intermediateWidth_;
-  sc.dstSize[1] = (float)intermediateHeight_;
-  sc.filter = 0;      // one to one, so nearest is exact
-  // All three belong to the display rather than to the picture. Scanlines and
-  // the mask especially: they are drawn for a particular size on a particular
-  // screen, and baking them into a file at source resolution would put the gaps
-  // in the wrong places for whoever plays it back.
+  sc.dstSize[0] = (float)deliveryWidth_;
+  sc.dstSize[1] = (float)deliveryHeight_;
+  // At one to one nearest is exact, and it is the only filter that cannot
+  // invent anything. When the size does change, the picture gets the same
+  // filter the window would have used -- that is the whole point of the
+  // setting reaching this far.
+  sc.filter = deliveryResize() ? (int32_t)deliveryFilter_ : 0;
+  // All of these belong to the display rather than to the picture. Scanlines
+  // and the mask especially: they are drawn for a particular size on a
+  // particular screen, and baking them into a file would put the gaps in the
+  // wrong places for whoever plays it back.
   sc.sharpen = 0.0f;
   sc.scanlines = 0.0f;
   sc.mask = 0;
@@ -833,6 +893,27 @@ void VideoRenderer::RenderSdrCopy() {
   sc.paperWhite = paperWhiteNits_;
   sc.sourcePeak = sourcePeakNits_;
   sc.displayPeak = 100.0f;  // an ordinary screen, by definition of what this is for
+  // The half float target is the one case here that is not headed for an
+  // ordinary screen: it carries linear light on to either a PQ recording or a
+  // wide screenshot, and tone mapping it down to a hundred nits first would
+  // throw away precisely what those exist for. It only ever resamples.
+  //
+  // The eight bit target skips the same block whenever there is no HDR to map:
+  // an SDR picture is already display encoded, the transfer step would be a
+  // pair of inverse curves cancelling out, and the clamp is the only thing left
+  // in there -- which is exactly what the resample must not need.
+  sc.passthrough = (half || hdrTransfer_ == Transfer::Sdr) ? 1 : 0;
+
+  // The one setting in this pass the user chose rather than the pass deciding
+  // for itself. Off, the picture leaves exactly as the window's own scaling
+  // found it -- which is the default, because a recording that clipped its
+  // highlights cannot be graded back and a clean one can always be graded
+  // forward.
+  sc.procAmp = (deliveryProcAmp_ && procAmpActive()) ? 1 : 0;
+  sc.brightness = deliveryBrightness_;
+  sc.contrast = deliveryContrast_;
+  sc.saturation = deliverySaturation_;
+  sc.hue = deliveryHue_;
 
   D3D11_MAPPED_SUBRESOURCE mapped = {};
   if (SUCCEEDED(dc->Map(cbScale_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -840,12 +921,12 @@ void VideoRenderer::RenderSdrCopy() {
     dc->Unmap(cbScale_.Get(), 0);
   }
 
-  ID3D11RenderTargetView* rtv[] = {sdrCopyRtv_.Get()};
+  ID3D11RenderTargetView* rtv[] = {half ? deliveryHalfRtv_.Get() : deliveryRtv_.Get()};
   dc->OMSetRenderTargets(1, rtv, nullptr);
 
   D3D11_VIEWPORT vp = {};
-  vp.Width = (float)intermediateWidth_;
-  vp.Height = (float)intermediateHeight_;
+  vp.Width = (float)deliveryWidth_;
+  vp.Height = (float)deliveryHeight_;
   vp.MaxDepth = 1.0f;
   dc->RSSetViewports(1, &vp);
 
@@ -864,6 +945,7 @@ void VideoRenderer::RenderSdrCopy() {
 
   ID3D11ShaderResourceView* none[] = {nullptr};
   dc->PSSetShaderResources(0, 1, none);
+  return true;
 }
 
 // ----------------------------------------------------------------- uploading
@@ -1975,12 +2057,12 @@ void VideoRenderer::QueueReadback() {
   if (!readbackEnabled_ || !intermediate_ || !ctx_) return;
 
   // Resolution changed (crop, or the card switched mode): start over.
-  if (readbackWidth_ != intermediateWidth_ || readbackHeight_ != intermediateHeight_) {
+  if (readbackWidth_ != deliveryWidth_ || readbackHeight_ != deliveryHeight_) {
     ReleaseReadbackResources();
 
     D3D11_TEXTURE2D_DESC td = {};
-    td.Width = (UINT)intermediateWidth_;
-    td.Height = (UINT)intermediateHeight_;
+    td.Width = (UINT)deliveryWidth_;
+    td.Height = (UINT)deliveryHeight_;
     td.MipLevels = 1;
     td.ArraySize = 1;
     td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -1996,18 +2078,20 @@ void VideoRenderer::QueueReadback() {
         return;
       }
     }
-    readbackWidth_ = intermediateWidth_;
-    readbackHeight_ = intermediateHeight_;
+    readbackWidth_ = deliveryWidth_;
+    readbackHeight_ = deliveryHeight_;
   }
 
   // The slot about to be written must not be the one the caller still holds.
   if (readbackWrite_ == readbackMapped_) return;
 
+  // Straight off the intermediate whenever it already is what the recorder
+  // wants: same size, eight bits, nothing to do. Otherwise through the delivery
+  // pass, which handles either reason or both at once.
   ID3D11Texture2D* from = intermediate_.Get();
-  if (hdrTransfer_ != Transfer::Sdr) {
-    RenderSdrCopy();
-    if (!sdrCopy_) return;
-    from = sdrCopy_.Get();
+  if (deliveryNeeded()) {
+    if (!RenderDelivery(false)) return;
+    from = delivery_.Get();
   }
   ctx_->context()->CopyResource(readbackTex_[readbackWrite_].Get(), from);
   QueueHdrReadback();
@@ -2050,13 +2134,24 @@ bool VideoRenderer::GrabStill(std::vector<uint8_t>* pixels, int* width, int* hei
     return false;
   }
 
+  // Same two reasons as the recording path: square pixels, and eight bits out
+  // of a picture that may not be eight bits. Either one sends the still through
+  // the delivery pass first. The HDR case is not new here so much as newly
+  // correct -- copying a half float intermediate straight into an eight bit
+  // staging texture never was a legal copy.
+  const bool viaDelivery = deliveryNeeded();
+  if (viaDelivery && !RenderDelivery(false)) return false;
+  ID3D11Texture2D* from = viaDelivery ? delivery_.Get() : intermediate_.Get();
+  const int fromW = viaDelivery ? deliveryWidth_ : intermediateWidth_;
+  const int fromH = viaDelivery ? deliveryHeight_ : intermediateHeight_;
+
   // A staging texture of its own rather than a slot from the readback ring: the
   // ring only exists while recording, and its slots are deliberately two frames
   // stale. A screenshot should be the picture that was on screen when the key
   // went down.
   D3D11_TEXTURE2D_DESC td = {};
-  td.Width = (UINT)intermediateWidth_;
-  td.Height = (UINT)intermediateHeight_;
+  td.Width = (UINT)fromW;
+  td.Height = (UINT)fromH;
   td.MipLevels = 1;
   td.ArraySize = 1;
   td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -2067,7 +2162,7 @@ bool VideoRenderer::GrabStill(std::vector<uint8_t>* pixels, int* width, int* hei
   ComPtr<ID3D11Texture2D> staging;
   if (FAILED(CAP_HR(ctx_->device()->CreateTexture2D(&td, nullptr, &staging)))) return false;
 
-  ctx_->context()->CopyResource(staging.Get(), intermediate_.Get());
+  ctx_->context()->CopyResource(staging.Get(), from);
 
   // Blocking map: D3D11_MAP_READ without DO_NOT_WAIT flushes and waits.
   D3D11_MAPPED_SUBRESOURCE mapped = {};
@@ -2075,10 +2170,10 @@ bool VideoRenderer::GrabStill(std::vector<uint8_t>* pixels, int* width, int* hei
     return false;
   }
 
-  const size_t rowBytes = (size_t)intermediateWidth_ * 4;
-  pixels->resize(rowBytes * (size_t)intermediateHeight_);
+  const size_t rowBytes = (size_t)fromW * 4;
+  pixels->resize(rowBytes * (size_t)fromH);
   const uint8_t* src = (const uint8_t*)mapped.pData;
-  for (int y = 0; y < intermediateHeight_; ++y) {
+  for (int y = 0; y < fromH; ++y) {
     uint8_t* dst = pixels->data() + (size_t)y * rowBytes;
     memcpy(dst, src + (size_t)y * (size_t)mapped.RowPitch, rowBytes);
     // The pipeline carries an alpha channel it has no use for. Whatever ended up
@@ -2087,9 +2182,143 @@ bool VideoRenderer::GrabStill(std::vector<uint8_t>* pixels, int* width, int* hei
   }
   ctx_->context()->Unmap(staging.Get(), 0);
 
-  if (width) *width = intermediateWidth_;
-  if (height) *height = intermediateHeight_;
+  if (width) *width = fromW;
+  if (height) *height = fromH;
   return true;
+}
+
+// Shape the picture wants to be seen in, width over height.
+//
+// Built from the *cropped* size rather than the output size, and that is the
+// whole subtlety of it. Line doubling puts two rows where the signal has one
+// and a quarter turn moves the lines onto the other axis; neither changes what
+// shape the picture is, so neither may be allowed to leak in through a pixel
+// count. Only cropping and the turn itself really move the answer.
+double VideoRenderer::TargetAspect(const ImageSettings& image) const {
+  const int w = croppedWidth_;
+  const int h = croppedHeight_;
+  if (w <= 0 || h <= 0) return 0.0;
+
+  const bool turned =
+      image.rotation == Rotation::Cw90 || image.rotation == Rotation::Ccw90;
+
+  // A forced aspect describes the signal, not the window: turn a 4:3 console on
+  // its side and what you should be looking at is 3:4.
+  if (image.aspect == AspectMode::Force16x9) return turned ? 9.0 / 16.0 : 16.0 / 9.0;
+  if (image.aspect == AspectMode::Force4x3) return turned ? 3.0 / 4.0 : 4.0 / 3.0;
+
+  double dar = (double)w / (double)h;
+  if (source_.aspectX > 0 && source_.aspectY > 0 && source_.width > 0 &&
+      source_.height > 0) {
+    // The media type's aspect describes the whole uncropped frame, so it has to
+    // be reduced to a per-pixel figure first -- how much wider a source pixel
+    // is than it is tall. Otherwise a cropped picture comes out stretched.
+    const double par = ((double)source_.aspectX / (double)source_.aspectY) *
+                       ((double)source_.height / (double)source_.width);
+    if (par > 0.0) dar = (double)w * par / (double)h;
+  } else if (analogueSource_ && source_.width > 0 && source_.height > 0) {
+    // Kein Seitenverhaeltnis im Medientyp -- aber am Analogeingang muss auch
+    // keines drinstehen, weil es dort nur eines gibt.
+    //
+    // Eine analoge Bildzeile ist keine Reihe von Bildpunkten, sondern ein
+    // durchgehender Spannungsverlauf; die 720 Werte sind die Abtastung, die
+    // sich die Karte ausgesucht hat, und ueber die Form des Bildes sagen sie
+    // nichts. Die steht in der Norm, und die kennt genau eine: 4:3. Wer das
+    // ignoriert, zeigt PAL mit 720/576 = 1,25 an und nimmt es auch so auf --
+    // sechs Prozent zu schmal, ein Kreis wird zum stehenden Ei.
+    //
+    // Die SA7160 tut genau das: sie beschreibt Composite mit
+    // `FORMAT_VideoInfo`, und die Struktur hat gar kein Feld dafuer. Am
+    // 30.08. um 13:55 Uhr kam der Screenshot deshalb als 720x576 heraus statt
+    // als 768x576, und im Log stand keine einzige Zeile ueber quadratische
+    // Pixel -- der Durchgang lief, verglich 1,25 mit 1,25 und hatte nichts zu
+    // tun.
+    //
+    // Anamorphes PAL waere die Ausnahme, aber die steht im WSS-Signal der
+    // Austastluecke, und das reicht keine Karte hier durch. Dafuer gibt es die
+    // feste 16:9-Einstellung.
+    const double par = (4.0 / 3.0) * ((double)source_.height / (double)source_.width);
+    if (par > 0.0) dar = (double)w * par / (double)h;
+  }
+  if (dar <= 0.0) dar = (double)w / (double)h;
+  return turned ? 1.0 / dar : dar;
+}
+
+// What size the picture leaves at, for everything that is not the window.
+//
+// The window can show non-square pixels for nothing: it simply draws into a
+// rectangle of the right shape. A file cannot -- it is a grid, and a grid has
+// no room for "these pixels are not square" -- so anything leaving gets
+// resampled instead, and PAL's 720x576 goes out as 768x576.
+//
+// On HDMI the pixels are already square, the two sizes come out equal, and the
+// whole pass is skipped.
+void VideoRenderer::ComputeDeliverySize(const ImageSettings& image) {
+  deliveryWidth_ = outputWidth_;
+  deliveryHeight_ = outputHeight_;
+  deliveryFilter_ = (int)image.filter;
+
+  deliveryBrightness_ = Clamp(image.brightness, -1.0f, 1.0f);
+  deliveryContrast_ = Clamp(image.contrast, 0.0f, 2.0f);
+  deliverySaturation_ = Clamp(image.saturation, 0.0f, 2.0f);
+  deliveryHue_ = Clamp(image.hue, -180.0f, 180.0f) * 3.14159265358979f / 180.0f;
+  deliveryProcAmp_ = image.procAmpToOutput;
+
+  if (!image.squarePixelOutput) return;
+  if (outputWidth_ <= 0 || outputHeight_ <= 0) return;
+  // Neither of these has a shape to resample to. Stretch takes whatever the
+  // window happens to be, which is not a property of the picture at all, and
+  // Integer is a promise about pixels that resampling is precisely the way to
+  // break.
+  if (image.aspect == AspectMode::Stretch || image.aspect == AspectMode::Integer) return;
+
+  const double target = TargetAspect(image);
+  if (target <= 0.0) return;
+
+  // Not an exact comparison. A card is free to describe 16:9 as 157:88 or to
+  // round its own numbers, and a fifth of a percent of aspect is a pixel or two
+  // -- nowhere near worth resampling a whole frame for, and the resample would
+  // do more damage than the error it corrects.
+  const double have = (double)outputWidth_ / (double)outputHeight_;
+  if (std::abs(have - target) <= target * 0.005) return;
+
+  // Grow the short axis rather than shrink the long one. Resampling can only
+  // lose detail, so a pass that has to happen anyway should at least not throw
+  // samples away on top of it.
+  int w = outputWidth_;
+  int h = outputHeight_;
+  if (target > have) {
+    w = (int)std::lround((double)outputHeight_ * target);
+  } else {
+    h = (int)std::lround((double)outputWidth_ / target);
+  }
+  // Every encoder in reach subsamples chroma, and half of an odd number is not
+  // a number of pixels. x264 refuses outright; others round quietly and shear.
+  // To the *nearest* even, not upwards: rounding 721 up to 722 would invent a
+  // resampling pass out of a rounding error.
+  w = 2 * (int)std::lround((double)w / 2.0);
+  h = 2 * (int)std::lround((double)h / 2.0);
+  w = std::max(2, std::min(w, 8192));
+  h = std::max(2, std::min(h, 8192));
+
+  // After that rounding there may be no difference left at all.
+  if (w == outputWidth_ && h == outputHeight_) return;
+
+  deliveryWidth_ = w;
+  deliveryHeight_ = h;
+
+  // Worth a line in the log: it changes the size of every recording, every
+  // screenshot and the camera, and it is the first thing to look at when one of
+  // them comes out an unexpected shape.
+  if (w != loggedDeliveryW_ || h != loggedDeliveryH_ || outputWidth_ != loggedOutW_ ||
+      outputHeight_ != loggedOutH_) {
+    loggedDeliveryW_ = w;
+    loggedDeliveryH_ = h;
+    loggedOutW_ = outputWidth_;
+    loggedOutH_ = outputHeight_;
+    CAP_LOG("Ausgabe auf quadratische Pixel: %dx%d -> %dx%d (Seitenverhältnis %.4f)",
+            outputWidth_, outputHeight_, w, h, target);
+  }
 }
 
 void VideoRenderer::ComputeDestRect(const ImageSettings& image) {
@@ -2134,21 +2363,7 @@ void VideoRenderer::ComputeDestRectIn(const ImageSettings& image, int winW, int 
     return;
   }
 
-  double target;
-  if (image.aspect == AspectMode::Force16x9) {
-    target = 16.0 / 9.0;
-  } else if (image.aspect == AspectMode::Force4x3) {
-    target = 4.0 / 3.0;
-  } else if (source_.aspectX > 0 && source_.aspectY > 0 && source_.width > 0 &&
-             source_.height > 0) {
-    // The media type's aspect describes the whole frame, so cropping has to be
-    // folded in or a cropped picture would come out stretched.
-    const double full = (double)source_.aspectX / (double)source_.aspectY;
-    target = full * ((double)srcW / (double)source_.width) *
-             ((double)source_.height / (double)srcH);
-  } else {
-    target = (double)srcW / (double)srcH;
-  }
+  double target = TargetAspect(image);
   if (target <= 0.0) target = (double)srcW / (double)srcH;
 
   int w = winW;
@@ -2186,6 +2401,12 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
       image.rotation == Rotation::Cw90 || image.rotation == Rotation::Ccw90;
   outputWidth_ = quarterTurn ? doubledHeight : croppedWidth_;
   outputHeight_ = quarterTurn ? croppedWidth_ : doubledHeight;
+
+  // The size everything that is not the window leaves at, plus the filter that
+  // gets it there. Worked out here because this is the only place holding the
+  // settings; the readback and the stills run outside Draw and read what this
+  // leaves behind.
+  ComputeDeliverySize(image);
 
   if (!EnsureClean(srcW, srcH)) return;
   if (!EnsureIntermediate(outputWidth_, outputHeight_)) return;
@@ -2394,6 +2615,15 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   sc.paperWhite = paperWhiteNits_;
   sc.sourcePeak = sourcePeakNits_;
   sc.displayPeak = displayPeakNits_;
+
+  // The window always gets them -- that is what the sliders are for. Whether
+  // they also go into a file is decided in RenderDelivery, not here.
+  sc.procAmp = procAmpActive() ? 1 : 0;
+  sc.brightness = deliveryBrightness_;
+  sc.contrast = deliveryContrast_;
+  sc.saturation = deliverySaturation_;
+  sc.hue = deliveryHue_;
+
   if (SUCCEEDED(dc->Map(cbScale_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
     memcpy(mapped.pData, &sc, sizeof(sc));
     dc->Unmap(cbScale_.Get(), 0);
