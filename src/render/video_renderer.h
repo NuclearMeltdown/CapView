@@ -77,6 +77,32 @@ class VideoRenderer {
   // nothing by keeping to the frame-wide test alone -- which is what shipped in
   // 3.0 and is unchanged here.
   void SetAnalogueSource(bool analogue) { analogueSource_ = analogue; }
+
+  // Wie schnell die Bilder ankommen, gemessen; 0, solange nichts gemessen ist.
+  //
+  // Damit kann die Bildrate ein gemessenes "interlaced" ueberstimmen, und das
+  // nicht als Faustregel, sondern weil der Formatraum es hergibt: ein gewebtes
+  // Halbbildpaar *ist* ein Bild, und jedes Format, das es gibt, liefert davon
+  // 25 oder 30 in der Sekunde -- 576i und 1080i50 fuenfundzwanzig, 480i und
+  // 1080i60 knapp dreissig. 720i hat es in keiner Norm je gegeben. Kommen also
+  // von einer Quelle mit 720 Zeilen oder mehr fuenfzig oder sechzig Bilder in
+  // der Sekunde an, koennen diese Bilder keine gewebten Halbbilder sein, ganz
+  // gleich wie sehr sie kaemmen.
+  //
+  // Gebraucht wird das, weil die Kammpruefung raeumlich misst und ein
+  // Grafikstil raeumlich luegen kann. Ein absichtlich gelegtes Zeilenraster,
+  // Dithering, eine Kreuzschraffur: alles Muster, die je Abtastung dieselbe
+  // Zacke machen wie ein bewegtes Halbbildpaar, und ein Bild, das sie ueber die
+  // ganze Flaeche traegt, kaemmt in jeder Kachel. Unter 720 Zeilen bleibt es
+  // beim Urteil der Messung -- dort *ist* 480i/576i der Normalfall, und ein
+  // Veto naehme der Erkennung genau die Faelle weg, fuer die es sie gibt.
+  //
+  // Die *gemessene* Rate, nicht die angekuendigte. Diese Karte kuendigt bei
+  // einer Halbbildquelle 50 an und liefert 25 gewebte Bilder; die
+  // angekuendigte Zahl wuerde also genau die Quellen wegwerfen, um die es
+  // hier geht.
+  void SetFrameRateHint(double fps) { frameRateHint_ = fps > 0.0 ? fps : 0.0; }
+
   // Samples per cycle of the subcarrier at the width actually being captured --
   // what the shader works with, and what the settings need to say honestly how
   // wide the demodulation window currently is.
@@ -601,6 +627,12 @@ class VideoRenderer {
   // Whether the tile half of the test is allowed to decide. See
   // SetAnalogueSource.
   bool analogueSource_ = false;
+  // Gemessene Ankunftsrate, 0 = noch nicht gemessen. Siehe SetFrameRateHint.
+  double frameRateHint_ = 0.0;
+  // Ob schon im Log steht, dass die Rate ein Kammurteil verworfen hat. Einmal
+  // je Format, nicht je Fenster: sonst schriebe eine gerasterte Grafik jede
+  // Sekunde dieselbe Zeile.
+  bool rateVetoLogged_ = false;
   // Worst reading of the current window, whole frame and best tile. Only ever
   // read back in the log line.
   double combFrameBest_ = 0.0;
