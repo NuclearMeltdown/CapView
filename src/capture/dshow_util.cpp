@@ -1107,8 +1107,8 @@ struct StandardEntry {
   int lines;
 };
 
-// Ordered so the common ones come first; the index is written to the config, so
-// entries may be appended but not reordered.
+// Ordered so the common ones come first. The config stores the DirectShow value
+// and not the index, so this list may be reordered and regrouped freely.
 const StandardEntry kStandards[] = {
     {AnalogVideo_PAL_B, "PAL B", 625},        {AnalogVideo_PAL_G, "PAL G", 625},
     {AnalogVideo_PAL_I, "PAL I", 625},        {AnalogVideo_PAL_D, "PAL D", 625},
@@ -1123,11 +1123,101 @@ const StandardEntry kStandards[] = {
 };
 const int kStandardCount = (int)(sizeof(kStandards) / sizeof(kStandards[0]));
 
+// The letters behind PAL and SECAM name RF properties -- sound carrier spacing
+// and channel bandwidth -- and none of that survives the trip down a composite
+// or S-Video cable. What reaches the decoder is a line count, a field rate and a
+// colour subcarrier, and by those there are only the eight distinct pictures
+// below. A list of twenty entries where eight of them differ is a list that
+// makes the reader guess which one is theirs.
+//
+// The group is a display device only. What goes into the config is still the
+// concrete DirectShow value the card accepted, so existing configs keep working
+// and the readout below the picker can still name the exact standard.
+//
+// NTSC M and its Japanese variant stay apart on purpose: they differ in setup,
+// the 7.5 IRE pedestal that lifts black off the blanking level, and that is a
+// visible difference rather than a broadcast one.
+struct StandardGroup {
+  const char* name;
+  long members;  // every value that decodes to the same picture
+  const char* hintDe;
+  const char* hintEn;
+};
+
+const StandardGroup kStandardGroups[] = {
+    {"PAL",
+     AnalogVideo_PAL_B | AnalogVideo_PAL_G | AnalogVideo_PAL_I | AnalogVideo_PAL_D |
+         AnalogVideo_PAL_H,
+     "625 Zeilen, 50 Hz, Träger 4,43 MHz. Europa, Australien, weite Teile Asiens und "
+     "Afrikas. Umfasst PAL B, G, I, D und H, die sich nur im Tonträger unterscheiden.",
+     "625 lines, 50 Hz, 4.43 MHz subcarrier. Europe, Australia, much of Asia and Africa. "
+     "Covers PAL B, G, I, D and H, which differ only in their sound carrier."},
+    {"PAL 60", AnalogVideo_PAL_60,
+     "525 Zeilen, 60 Hz, Träger 4,43 MHz. Keine Sendenorm, sondern das, was umgebaute "
+     "Konsolen und Player an einen PAL-Fernseher ausgeben.",
+     "525 lines, 60 Hz, 4.43 MHz subcarrier. Not a broadcast standard, but what modified "
+     "consoles and players send to a PAL television."},
+    {"PAL M", AnalogVideo_PAL_M,
+     "525 Zeilen, 60 Hz, Träger 3,58 MHz. Brasilien.",
+     "525 lines, 60 Hz, 3.58 MHz subcarrier. Brazil."},
+    {"PAL N", AnalogVideo_PAL_N | AnalogVideo_PAL_N_COMBO,
+     "625 Zeilen, 50 Hz, Träger 3,58 MHz. Argentinien, Uruguay, Paraguay.",
+     "625 lines, 50 Hz, 3.58 MHz subcarrier. Argentina, Uruguay, Paraguay."},
+    {"NTSC", AnalogVideo_NTSC_M,
+     "525 Zeilen, 60 Hz, Träger 3,58 MHz. Nordamerika. Schwarz liegt 7,5 IRE über "
+     "Austastung.",
+     "525 lines, 60 Hz, 3.58 MHz subcarrier. North America. Black sits 7.5 IRE above "
+     "blanking."},
+    {"NTSC Japan", AnalogVideo_NTSC_M_J,
+     "Wie NTSC, aber Schwarz liegt auf Austastpegel. Zu hell wirkendes Schwarz an einer "
+     "japanischen Konsole ist meistens dieser Unterschied.",
+     "Like NTSC, but black sits at blanking level. Washed-out black on a Japanese console "
+     "is usually this difference."},
+    {"NTSC 4.43", AnalogVideo_NTSC_433,
+     "525 Zeilen, 60 Hz, aber Träger 4,43 MHz. Keine Sendenorm, sondern was manche "
+     "PAL-Player aus einer NTSC-Quelle machen.",
+     "525 lines, 60 Hz, but a 4.43 MHz subcarrier. Not a broadcast standard, but what some "
+     "PAL players make of an NTSC source."},
+    {"SECAM",
+     AnalogVideo_SECAM_B | AnalogVideo_SECAM_D | AnalogVideo_SECAM_G | AnalogVideo_SECAM_H |
+         AnalogVideo_SECAM_K | AnalogVideo_SECAM_K1 | AnalogVideo_SECAM_L |
+         AnalogVideo_SECAM_L1,
+     "625 Zeilen, 50 Hz, Farbe frequenzmoduliert statt in der Phase. Frankreich, "
+     "Osteuropa. Umfasst SECAM B bis L1.",
+     "625 lines, 50 Hz, colour frequency modulated rather than carried in the phase. "
+     "France, eastern Europe. Covers SECAM B through L1."},
+};
+const int kStandardGroupCount = (int)(sizeof(kStandardGroups) / sizeof(kStandardGroups[0]));
+
 ComPtr<IAMAnalogVideoDecoder> DecoderOf(IBaseFilter* filter) {
   ComPtr<IAMAnalogVideoDecoder> dec;
   if (filter) filter->QueryInterface(IID_PPV_ARGS(&dec));
   return dec;
 }
+
+ComPtr<IAMVideoProcAmp> ProcAmpOf(IBaseFilter* filter) {
+  ComPtr<IAMVideoProcAmp> amp;
+  if (filter) filter->QueryInterface(IID_PPV_ARGS(&amp));
+  return amp;
+}
+
+// The ones that describe the picture, and only those.
+//
+// Gain, white balance and backlight compensation are left alone on purpose:
+// they are the card deciding how to read the signal rather than what to do with
+// it afterwards, they are usually on automatic, and pinning an analogue
+// decoder's AGC to a fixed number is a good way to turn a slightly weak source
+// into a dark one.
+const struct {
+  long property;
+  const char* name;
+} kProcAmpProps[] = {
+    {VideoProcAmp_Brightness, "Helligkeit"}, {VideoProcAmp_Contrast, "Kontrast"},
+    {VideoProcAmp_Hue, "Farbton"},           {VideoProcAmp_Saturation, "Sättigung"},
+    {VideoProcAmp_Sharpness, "Schärfe"},     {VideoProcAmp_Gamma, "Gamma"},
+    {VideoProcAmp_ColorEnable, "Farbe"},
+};
+const int kProcAmpPropCount = (int)(sizeof(kProcAmpProps) / sizeof(kProcAmpProps[0]));
 
 }  // namespace
 
@@ -1153,6 +1243,39 @@ int VideoStandardIndexOf(long value) {
 int VideoStandardLines(long value) {
   const int index = VideoStandardIndexOf(value);
   return index < 0 ? 0 : kStandards[index].lines;
+}
+
+int VideoStandardGroupCount() { return kStandardGroupCount; }
+
+const char* VideoStandardGroupName(int index) {
+  if (index < 0 || index >= kStandardGroupCount) return "";
+  return kStandardGroups[index].name;
+}
+
+const char* VideoStandardGroupHint(int index) {
+  if (index < 0 || index >= kStandardGroupCount) return "";
+  return T(kStandardGroups[index].hintDe, kStandardGroups[index].hintEn);
+}
+
+int VideoStandardGroupOf(long value) {
+  if (value <= 0) return -1;
+  for (int i = 0; i < kStandardGroupCount; ++i) {
+    if (kStandardGroups[i].members & value) return i;
+  }
+  return -1;
+}
+
+// The value to hand the decoder when a group is picked. Its members produce the
+// same picture, so any one the card admits to will do; kStandards decides the
+// order, which is the one that puts the common variants first.
+long VideoStandardGroupPick(int index, long available) {
+  if (index < 0 || index >= kStandardGroupCount) return 0;
+  const long members = kStandardGroups[index].members & available;
+  if (members == 0) return 0;
+  for (int i = 0; i < kStandardCount; ++i) {
+    if (members & kStandards[i].value) return kStandards[i].value;
+  }
+  return 0;
 }
 
 long AvailableVideoStandards(IBaseFilter* filter) {
@@ -1199,28 +1322,175 @@ std::string VideoStandardSettingName(long setting) {
   return index < 0 ? T("Unbekannt", "Unknown") : VideoStandardName(index);
 }
 
+// What the pickers show. They offer groups, so echoing back the exact variant
+// the card took would name something the list never offered. The readout under
+// the picker stays exact -- that one exists to say what really happened.
+std::string VideoStandardPickerName(long setting) {
+  const int group = VideoStandardGroupOf(setting);
+  return group < 0 ? VideoStandardSettingName(setting) : VideoStandardGroupName(group);
+}
+
 double VideoStandardSubcarrierSamples(long standard) {
   // 13.5 MHz of sampling over the active line, from BT.601.
   const double kSampleRate = 13500000.0;
-  // NTSC M and its Japanese variant carry 3.579545 MHz; PAL M is close enough to
-  // count with them. Everything else in practice -- PAL, PAL-60, SECAM, and the
-  // 4.43 MHz NTSC variant -- sits at 4.43361875 MHz.
+  // NTSC M and its Japanese variant carry 3.579545 MHz. PAL M at 3.575611 and
+  // PAL N at 3.582056 are close enough to count with them: 0.11 % and 0.07 %
+  // off, which over the nine periods the demodulator looks at comes to a
+  // fiftieth of a sample. Everything else in practice -- PAL, PAL-60, SECAM, and
+  // the 4.43 MHz NTSC variant -- sits at 4.43361875 MHz.
   const bool ntsc = standard == AnalogVideo_NTSC_M || standard == AnalogVideo_NTSC_M_J ||
-                    standard == AnalogVideo_PAL_M;
+                    standard == AnalogVideo_PAL_M || standard == AnalogVideo_PAL_N ||
+                    standard == AnalogVideo_PAL_N_COMBO;
   const double carrier = ntsc ? 3579545.0 : 4433618.75;
   return kSampleRate / carrier;
 }
 
 
-std::vector<long> AutoStandardCandidates(long available) {
-  // One per line count and colour system. Trying PAL B and then PAL G would be
-  // asking the same question twice: they differ in the sound carrier, which is
-  // no part of the picture.
-  static const long kOrder[] = {AnalogVideo_PAL_B,   AnalogVideo_PAL_60, AnalogVideo_NTSC_M,
-                                AnalogVideo_NTSC_M_J, AnalogVideo_SECAM_B};
+// Der Partner einer Norm: dieselbe Farbe, die andere Bildfrequenz.
+//
+// PAL und PAL 60 tragen beide den 4,43-MHz-Traeger und unterscheiden sich nur
+// in Zeilenzahl und Bildrate. Genau dazwischen springt eine Konsole, die von 50
+// auf 60 Hz umschaltet, und genau dort geht der Lock verloren.
+//
+// Das ist nicht nur eine Wahrscheinlichkeit, sondern noetig: der Decoder meldet
+// einen *horizontalen* Lock, und PAL 60 und NTSC M haben dieselben 525 Zeilen
+// bei 60 Hz. Sie unterscheiden sich allein im Farbtraeger, den diese Meldung
+// gar nicht anfasst. Wer zuerst gefragt wird, gewinnt also -- deshalb muss der
+// Partner vor dem allgemeinen Durchlauf drankommen.
+long VideoStandardSibling(long standard, long available) {
+  const int group = VideoStandardGroupOf(standard);
+  if (group < 0) return 0;
+  const int pal = VideoStandardGroupOf(AnalogVideo_PAL_B);
+  const int pal60 = VideoStandardGroupOf(AnalogVideo_PAL_60);
+  if (group == pal) return VideoStandardGroupPick(pal60, available);
+  if (group == pal60) return VideoStandardGroupPick(pal, available);
+  return 0;
+}
+
+namespace {
+
+// Was in einer Region ueberhaupt vorkommt, in der Reihenfolge, in der es dort
+// vorkommt. Endet je Zeile mit 0.
+//
+// Entscheidend ist nicht, was in der Liste steht, sondern was *zuerst* steht:
+// innerhalb einer Zeilenzahl gewinnt der erste Eintrag immer, weil der Lock die
+// Farbe nicht misst. Fuer Europa heisst das PAL 60 vor NTSC M -- eine 525/60-
+// Quelle an einem europaeischen Anschluss ist fast immer eine umgebaute Konsole
+// im 60-Hz-Modus und fast nie ein amerikanisches Geraet. In Nordamerika steht
+// es genau andersherum, und das ist derselbe Satz mit vertauschten Rollen.
+//
+// Der Rest kommt danach aus kCommon und kRare dazu; hier steht nur der Vorlauf.
+//
+// `VideoRegion::None` hat hier absichtlich keine Zeile. Wer keine Region nennt,
+// bekommt keinen Vorlauf -- die Schleife unten findet dann nichts und faellt
+// direkt in kCommon. Das ist kein Sonderfall im Code, sondern einer, den die
+// Tabelle durch Schweigen erledigt.
+struct RegionLead {
+  VideoRegion region;
+  long order[4];
+};
+const RegionLead kRegionLeads[] = {
+    {VideoRegion::PalEurope, {AnalogVideo_PAL_B, AnalogVideo_PAL_60, 0, 0}},
+    {VideoRegion::NtscAmerica, {AnalogVideo_NTSC_M, AnalogVideo_NTSC_M_J, 0, 0}},
+    {VideoRegion::NtscJapan, {AnalogVideo_NTSC_M_J, AnalogVideo_NTSC_M, 0, 0}},
+    {VideoRegion::Secam, {AnalogVideo_SECAM_B, AnalogVideo_PAL_B, AnalogVideo_PAL_60, 0}},
+    // Brasilien sendete 525/60 mit dem NTSC-Traeger; die Geraete von jenseits
+    // der Grenze sind NTSC, nicht PAL.
+    {VideoRegion::PalBrazil, {AnalogVideo_PAL_M, AnalogVideo_NTSC_M, 0, 0}},
+    // PAL N ist 625/50 und steht damit vor PAL B, das dieselben Zeilen hat.
+    {VideoRegion::PalArgentina, {AnalogVideo_PAL_N, AnalogVideo_PAL_B, 0, 0}},
+};
+
+}  // namespace
+
+std::vector<long> AutoStandardCandidates(long available, VideoRegion region, long lastGood,
+                                         int* preferred) {
+  // Je ein Vertreter pro Zeilenzahl und Farbsystem, ueber die Gruppen gewaehlt.
+  // PAL B und PAL G zu probieren hiesse dieselbe Frage zweimal stellen -- sie
+  // unterscheiden sich im Tonträger, der kein Teil des Bildes ist. Ueber die
+  // Gruppe statt ueber ein festes Bit, damit eine Karte, die PAL I meldet aber
+  // kein PAL B, trotzdem einen PAL-Kandidaten bekommt.
+  //
+  // Zuerst die gaengigen, dann die seltenen. Jeder Kandidat kostet eine
+  // Wartezeit, und die haeufigen sollen nicht hinter Normen stehen, die
+  // ausserhalb einer Handvoll Laender niemand hat. Karten melden PAL M und
+  // PAL N naemlich unabhaengig davon, ob im Umkreis von tausend Kilometern
+  // jemand so sendet.
+  static const long kCommon[] = {
+      AnalogVideo_PAL_B,     // PAL, 625/50 -- Europa, Australien, halb Asien
+      AnalogVideo_PAL_60,    // PAL 60, 525/60 -- umgebaute Konsolen und Player
+      AnalogVideo_NTSC_M,    // NTSC, 525/60 -- Nordamerika
+      AnalogVideo_NTSC_M_J,  // NTSC Japan, dasselbe mit anderem Schwarzpegel
+  };
+  static const long kRare[] = {
+      AnalogVideo_SECAM_B,  // SECAM, 625/50 -- Frankreich, Osteuropa
+      AnalogVideo_PAL_M,    // 525/60 mit 3,58 MHz -- Brasilien
+      AnalogVideo_PAL_N,    // 625/50 mit 3,58 MHz -- Argentinien und Nachbarn
+      AnalogVideo_NTSC_433,  // 525/60 mit 4,43 MHz -- was PAL-Player daraus machen
+  };
+
   std::vector<long> out;
-  for (long value : kOrder) {
-    if (available & value) out.push_back(value);
+  auto add = [&out](long value) {
+    if (value <= 0) return;
+    for (long have : out) {
+      if (have == value) return;
+    }
+    out.push_back(value);
+  };
+  auto addFamily = [&](long representative) {
+    add(VideoStandardGroupPick(VideoStandardGroupOf(representative), available));
+  };
+
+  // Ganz vorne der Partner der zuletzt eingerasteten Norm, dahinter sie selbst.
+  // Das deckt die zwei Faelle ab, in denen ein Lock ueberhaupt verloren geht,
+  // ohne dass das Kabel gezogen wurde: die Konsole schaltet zwischen 50 und
+  // 60 Hz um, oder sie wurde neu gestartet und kommt gleich wieder.
+  const long sibling = VideoStandardSibling(lastGood, available);
+  add(sibling);
+  if (lastGood > 0 && (available & lastGood) != 0) add(lastGood);
+  if (preferred) *preferred = (int)out.size();
+
+  // Dahinter das, was in der Gegend des Nutzers ueberhaupt vorkommt. Erst
+  // danach der allgemeine Durchlauf -- der bleibt vollstaendig, damit eine
+  // falsch eingestellte Region die richtige Norm verzoegert und nicht
+  // verhindert.
+  const VideoRegion resolved = ResolveVideoRegion(region);
+  for (const RegionLead& lead : kRegionLeads) {
+    if (lead.region != resolved) continue;
+    for (long family : lead.order) {
+      if (family == 0) break;
+      addFamily(family);
+    }
+    break;
+  }
+
+  for (long family : kCommon) addFamily(family);
+  for (long family : kRare) addFamily(family);
+  return out;
+}
+
+std::vector<long> VideoStandardColourCandidates(long standard, long available,
+                                                VideoRegion region) {
+  std::vector<long> out;
+  const int lines = VideoStandardLines(standard);
+  if (lines <= 0) return out;
+
+  // Ueber dieselbe Kandidatenliste wie die Normensuche selbst. Die hat die
+  // Arbeit schon getan: je ein Vertreter pro Farbsystem, die Tonträgervarianten
+  // zusammengefasst, und nach Region sortiert. Hier bleibt nur, sie auf die
+  // Zeilenzahl einzuengen -- die steht ja fest, der Lock hat sie bestaetigt.
+  //
+  // Ohne lastGood: gesucht wird, was zur *jetzigen* Norm passt, nicht was
+  // zuletzt gut war.
+  const std::vector<long> ordered = AutoStandardCandidates(available, region, 0, nullptr);
+
+  // Die jetzige zuerst, denn sie ist bereits gemessen; sie noch einmal
+  // einzustellen waere ein Wechsel und kostete eine Einschwingzeit umsonst.
+  if ((available & standard) != 0) out.push_back(standard);
+  for (long candidate : ordered) {
+    if (candidate == standard) continue;
+    if (VideoStandardLines(candidate) != lines) continue;
+    out.push_back(candidate);
   }
   return out;
 }

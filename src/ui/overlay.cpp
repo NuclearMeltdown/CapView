@@ -278,6 +278,26 @@ void DrawToast(const std::string& text, double age, double duration) {
   ImGui::PopStyleVar();
 }
 
+void DrawSearchIndicator(const std::string& text) {
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 24.0f),
+                          ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.78f);
+
+  if (ImGui::Begin("##standardsearch", nullptr, kOverlayFlags)) {
+    // Dieselben drei Punkte wie auf der Statuskarte. Die Suche kann eine halbe
+    // Minute laufen, und ohne Bewegung sieht ein stehender Text nach einem
+    // Ergebnis aus statt nach einem Vorgang.
+    const int phase = (int)(ImGui::GetTime() * 3.0) % 4;
+    std::string dots(3, '.');
+    for (int i = 0; i < 3; ++i) {
+      if (i >= phase) dots[(size_t)i] = ' ';
+    }
+    ImGui::Text("%s%s", text.c_str(), dots.c_str());
+  }
+  ImGui::End();
+}
+
 void DrawRecordIndicator(double seconds, OsdCorner volumeCorner) {
   // Opposite corner to the volume readout: both can appear at once, and a
   // number sliding out from under a dot looks like a bug.

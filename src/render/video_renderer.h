@@ -60,6 +60,23 @@ class VideoRenderer {
   // Samples per cycle of the colour subcarrier, for a full width line. Set from
   // the video standard; the dot crawl filter is built around it.
   void SetCarrierSamples(double samples) { carrierSamples_ = samples; }
+
+  // Whether the picture arriving is one picture.
+  //
+  // Sounds like a strange thing to ask, and it is the whole justification for
+  // the tile half of the interlacing test. That half assumes a badly combed
+  // corner means a combed signal -- true of a console, whose screen is one
+  // scene, and false of a captured desktop, which is a picture made of other
+  // people's pictures. Any window on it can hold a still or a video that is
+  // itself combed, and no test that looks at pixels can tell combing from a
+  // photograph of combing.
+  //
+  // An analogue input is the case where the assumption holds and where the tile
+  // test is needed at all, because a card that decodes composite says nothing
+  // about fields. Digital sources announce 1080i themselves, so they lose
+  // nothing by keeping to the frame-wide test alone -- which is what shipped in
+  // 3.0 and is unchanged here.
+  void SetAnalogueSource(bool analogue) { analogueSource_ = analogue; }
   // Samples per cycle of the subcarrier at the width actually being captured --
   // what the shader works with, and what the settings need to say honestly how
   // wide the demodulation window currently is.
@@ -195,6 +212,41 @@ class VideoRenderer {
   // -- once combing has been seen there is no reason to doubt it again.
   enum class InterlaceVerdict { Pending, Progressive, Interlaced };
   InterlaceVerdict detectedInterlace() const { return interlaceVerdict_; }
+
+  // Wie farbig das Bild seit dem letzten ResetChroma war, 0..1. Gemessen wird
+  // die Farbe *ueber einen Block gemittelt*, nicht die einzelner Bildpunkte --
+  // der Grund dafuer steht bei AnalyzeChroma und ist der Kern der Sache. -1,
+  // solange zu wenige Bilder gemessen wurden oder das Format keine lesbare
+  // Farbe hat.
+  //
+  // Wofuer das da ist: der Lock der Karte misst nur die Zeilenfrequenz. Steht
+  // der falsche Farbtraeger, rastet sie trotzdem ein, der Farbkiller des
+  // Decoders greift mangels Burst -- und heraus kommt ein graues Bild mit
+  // Regenbogengries. Genau das ist hier messbar und sonst nirgends.
+  float chromaEnergy() const;
+  // Dieselbe Messung, aber nur ueber die *dunklen* Bloecke. -1, wenn es zu
+  // wenige davon gab, um etwas zu sagen.
+  //
+  // Wofuer das da ist: `chromaEnergy` beantwortet "ist ueberhaupt Farbe da",
+  // und das reicht nicht. Ein falscher Farbtraeger kann die Farbe auch
+  // *erfinden* statt sie zu toeten -- am 30.08. rastete die Suche auf einer
+  // PAL-Quelle versehentlich auf SECAM B ein, und heraus kam ein Bild mit
+  // rotem Schwarz und 0,241 gemessener Farbe, dem Achtfachen dessen, was das
+  // richtige PAL B auf derselben Szene misst (0,029). Nach Menge waere also
+  // die falsche Norm der Sieger.
+  //
+  // Was die beiden Faelle trennt, ist das dunkle Ende: bei richtiger Norm ist
+  // es neutral, immer, egal wie bunt der Rest ist. Farbe dort ist nicht Farbe,
+  // sondern ein Traeger, den es nicht gibt.
+  //
+  // Dunkel heisst dabei *nach Luma*, nicht nach Helligkeit. Ein falscher
+  // Traeger verschiebt U und V, nicht Y -- rechnet man die Helligkeit aus dem
+  // fertigen RGB, faellt rotes Schwarz aus der Auswahl heraus und die Messung
+  // findet genau die Bloecke nicht, wegen derer sie da ist.
+  float darkChromaEnergy() const;
+  // Von vorn messen. Wird gerufen, wenn die Norm gewechselt hat: was vor dem
+  // Wechsel gemessen wurde, gehoert zu einer anderen Einstellung.
+  void ResetChroma();
 
   // True when the two fields hold the *same* lines rather than lines half a
   // picture line apart -- a 240p or 288p console that the card packed into an
@@ -400,9 +452,28 @@ class VideoRenderer {
   void AnalyzeInterlace(const FrameView& frame);
   void AnalyzeContentBounds(const FrameView& frame);
   void AnalyzeSignal(const FrameView& frame);
+  void AnalyzeChroma(const FrameView& frame);
   // Byte offset of the first luma sample and the distance to the next one.
   // False for formats this cannot read.
   bool LumaLayout(size_t* offset, size_t* step) const;
+  // Dasselbe fuer die beiden Farbdifferenzen -- nur reicht dafuer kein Paar aus
+  // Versatz und Schrittweite, weil die Farbe je nach Format entweder neben dem
+  // Luma oder in einer eigenen Ebene liegt und mal nur waagerecht, mal auch
+  // senkrecht unterabgetastet ist.
+  //
+  // Beides faellt auf dieselbe Beschreibung zusammen: Luma des Bildpunktes
+  // (x, y) steht bei `yOff + y*yPitch + x*yStep`, seine Farbe bei
+  // `uOff + (y >> cyShift)*uPitch + (x >> cxShift)*uStep`. Damit muss die
+  // Messschleife den Unterschied nicht mehr kennen, und ein weiteres Format
+  // kostet einen Zweig hier statt einer zweiten Schleife dort.
+  struct ChromaPlanes {
+    size_t yOff = 0, uOff = 0, vOff = 0;
+    size_t yPitch = 0, uPitch = 0, vPitch = 0;
+    size_t yStep = 1, uStep = 1, vStep = 1;
+    int cxShift = 0, cyShift = 0;
+    size_t needed = 0;  // so gross muss das Bild mindestens sein
+  };
+  bool ChromaLayout(ChromaPlanes* planes) const;
   RangeVerdict rangeVerdict_ = RangeVerdict::Pending;
   int rangeFramesSeen_ = 0;
   uint64_t rangeSamples_ = 0;
@@ -410,6 +481,18 @@ class VideoRenderer {
   uint64_t rangeAbove235_ = 0;
   int rangeMin_ = 255;
   int rangeMax_ = 0;
+
+  // Farbstaerke. Laeuft dauerhaft mit und latcht nicht: anders als Pegel und
+  // Halbbilder ist das keine Eigenschaft der Quelle, sondern eine der gerade
+  // eingestellten Norm, und die kann sich jederzeit aendern.
+  int chromaFramesSeen_ = 0;
+  int chromaFramesAnalysed_ = 0;
+  uint64_t chromaSum_ = 0;
+  uint64_t chromaCount_ = 0;
+  // Dieselbe Summe, aber nur ueber die dunklen Bloecke. Eigene Zaehlung, weil
+  // ein Bild auch ganz ohne dunkle Stellen auskommen kann.
+  uint64_t chromaDarkSum_ = 0;
+  uint64_t chromaDarkCount_ = 0;
 
   InterlaceVerdict interlaceVerdict_ = InterlaceVerdict::Pending;
   bool coSitedFields_ = false;

@@ -59,6 +59,16 @@ void TextDisabledWrapped(const char* text) {
   ImGui::PopStyleColor();
 }
 
+// Dasselbe in der Farbe, die im Rest des Fensters schon "sieh hier hin" heisst
+// -- dieselben Werte wie bei "Erzwungen: ...". Grau waere hier falsch: grau
+// sagt "Nebensache", und ein Hinweis, den man lesen soll, ist keine.
+void TextWarningWrapped(const char* text) {
+  if (!text || !*text) return;
+  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.72f, 0.35f, 1.0f));
+  ImGui::TextWrapped("%s", text);
+  ImGui::PopStyleColor();
+}
+
 // Combo over an enum whose labels come from a lookup function, so the list
 // follows the selected language without any table to keep in sync.
 bool ComboEnum(const char* label, int* value, int count, NameFn name, NameFn help = nullptr) {
@@ -751,7 +761,7 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
     deviceConfigRequested_ = true;
   }
   ImGui::EndDisabled();
-  ImGui::SetItemTooltip(
+  WrappedTooltip(
       captureRunning_
           ? T("Eigener Dialog des Treibers. Das Bild läuft dabei weiter.",
               "The driver's own dialog. The picture keeps running while it is open.")
@@ -794,7 +804,7 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
 
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##vstandard",
-                          VideoStandardSettingName(p.capture.videoStandard).c_str())) {
+                          VideoStandardPickerName(p.capture.videoStandard).c_str())) {
       if (ImGui::Selectable(T("Nicht ändern", "Leave alone"), p.capture.videoStandard == 0)) {
         p.capture.videoStandard = 0;
       }
@@ -802,28 +812,87 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
         p.capture.videoStandard = -1;
       }
       ImGui::Separator();
-      for (int i = 0; i < VideoStandardCount(); ++i) {
-        const long value = VideoStandardValue(i);
-        if ((caps.availableStandards & value) == 0) continue;
-        if (ImGui::Selectable(VideoStandardName(i), p.capture.videoStandard == value)) {
+      const int chosen = VideoStandardGroupOf(p.capture.videoStandard);
+      for (int i = 0; i < VideoStandardGroupCount(); ++i) {
+        const long value = VideoStandardGroupPick(i, caps.availableStandards);
+        if (value == 0) continue;
+        if (ImGui::Selectable(VideoStandardGroupName(i), chosen == i)) {
           p.capture.videoStandard = value;
         }
+        WrappedTooltip(VideoStandardGroupHint(i));
       }
       ImGui::EndCombo();
     }
-    ImGui::SetItemTooltip(
-        T("PAL hat 625 Zeilen bei 50 Hz, PAL-60 hat 525 bei 60. Automatisch probiert "
-          "die Normen durch, bis der Decoder einrastet.",
-          "PAL is 625 lines at 50 Hz, PAL-60 is 525 at 60. Automatic tries them until the "
-          "decoder locks."));
+    WrappedTooltip(
+        T("Zusammengefasst zu den Normen, die am Kabel wirklich verschieden aussehen -- "
+          "die Buchstaben hinter PAL und SECAM betreffen nur die Übertragung im "
+          "Fernsehkanal. Automatisch probiert sie durch, bis der Decoder einrastet.",
+          "Grouped by what actually looks different over a cable -- the letters behind PAL "
+          "and SECAM only concern broadcasting in a television channel. Automatic tries "
+          "them until the decoder locks."));
+
+    // Nur bei "Automatisch": die Region ordnet die Suche, und wo nicht gesucht
+    // wird, ordnet sie nichts. Ein Regler, der gerade nichts tut, ist ein
+    // Regler, an dem jemand dreht und sich wundert.
+    if (p.capture.videoStandard == -1) {
+      int region = (int)cfg().app.videoRegion;
+      ImGui::SetNextItemWidth(-1.0f);
+      if (ComboEnum("##videoregion", &region, kVideoRegionCount, VideoRegionName)) {
+        cfg().app.videoRegion = (VideoRegion)region;
+      }
+      ImGui::SameLine();
+      HelpMarker(
+          T("In welchem Land du wohnst. Die Karte meldet nur, ob sie die Zeilenfrequenz "
+            "gefunden hat — PAL 60 und NTSC M haben beide 525 Zeilen bei 60 Hz und "
+            "unterscheiden sich allein in der Farbe, die diese Meldung gar nicht misst. "
+            "Wer zuerst probiert wird, gewinnt also, und diese Angabe bestimmt, wer das "
+            "ist. Gefunden werden am Ende trotzdem alle Normen, nur langsamer.",
+            "Where you live. The card only reports whether it found the line frequency — "
+            "PAL 60 and NTSC M both have 525 lines at 60 Hz and differ only in colour, "
+            "which that report does not measure. Whichever is tried first wins, and this "
+            "setting decides which that is. Every standard is still found in the end, "
+            "just more slowly."));
+      // Was "Automatisch" hier gerade heisst. Sonst ist die haeufigste
+      // Einstellung die einzige, die nichts ueber sich sagt.
+      if (cfg().app.videoRegion == VideoRegion::Auto) {
+        ImGui::TextDisabled(T("Laut Windows: %s", "According to Windows: %s"),
+                            VideoRegionName((int)ResolveVideoRegion(VideoRegion::Auto)));
+      }
+    }
 
     // What the card is actually set to. On automatic this is the only way to see
     // what the search settled on, and "it looks right" is not the same as
     // knowing.
-    if (caps.currentStandard != 0) {
-      const int idx = VideoStandardIndexOf(caps.currentStandard);
-      ImGui::TextDisabled(T("Eingestellt: %s", "In use: %s"),
-                          idx >= 0 ? VideoStandardName(idx) : "?");
+    //
+    // "Eingestellt" ist dabei erst dann das richtige Wort, wenn die Norm auch
+    // gilt. Waehrend der Suche steht auf der Karte eine Vermutung, die im
+    // naechsten Moment verworfen wird -- sie so zu nennen, als waere sie eine
+    // Entscheidung, ist die Auskunft, die vorher hier stand und die niemandem
+    // half. Also sagt die Zeile jetzt, was gerade passiert, und nennt dabei
+    // trotzdem die Norm: an ihr sieht man, dass die Suche laeuft und wie weit.
+    const long shown = liveStandard_ != 0 ? liveStandard_ : caps.currentStandard;
+    if (shown != 0) {
+      const int idx = VideoStandardIndexOf(shown);
+      const char* name = idx >= 0 ? VideoStandardName(idx) : "?";
+      switch (standardSearch_) {
+        case StandardSearch::Trying:
+          ImGui::TextDisabled(T("Suche läuft: %s …", "Scanning: %s …"), name);
+          break;
+        case StandardSearch::Paused:
+          // Nach einer erfolglosen Runde wird die Karte auf die beste Vermutung
+          // gestellt und es wird gewartet. Das ist etwas anderes als Suchen, und
+          // wer zusieht, soll nicht auf einen Fortschritt warten, den es gerade
+          // nicht gibt.
+          ImGui::TextDisabled(T("Suche pausiert, Karte auf %s", "Scanning paused, card set to %s"),
+                              name);
+          break;
+        case StandardSearch::Colour:
+          ImGui::TextDisabled(T("Farbe wird geprüft: %s", "Checking colour: %s"), name);
+          break;
+        case StandardSearch::Off:
+          ImGui::TextDisabled(T("Eingestellt: %s", "In use: %s"), name);
+          break;
+      }
     }
 
     if (signalLocked_ >= 0) {

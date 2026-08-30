@@ -67,6 +67,25 @@ class SettingsWindow {
   // 1 locked, 0 not, -1 unknown. Shown next to the video standard, because that
   // is the one number that says whether the setting is the right one.
   void SetSignalLocked(int locked) { signalLocked_ = locked; }
+
+  // Was die automatische Normensuche gerade tut. Der Dialog wuerde es sonst
+  // nicht erfahren: die Suche laeuft im Hintergrund und stellt die Karte
+  // waehrenddessen mehrmals um.
+  enum class StandardSearch {
+    Off,      // nichts zu suchen -- eingerastet, oder die Norm steht fest
+    Trying,   // ein Kandidat steht auf der Karte und hat noch nicht eingerastet
+    Paused,   // eine Runde ohne Lock; die Karte ist geparkt, es wird gewartet
+    Colour,   // eingerastet, aber gerade wird die Farbe gegengeprueft
+  };
+  void SetStandardSearch(StandardSearch state) { standardSearch_ = state; }
+  // Die Norm, die *jetzt* auf der Karte steht, aus derselben Abfrage wie der
+  // Lock. Nicht dasselbe wie `caps.currentStandard`: das ist der Stand des
+  // letzten Graphenbaus, und die Suche baut den Graphen nicht neu, wenn sie
+  // eine Norm nur ausprobiert. Genau daran zeigte der Dialog waehrend der
+  // Suche die vorletzte Antwort und konnte nach einer Farbberichtigung sogar
+  // dauerhaft eine andere Norm nennen als die, die wirklich eingerastet war.
+  // 0 heisst: nichts laeuft, dann bleibt `caps` die beste Auskunft.
+  void SetLiveStandard(long standard) { liveStandard_ = standard; }
   // Whether the running source is being treated as analogue. Decides which of
   // the picture settings are worth showing at all.
   void SetAnalogueSource(bool on) { analogueSource_ = on; }
@@ -222,12 +241,15 @@ class SettingsWindow {
   int captureAction_ = -1;
   const char* const* detectedRange_ = nullptr;
   const char* const* detectedInterlace_ = nullptr;
+  bool interlaceDoubtful_ = false;
   bool fillsWindow_ = false;
   bool probeAllowed_ = true;
   Updater* updater_ = nullptr;
   bool restartRequested_ = false;
   bool coSitedFields_ = false;
   int signalLocked_ = -1;
+  StandardSearch standardSearch_ = StandardSearch::Off;
+  long liveStandard_ = 0;
   bool analogueSource_ = true;
   bool captureRunning_ = false;
   bool deviceConfigRequested_ = false;
