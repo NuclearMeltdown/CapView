@@ -1104,6 +1104,13 @@ static const int kCombTileMinSamples = 64;
 // comparisons are looking at the same kind of thing.
 static const double kDoubleRatio = 3.0;
 static const double kDoubleFloor = 4.0;
+// Ab wo die gemessene Bildrate die raeumliche Messung ueberstimmen darf --
+// die Begruendung steht bei SetFrameRateHint im Header. Beide Schwellen liegen
+// weit von dem weg, was sie trennen sollen: gewebte Halbbilder kommen mit 25
+// bis knapp 30 Bildern in der Sekunde an, progressive HD-Quellen mit 50 oder
+// 60. Dazwischen ist nichts, was gemessen werden koennte.
+static const int kRateVetoMinHeight = 720;
+static const double kRateVetoMinFps = 48.0;
 
 void VideoRenderer::ResetAnalysis() {
   rangeVerdict_ = RangeVerdict::Pending;
@@ -1117,6 +1124,7 @@ void VideoRenderer::ResetAnalysis() {
   interlaceVerdict_ = InterlaceVerdict::Pending;
   coSitedFields_ = false;
   coSitedPhase_ = 0;
+  rateVetoLogged_ = false;
   combFramesSeen_ = 0;
   combSamples_ = 0;
   combHits_ = 0;
@@ -1769,7 +1777,31 @@ void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
   const double lo = dInner < dOuter ? dInner : dOuter;
   const double hi = dInner < dOuter ? dOuter : dInner;
 
-  if (hi >= kDoubleFloor && lo * kDoubleRatio < hi) {
+  const bool looksDoubled = hi >= kDoubleFloor && lo * kDoubleRatio < hi;
+  const bool looksCombed = combFrameHits_ >= kCombFramesNeeded;
+
+  // Was die Bildrate dazu sagt -- gefragt, bevor die Messung etwas festschreibt,
+  // damit im Log nicht "interlaced" steht, was gleich darauf ueberstimmt wird,
+  // und damit `coSitedFields_` nicht auf einer Annahme laeuft, die nicht traegt.
+  //
+  // Der Medientyp schlaegt die Rate: sagt er selbst "interlaced", ist nichts zu
+  // ueberstimmen. Unter 720 Zeilen redet sie gar nicht erst mit.
+  //
+  // Steht die Messung des Sinks noch aus, wird nicht durchgewunken, sondern
+  // gewartet. Sie braucht eine Sekunde, ein Kammfenster bei 60 Hz genauso, und
+  // beide Uhren fangen beim Formatwechsel bei null an: ohne dieses Warten
+  // entschiede ein Wettlauf darueber, ob das Veto zum ersten Fenster schon
+  // greift -- und "interlaced" rastet fuer die ganze Sitzung ein. Ein Fenster
+  // zu warten kostet nichts, denn bei einer echten Halbbildquelle kommen 25 bis
+  // 30 Bilder in der Sekunde an, das Fenster dauert dort zwei Sekunden, und die
+  // Rate steht laengst.
+  const bool rateMayRule = !source_.interlaced && h >= kRateVetoMinHeight;
+  const bool rateKnown = frameRateHint_ > 1.0;
+  const bool rateRulesOut = rateMayRule && rateKnown && frameRateHint_ >= kRateVetoMinFps;
+  const bool rateNotYetIn = rateMayRule && !rateKnown;
+  const bool mayLatch = !rateRulesOut && !rateNotYetIn;
+
+  if (looksDoubled && mayLatch) {
     coSitedFields_ = true;
     // Measured in buffer order, used in picture order. Those differ for the
     // bottom-up layouts, but only by a mirror, and mirroring an even number of
@@ -1788,7 +1820,7 @@ void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
   // gemessen, auch wo er nichts entscheiden darf.
   const char* tileNote = analogueSource_ ? "" : ", Kachelweg aus (digitale Quelle)";
 
-  if (combFrameHits_ >= kCombFramesNeeded) {
+  if (looksCombed && mayLatch) {
     interlaceVerdict_ = InterlaceVerdict::Interlaced;
     CAP_LOG("Interlacing erkannt: ja (%d von %d Bildern mit Kammartefakten, davon %d nur in "
             "einzelnen Kacheln; hoechstens %.1f%% im Bild, %.1f%% in einer Kachel%s)",
@@ -1800,12 +1832,35 @@ void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
   // Nothing found this time. Say so once, then start a fresh window and keep
   // watching: a picture that was standing still proves nothing, and the next
   // window is only a second or two away.
-  if (interlaceVerdict_ == InterlaceVerdict::Pending) {
+  //
+  // Solange die Rate noch aussteht, wird auch das nicht gesagt: ein "nein",
+  // das eine Sekunde spaeter ein "ja" werden kann, ist keine Auskunft.
+  const bool rateVetoed = rateRulesOut && (looksCombed || looksDoubled);
+
+  // Dass die Rate etwas verworfen hat, ist eine andere Nachricht als "nichts
+  // gefunden", und sie haengt deshalb nicht am Urteil, sondern wird einmal je
+  // Format gesagt. Sonst faellt sie genau in den haeufigen Fall, in dem das
+  // erste Fenster noch auf ein stehendes Bild sah: das Urteil steht dann schon
+  // auf "nein", und jedes spaetere Veto -- das eigentliche Ereignis -- waere
+  // stumm.
+  if (rateVetoed && !rateVetoLogged_) {
+    rateVetoLogged_ = true;
+    CAP_LOG("Interlacing erkannt: nein, die Bildrate schliesst Halbbilder aus "
+            "(%.1f Bilder/s bei %d Zeilen; gemessen %d von %d Bildern mit "
+            "Kammartefakten, hoechstens %.1f%% im Bild und %.1f%% in einer Kachel, "
+            "%.2f/%.2f pro Zeilenpaar)",
+            frameRateHint_, h, combFrameHits_, combFramesAnalysed_, combFrameBest_ * 100.0,
+            combTileBest_ * 100.0, lo, hi);
+  }
+
+  if (interlaceVerdict_ == InterlaceVerdict::Pending && !rateNotYetIn) {
     interlaceVerdict_ = InterlaceVerdict::Progressive;
-    CAP_LOG("Interlacing erkannt: nein (%d von %d Bildern mit Kammartefakten, hoechstens "
-            "%.1f%% im Bild und %.1f%% in einer Kachel%s, %.2f/%.2f pro Zeilenpaar)",
-            combFrameHits_, combFramesAnalysed_, combFrameBest_ * 100.0, combTileBest_ * 100.0,
-            tileNote, lo, hi);
+    if (!rateVetoed) {
+      CAP_LOG("Interlacing erkannt: nein (%d von %d Bildern mit Kammartefakten, hoechstens "
+              "%.1f%% im Bild und %.1f%% in einer Kachel%s, %.2f/%.2f pro Zeilenpaar)",
+              combFrameHits_, combFramesAnalysed_, combFrameBest_ * 100.0, combTileBest_ * 100.0,
+              tileNote, lo, hi);
+    }
   }
   combFramesSeen_ = 0;
   combFrameHits_ = 0;

@@ -2840,6 +2840,13 @@ ImageSettings App::EffectiveImage(const Profile& profile) const {
 //   gegeben. Bei 1080 ist sie es nicht, 1080i gab es im Fernsehen wirklich,
 //   und deshalb steht hier eine Frage und keine Behauptung. Darunter, etwa bei
 //   480i von einem DVD-Spieler ueber HDMI, ist interlaced schlicht richtig.
+//
+// Die Haelfte dieser Faelle beantwortet inzwischen die Bildrate von selbst:
+// kommen bei 720 Zeilen oder mehr fuenfzig oder sechzig Bilder in der Sekunde
+// an, laesst die Erkennung "interlaced" gar nicht mehr zu (siehe
+// VideoRenderer::SetFrameRateHint). Uebrig bleibt hier also die Quelle, die mit
+// 25 oder 30 Bildern ankommt und kaemmt -- und die kann eben beides sein, ein
+// echtes 1080i und ein erfasster Bildschirm, auf dem ein Video davon laeuft.
 // * Die automatische Erkennung ist eingeschaltet. Ist sie es nicht, laeuft der
 //   Deinterlacer sowieso und die Messung aendert am Bild nichts -- vor etwas zu
 //   warnen, das gar nicht wirkt, zeigt in die falsche Richtung.
@@ -3801,6 +3808,18 @@ void App::DrawUi() {
   // Und dieselbe Wahrheit noch einmal an den Renderer, der daran entscheidet,
   // ob die kachelweise Interlacing-Erkennung mitreden darf.
   renderer_.SetAnalogueSource(SourceIsAnalogue());
+  // Und die gemessene Ankunftsrate dazu, mit der die Erkennung ein Kammurteil
+  // verwerfen kann, das der Formatraum nicht hergibt -- siehe SetFrameRateHint.
+  // Gemessen, nicht angekuendigt: die Karte kuendigt bei einer Halbbildquelle
+  // 50 an und liefert 25 gewebte Bilder, und mit der angekuendigten Zahl haette
+  // das Veto genau die Quellen erwischt, vor denen es schuetzen soll. Ohne
+  // Messung 0, und 0 heisst "noch nicht gemessen", nicht "steht still".
+  double measuredFps = 0.0;
+  if (const FrameSink* sink = capture_.sink()) {
+    const double measured = sink->stats().sourceFps;
+    if (measured > 1.0) measuredFps = measured;
+  }
+  renderer_.SetFrameRateHint(measuredFps);
   settings_.SetSourceFps(renderer_.sourceFormat().fps);
   // Woraus sich entscheidet, welche Abschnitte im Reiter Bild erscheinen: die
   // Zeilenzahl fuer die Bildroehreneffekte, die Halbbilder fuer das
