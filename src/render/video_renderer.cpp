@@ -1236,11 +1236,6 @@ bool VideoRenderer::ChromaLayout(ChromaPlanes* planes) const {
   return true;
 }
 
-// Jedes achte Bild. Die Messung laeuft dauerhaft mit, also muss sie billig
-// sein; gebraucht wird kein genauer Wert, sondern die Unterscheidung "farbig"
-// von "grau".
-static const int kChromaSampleEvery = 8;
-
 // Gemessen wird nicht die Farbe eines Pixels, sondern die eines Bloecks --
 // und das ist der ganze Trick.
 //
@@ -1282,7 +1277,7 @@ static const uint64_t kChromaDarkBlocksWanted = 200;
 static const int kChromaFramesWanted = 10;
 
 void VideoRenderer::AnalyzeChroma(const FrameView& frame) {
-  if (++chromaFramesSeen_ % kChromaSampleEvery != 0) return;
+  if (++chromaFramesSeen_ % chromaSampleEvery_ != 0) return;
 
   const int w = source_.width;
   const int h = source_.height;
@@ -1423,6 +1418,15 @@ void VideoRenderer::ResetChroma() {
   chromaCount_ = 0;
   chromaDarkSum_ = 0;
   chromaDarkCount_ = 0;
+}
+
+void VideoRenderer::SetChromaCadence(int everyNth) {
+  const int want = everyNth < 1 ? 1 : everyNth;
+  if (want == chromaSampleEvery_) return;
+  // Der Takt aendert sich mitten in einer Messung nicht sinnvoll: die schon
+  // gezaehlten Bilder stammen aus dem alten. Also von vorn.
+  chromaSampleEvery_ = want;
+  ResetChroma();
 }
 
 bool VideoRenderer::LumaLayout(size_t* offset, size_t* step) const {

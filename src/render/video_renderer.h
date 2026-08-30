@@ -255,6 +255,24 @@ class VideoRenderer {
   // Wechsel gemessen wurde, gehoert zu einer anderen Einstellung.
   void ResetChroma();
 
+  // Wie dicht gemessen wird: jedes `everyNth`-te Bild.
+  //
+  // Im Normalbetrieb duenn, denn die Messung laeuft dauerhaft mit und soll
+  // billig sein; gebraucht wird dort kein genauer Wert, sondern die
+  // Unterscheidung "farbig" von "grau". Waehrend eines Normenvergleichs
+  // dagegen dicht, und zwar nicht
+  // aus Ungeduld: die Kandidaten sollen dieselbe Szene sehen. Bei jedem achten
+  // Bild dauert eine Messung 3,2 s und der ganze Rundgang vierzehn, und in
+  // vierzehn Sekunden ist eine Spielkonsole im Vorschaumodus zwei Szenen
+  // weiter -- gemessen wurde dann zum Teil das Programm und nicht die Norm.
+  // Dicht abgetastet kostet dieselbe Zahl Messbilder 0,4 s; ein Rundgang aus
+  // vier Messungen brauchte am 30.08. gemessen 2,9 s statt vierzehn.
+  //
+  // Die Zahl der Messbilder aendert sich dabei *nicht*: die dunklen Bloecke
+  // muessen sich weiter ueber zehn Bilder ansammeln, sonst hat die Messung, auf
+  // die es ankommt, keine Grundlage.
+  void SetChromaCadence(int everyNth);
+
   // True when the two fields hold the *same* lines rather than lines half a
   // picture line apart -- a 240p or 288p console that the card packed into an
   // interlaced frame. Such a source is still interlaced in the sense that
@@ -557,6 +575,7 @@ class VideoRenderer {
   // eingestellten Norm, und die kann sich jederzeit aendern.
   int chromaFramesSeen_ = 0;
   int chromaFramesAnalysed_ = 0;
+  int chromaSampleEvery_ = 8;  // siehe SetChromaCadence
   uint64_t chromaSum_ = 0;
   uint64_t chromaCount_ = 0;
   // Dieselbe Summe, aber nur ueber die dunklen Bloecke. Eigene Zaehlung, weil

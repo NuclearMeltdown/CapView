@@ -1737,6 +1737,15 @@ void App::VerifyStandardColour(int64_t now) {
   static const double kColourRetryBaseSeconds = 10.0;
   // Bis die Karte nach einem Normwechsel wieder saubere Bilder liefert. Die
   // Zeilenzahl bleibt gleich, es geht nur um den Farb-PLL, deshalb kurz.
+  //
+  // Dass die Frist ueberhaupt etwas tut, ist am 30.08. nachgestellt worden,
+  // indem sie auf null gesetzt wurde: dann misst jeder Kandidat den
+  // Umschaltmoment mit und wird zu seinem Vorgaenger hin verschmiert -- PAL N
+  // 0,047 und 0,064 statt 0,012 bis 0,021, SECAM B in den Tiefen 0,246 statt
+  // 0,271 bis 0,410. Wie weit sie darueber hinaus Reserve hat, ist nicht
+  // gemessen; sie kostet nichts, weil die Suche nach einem Normwechsel ohnehin
+  // auf zwei frische Messwerte des Wachtthreads wartet und das ungefaehr
+  // ebenso lange dauert.
   static const double kColourSettleSeconds = 0.5;
   // Kommt in dieser Zeit keine Messung zustande, kommt keine. Das Format hat
   // dann keine lesbare Farbe -- siehe VideoRenderer::AnalyzeChroma -- oder es
@@ -1793,6 +1802,26 @@ void App::VerifyStandardColour(int64_t now) {
   // In den Tiefen selbst nicht: richtig bleibt unter 0,110, falsches SECAM
   // faengt bei 0,289 an, Faktor 2,6 dazwischen.
   //
+  // Am selben Abend noch einmal, nachdem das Messfenster von 3,2 s auf 0,4 s
+  // verkuerzt war (siehe SetChromaCadence), vier Rundgaenge:
+  //
+  //   PAL B  (richtig)  0,190/0,112  0,259/0,044  0,135/0,053  0,163/0,069
+  //   SECAM B (falsch)  0,357/0,334  0,477/0,273  0,438/0,393  0,425/0,204
+  //   PAL N  (falsch)   0,042/0,038  0,012/0,011  0,019/0,015  0,018/0,027
+  //
+  // Die Tiefen des richtigen PAL B bleiben, wo sie waren -- unter 0,112 --,
+  // die des falschen SECAM B reichen jetzt bis 0,204 herunter. Der Abstand
+  // schrumpft damit von Faktor 2,6 auf 1,8, und der Wert steht nicht mehr in
+  // der Mitte, sondern naeher am falschen Rand.
+  //
+  // Er bleibt trotzdem, wo er ist, weil die beiden Irrtuemer verschieden viel
+  // kosten. Zu hoch heisst: ein falscher Kandidat gilt als plausibel und tritt
+  // in Stufe eins an -- wo er gegen richtige Tiefen von 0,069 mit 0,204 immer
+  // noch um Faktor 3 verliert. Zu niedrig heisst: der *richtige* Kandidat
+  // fliegt aus beiden Stufen, der Rundgang entscheidet nichts, und der Nutzer
+  // sieht bis zum naechsten Versuch weiter falsche Farben. Der Wert lehnt sich
+  // deshalb an die Seite, auf der ein Fehler noch aufgefangen wird.
+  //
   // Das Argument fuer den Anteil war, beide Zahlen kaemen aus denselben
   // Bildern, die Szene kuerze sich also heraus. Das stimmt fuer einen
   // *Vergleich zweier Kandidaten* -- und dort wird weiter verglichen, siehe
@@ -1816,6 +1845,14 @@ void App::VerifyStandardColour(int64_t now) {
     return d < 0.0f ? std::string("keine dunklen Stellen") : Format("%.3f", d);
   };
 
+  // Waehrend eines Vergleichs wird dicht abgetastet, sonst duenn.
+  //
+  // Hier oben, vor jedem Ruecksprung, damit der dichte Takt nicht in den
+  // Normalbetrieb durchsickern kann: colourCandidates_ *ist* der Suchzustand,
+  // und wer ihn leert, stellt damit auch den Takt zurueck. Die Bedingung wird
+  // je Bild neu gestellt, ausgefuehrt wird nur der Wechsel.
+  renderer_.SetChromaCadence(colourCandidates_.empty() ? 8 : 1);
+
   const long current = capture_.currentStandard();
   if (current == 0) return;
   const bool walking = !colourCandidates_.empty();
@@ -1835,13 +1872,31 @@ void App::VerifyStandardColour(int64_t now) {
   }
 
   // Frisch gewechselt: die ersten Bilder gehoeren noch der alten Einstellung.
+  //
+  // Zurueckgesetzt wird genau einmal, naemlich wenn die Frist abgelaufen ist.
+  // Hier stand vorher ein Ruecksetzer je Bild, solange gewartet wird, und der
+  // sah richtig aus und war es nicht: diese Funktion laeuft nach einem
+  // Normwechsel eine knappe halbe Sekunde ueberhaupt nicht: die Suche wartet
+  // auf zwei frische Messwerte des Wachtthreads, siehe UpdateVideoStandard.
+  // Faellt das Ende der Frist in dieses Loch, ist der erste Aufruf danach
+  // schon zu spaet -- es hat nie jemand zurueckgesetzt, und gemessen wird ab
+  // dem Wechsel statt ab dem Fristende, mitsamt dem Umschaltmoment der Karte.
+  //
+  // Am 30.08. mit Frist null nachgestellt, weil dort dasselbe Loch immer
+  // klafft: PAL N mass 0,047 und 0,064 statt 0,012 bis 0,021, SECAM B in den
+  // Tiefen 0,246 statt 0,271 bis 0,410 -- jeder Kandidat zum Nachbarn hin
+  // verschmiert. Mit einer Frist von 0,5 s traf es nur die Laeufe, in denen
+  // das Loch etwas laenger war als die Frist, und das war nicht zu sehen.
+  //
+  // Ein Ruecksetzer am Fristende macht den Anfang des Messfensters unabhaengig
+  // davon, wann der naechste Aufruf kommt, und kostet nichts: das Fenster lag
+  // ohnehin dahinter.
   if (colourSettleUntilQpc_ != 0) {
-    if (now < colourSettleUntilQpc_) {
-      renderer_.ResetChroma();
-      return;
-    }
+    if (now < colourSettleUntilQpc_) return;
     colourSettleUntilQpc_ = 0;
     colourStartedQpc_ = now;
+    renderer_.ResetChroma();
+    return;
   }
   if (colourStartedQpc_ == 0) colourStartedQpc_ = now;
 
@@ -1899,19 +1954,27 @@ void App::VerifyStandardColour(int64_t now) {
     const int count = (int)colourCandidates_.size();
     // Die Ausgangsnorm kommt am Ende ein zweites Mal dran.
     //
-    // Der Vergleich unterstellt, alle Kandidaten saehen dieselbe Szene. Jeder
-    // braucht gut drei Sekunden, drei Kandidaten also zehn, und in zehn
-    // Sekunden ist eine Spielkonsole im Vorschaumodus laengst woanders. Am
-    // 30.08. um 15:24 Uhr, dieselbe Norm im Abstand von zwanzig Sekunden:
-    // PAL B 0,181/0,217 und PAL B 0,191/0,107. Die Tiefen halbierten sich,
-    // ohne dass sich am Signal etwas geaendert haette.
+    // Der Vergleich unterstellt, alle Kandidaten saehen dieselbe Szene. Am
+    // 30.08. um 15:24 Uhr, als jede Messung noch gut drei Sekunden brauchte
+    // und der ganze Rundgang vierzehn, dieselbe Norm im Abstand von zwanzig
+    // Sekunden: PAL B 0,181/0,217 und PAL B 0,191/0,107. Die Tiefen
+    // halbierten sich, ohne dass sich am Signal etwas geaendert haette.
     //
-    // Der Schaden daraus ist einseitig. Ueber alle heutigen Messungen streuen
-    // die Tiefen des falschen SECAM B um 12 Prozent (0,289 bis 0,363), die des
-    // richtigen PAL B um 60 (0,057 bis 0,217): eine Schwebung aus dem falschen
-    // Traeger liegt gleichmaessig ueber jedem Bild und haengt kaum an der
-    // Szene, echte Farbe in dunklen Flaechen dagegen sehr. Eine flaue Szene
-    // laesst also nur den *richtigen* Kandidaten schlecht aussehen.
+    // Der Rundgang dauert seither knapp drei Sekunden (siehe
+    // SetChromaCadence), und damit ist der Grund kleiner geworden, aber nicht
+    // weg -- und er hat einen zweiten bekommen: die erste Messung der
+    // Ausgangsnorm ist die mitlaufende aus dem Normalbetrieb, ueber drei
+    // Sekunden gemittelt, die der Herausforderer sind kurze Aufnahmen. Die
+    // Wiederholung stellt die Ausgangsnorm auf dieselbe Grundlage wie die
+    // anderen.
+    //
+    // Der Schaden daraus ist einseitig. Ueber alle Messungen des 30.08.
+    // streuen die Tiefen des falschen SECAM B um Faktor zwei (0,204 bis
+    // 0,410), die des richtigen PAL B um Faktor fuenf (0,041 bis 0,217): eine
+    // Schwebung aus dem falschen Traeger liegt gleichmaessig ueber jedem Bild
+    // und haengt nur wenig an der Szene, echte Farbe in dunklen Flaechen
+    // dagegen ganz und gar. Eine flaue Szene laesst also vor allem den
+    // *richtigen* Kandidaten schlecht aussehen.
     //
     // Deshalb wird die Ausgangsnorm zweimal gemessen und tritt mit der
     // guenstigeren der beiden Messungen an. Das ist mit Absicht ungleich
@@ -2138,6 +2201,10 @@ void App::ResetStandardColourCheck() {
   colourStartedQpc_ = 0;
   colourRetryQpc_ = 0;
   colourAttempts_ = 0;
+  // Auch der Takt zurueck: der Abbruch kann von aussen kommen -- Signal weg,
+  // Graph neu -- und dann laeuft VerifyStandardColour nicht mehr, das den Takt
+  // sonst selbst zuruecknimmt.
+  renderer_.SetChromaCadence(8);
   renderer_.ResetChroma();
 }
 
