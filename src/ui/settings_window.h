@@ -52,6 +52,9 @@ class SettingsWindow {
   // by the caller, or null while nothing has been measured.
   void SetDetectedRange(const char* const* text) { detectedRange_ = text; }
   void SetDetectedInterlace(const char* const* text) { detectedInterlace_ = text; }
+  // Ob neben der Messung der Satz stehen soll, dass sie hier vermutlich irrt.
+  // Die Bedingungen dafuer stehen bei App::InterlaceVerdictDoubtful.
+  void SetInterlaceDoubtful(bool doubtful) { interlaceDoubtful_ = doubtful; }
   void SetCoSitedFields(bool on) { coSitedFields_ = on; }
   // False while the app is itself trying to open the card. Probing means
   // building a second graph on the same device, and doing that while the first

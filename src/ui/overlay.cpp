@@ -33,6 +33,32 @@ std::string Decimal(double v, int digits) {
   return s;
 }
 
+// Vier Anzeigen in der Sekunde. Schnell genug, dass die Zahl lebt und man eine
+// Aenderung sofort bemerkt, langsam genug, dass man sie lesen kann.
+const double kStatWindowSeconds = 0.25;
+
+// Wie lange ein Ausschlag stehen bleibt, nachdem er vorbei ist. Ohne das waere
+// eine Spitze fuer eine Viertelsekunde zu sehen und danach fort -- messbar,
+// aber nicht ablesbar, was fuer eine Anzeige dasselbe ist wie gar nicht da.
+//
+// Fuenf Sekunden, weil man beim Spielen nicht auf das Panel schaut, sondern
+// erst hinsieht, *nachdem* etwas geruckelt hat. Bis der Blick von der Mitte des
+// Bildes nach links oben gewandert ist, vergehen ein, zwei Sekunden; ein Wert,
+// der schon weg ist, wenn man ankommt, beantwortet die Frage nicht, wegen der
+// man hingesehen hat.
+const double kStatHoldSeconds = 5.0;
+
+// Ob ein Extremwert eine Erwaehnung wert ist. Er muss beides sein: deutlich vom
+// Mittel entfernt und absolut weit genug weg, um etwas zu bedeuten. Jeder Test
+// allein geht daneben -- ein ruhiges Bildalter von 0,2 ms, das 0,4 streift, ist
+// doppelt so hoch und heisst nichts, und 3 ms auf einem 60-ms-Tonpuffer sind
+// normales Atmen.
+bool StandsOut(double value, double average) {
+  const double d = value > average ? value - average : average - value;
+  if (d < 1.0) return false;
+  return average <= 0.0 || d / average >= 0.15;
+}
+
 // Places an overlay window in one of the four corners, inset from the edge.
 void PositionInCorner(OsdCorner corner, float inset) {
   const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -45,6 +71,66 @@ void PositionInCorner(OsdCorner corner, float inset) {
 }
 
 }  // namespace
+
+void StatMeter::Sample(double value, double now) {
+  if (count_ == 0) {
+    windowStart_ = now;
+    windowLow_ = value;
+    windowHigh_ = value;
+  } else {
+    if (value < windowLow_) windowLow_ = value;
+    if (value > windowHigh_) windowHigh_ = value;
+  }
+  sum_ += value;
+  ++count_;
+
+  if (!sinceValid_) {
+    sinceLow_ = value;
+    sinceHigh_ = value;
+    sinceValid_ = true;
+  } else {
+    if (value < sinceLow_) sinceLow_ = value;
+    if (value > sinceHigh_) sinceHigh_ = value;
+  }
+
+  if (now - windowStart_ < kStatWindowSeconds) return;
+
+  average = sum_ / (double)count_;
+
+  // Gezeigt wird der **juengste** Ausschlag, nicht der groesste. Jeder frische
+  // ersetzt den vorigen und stellt die Uhr zurueck, auch wenn er kleiner ist.
+  //
+  // Das ist die Entscheidung, die man beim Zusehen braucht. Wer hinsieht, weil
+  // es gerade geruckelt hat, will wissen, was gerade passiert ist -- eine
+  // groessere Zahl von vor vier Sekunden beantwortet eine andere Frage und
+  // sieht dabei aus, als sei sie die Antwort. Und mit dem Groessten stuende bei
+  // einer Serie von Rucklern nur der erste da, waehrend es weiterruckelt.
+  //
+  // Was "frisch" heisst, ist dieselbe Bedingung, an der das Panel entscheidet,
+  // ob es den Wert ueberhaupt nennt: die Uhr laeuft genau so lange, wie es
+  // etwas zu sagen gaebe. Laeuft sie ab, faellt der Wert auf das zurueck, was
+  // das laufende Fenster hergibt -- also auf den Normalzustand.
+  const bool freshHigh = StandsOut(windowHigh_, average);
+  const bool freshLow = StandsOut(windowLow_, average);
+  if (!valid || freshHigh || now - highAt_ >= kStatHoldSeconds) {
+    high = windowHigh_;
+    highAt_ = now;
+  }
+  if (!valid || freshLow || now - lowAt_ >= kStatHoldSeconds) {
+    low = windowLow_;
+    lowAt_ = now;
+  }
+  valid = true;
+
+  sum_ = 0.0;
+  count_ = 0;
+}
+
+void StatMeter::TakeRange(double* lowOut, double* highOut) {
+  if (lowOut) *lowOut = sinceValid_ ? sinceLow_ : average;
+  if (highOut) *highOut = sinceValid_ ? sinceHigh_ : average;
+  sinceValid_ = false;
+}
 
 void DrawStatsPanel(const OverlayStats& s) {
   const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -92,14 +178,25 @@ void DrawStatsPanel(const OverlayStats& s) {
         Decimal(s.presentFps, 1) + (s.vsync ? T(" fps  VSync an", " fps  VSync on")
                                             : T(" fps  VSync aus", " fps  VSync off")) +
             ((!s.vsync && s.tearing) ? T(", Tearing erlaubt", ", tearing allowed") : ""));
-    if (normal && s.deinterlacing) Row(T("Halbbilder", "Fields"), s.deinterlaceLabel);
+    if (normal) Row(T("Abtastung", "Scan"), s.scanLabel);
 
     if (full) {
       Row(T("Bilder", "Frames"),
           Format(T("%llu angezeigt, %llu verworfen", "%llu shown, %llu dropped"),
                  (unsigned long long)s.sink.displayed, (unsigned long long)s.sink.dropped));
     }
-    Row(T("Bildalter", "Frame age"), Decimal(s.frameAgeMs, 1) + " ms");
+    // Bildalter ist eine Latenz: nach unten ist alles gut, nur der Ausschlag
+    // nach oben ist eine Nachricht. Deshalb hier nur die Spitze und keine
+    // Spanne.
+    if (s.frameAge.valid) {
+      std::string age = Decimal(s.frameAge.average, 1) + " ms";
+      if (StandsOut(s.frameAge.high, s.frameAge.average)) {
+        age += T("  (Spitze ", "  (peak ") + Decimal(s.frameAge.high, 1) + ")";
+      }
+      Row(T("Bildalter", "Frame age"), age);
+    } else {
+      Row(T("Bildalter", "Frame age"), "—");
+    }
     if (full && s.videoDelayMs > 0) {
       Row(T("Bildverzögerung", "Video delay"),
           Format(T("%d ms (A/V-Versatz)", "%d ms (A/V offset)"), s.videoDelayMs));
@@ -113,8 +210,23 @@ void DrawStatsPanel(const OverlayStats& s) {
             s.audio.outputName + (s.audio.exclusive ? "  [Exclusive]" : "  [Shared]"));
       }
       if (normal) {
+        // Beim Tonpuffer zaehlen beide Richtungen und sie bedeuten Verschiedenes:
+        // ein Puffer, der leerlaeuft, knackt gleich, und einer, der sich
+        // aufstaut, kostet Verzoegerung. Deshalb die Spanne, wenn es nach beiden
+        // Seiten ausschlug, sonst die eine Seite, die es tat.
+        std::string swing;
+        const bool hi = s.audioBuffer.valid && StandsOut(s.audioBuffer.high, s.audioBuffer.average);
+        const bool lo = s.audioBuffer.valid && StandsOut(s.audioBuffer.low, s.audioBuffer.average);
+        if (hi && lo) {
+          swing = Decimal(s.audioBuffer.low, 1) + " - " + Decimal(s.audioBuffer.high, 1) + ", ";
+        } else if (hi) {
+          swing = T("Spitze ", "peak ") + Decimal(s.audioBuffer.high, 1) + ", ";
+        } else if (lo) {
+          swing = T("Einbruch ", "dip ") + Decimal(s.audioBuffer.low, 1) + ", ";
+        }
+        const double shown = s.audioBuffer.valid ? s.audioBuffer.average : s.audio.bufferMs;
         Row(T("Tonpuffer", "Audio buffer"),
-            Decimal(s.audio.bufferMs, 1) + T(" ms  (Ziel ", " ms  (target ") +
+            Decimal(shown, 1) + " ms  (" + swing + T("Ziel ", "target ") +
                 Decimal(s.audio.targetMs, 0) + " ms)");
       }
       if (full) {
