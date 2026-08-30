@@ -1045,6 +1045,15 @@ cbuffer ScaleCB : register(b0) {
   float  gMaskStrength; // 0..1
   int    gNativeWidth;  // pixels the source really has across, 0 = leave alone
   float  gLinePitch;    // output rows per real picture line; 0 disables scanlines
+
+  int    gPassthrough;  // resample only: no display effects, no transfer, no clamp
+  float  gBrightness;   // -1..1 added, or stops of exposure in linear light
+  float  gContrast;     // 0..2 around a pivot; 1 neutral
+  float  gSaturation;   // 0..2; 1 neutral
+
+  float  gHue;          // radians, converted on the way in
+  int    gProcAmp;      // apply the four above in this pass
+  float2 gPad;
 };
 
 struct VSOut {
@@ -1353,6 +1362,61 @@ float3 ToneMapToSdr(float3 rgb) {
   return rgb * (mapped / gDisplayPeak) / luma;
 }
 
+// ---------------------------------------------------------------------------
+// Brightness, contrast, saturation, hue.
+//
+// In the shader rather than on the card on purpose. The card's own set is put
+// back to neutral when the graph is built, so the picture arriving here is the
+// one the console sent; a decoder quietly lifting the black level would mean
+// there was no clean version anywhere to go back to.
+//
+// Order is contrast, brightness, then colour, which is the order every other
+// program does them in -- a number copied from one of them lands where it is
+// expected to.
+// ---------------------------------------------------------------------------
+float3 ApplyProcAmp(float3 rgb) {
+  const bool lin = gTransfer != 0;  // the picture is linear light, not display referred
+  const float3 kLuma = float3(0.2126, 0.7152, 0.0722);  // BT.709; the convert pass got us here
+
+  // Contrast pivots around mid grey, and which value that is depends on what is
+  // being carried. Display referred, half scale looks like the middle of the
+  // range. In linear light the same grey card sits near 0.18 -- undoing that is
+  // most of what a gamma curve was for.
+  const float pivot = lin ? 0.18 : 0.5;
+  rgb = (rgb - pivot) * gContrast + pivot;
+
+  // Brightness adds where the picture is display referred and multiplies where
+  // it is linear. Adding a constant to linear light raises the darkest parts of
+  // the picture out of all proportion to the rest and turns black into grey
+  // fog; multiplying is exposure, which is what the knob is expected to feel
+  // like.
+  if (lin) rgb *= exp2(gBrightness * 2.0);
+  else     rgb += gBrightness;
+
+  // Saturation and hue are one operation on the colour difference from luma:
+  // hue turns that vector, saturation changes its length. Doing both as a
+  // single rotate-and-scale keeps luma exactly where it was, which is the whole
+  // reason for going through the colour difference rather than touching RGB.
+  float y = dot(rgb, kLuma);
+  float cb = (rgb.b - y) / 1.8556;  // 2 * (1 - Kb)
+  float cr = (rgb.r - y) / 1.5748;  // 2 * (1 - Kr)
+
+  const float c = cos(gHue) * gSaturation;
+  const float s = sin(gHue) * gSaturation;
+  const float cb2 = cb * c - cr * s;
+  const float cr2 = cb * s + cr * c;
+
+  const float b = y + 1.8556 * cb2;
+  const float r = y + 1.5748 * cr2;
+  const float g = (y - kLuma.r * r - kLuma.b * b) / kLuma.g;
+  rgb = float3(r, g, b);
+
+  // Display referred, anything outside the range is a colour that does not
+  // exist and clamping is the honest answer. In linear light the top end is the
+  // highlight a recording still wants, so only the floor is held.
+  return lin ? max(rgb, 0.0) : saturate(rgb);
+}
+
 float4 main(VSOut i) : SV_Target {
   float2 pos = i.uv * gSrcSize;  // position in source pixels
 
@@ -1375,6 +1439,20 @@ float4 main(VSOut i) : SV_Target {
   } else {
     rgb = SampleSharpBilinear(pos);
   }
+
+  // Ahead of the line below, and that is the point of it. Everything past that
+  // line is a display effect; these four are not, and whether they reach a file
+  // is the user's decision rather than a property of the pass. gProcAmp is how
+  // that decision arrives -- set for the window whenever a knob is off centre,
+  // set on the way out only when the user asked for it.
+  if (gProcAmp != 0) rgb = ApplyProcAmp(rgb);
+
+  // Resampling on the way out to something that is not a screen. Everything
+  // below this line is either a display effect or a decision about which screen
+  // the picture is headed for, and none of that belongs in a file. Not even the
+  // clamp: in the half float case what is being carried is linear light, where
+  // a value above one is the highlight the whole exercise is about.
+  if (gPassthrough != 0) return float4(rgb, 1.0);
 
   if (gSharpen > 0.001) {
     rgb = Sharpen(rgb, i.uv, gSharpen);

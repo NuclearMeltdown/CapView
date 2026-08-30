@@ -1307,6 +1307,56 @@ bool SetVideoStandard(IBaseFilter* filter, long standard) {
   return true;
 }
 
+int NeutraliseProcAmp(IBaseFilter* filter) {
+  ComPtr<IAMVideoProcAmp> amp = ProcAmpOf(filter);
+  // Beide Faelle gehoeren ins Log, und zwar unterschieden. "Keine Zeile" hiesse
+  // sonst entweder "die Karte hat keine solchen Regler" oder "sie standen schon
+  // richtig", und das ist genau die Frage, die dieser Durchgang beantworten
+  // soll: kommt hier ein unveraendertes Bild an oder nicht.
+  if (!amp) {
+    CAP_LOG("Kartenregler: keine vorhanden, Bild kommt unveraendert an");
+    return 0;
+  }
+
+  int moved = 0;
+  int checked = 0;
+  for (int i = 0; i < kProcAmpPropCount; ++i) {
+    const long prop = kProcAmpProps[i].property;
+
+    long min = 0, max = 0, step = 0, def = 0, caps = 0;
+    if (FAILED(amp->GetRange(prop, &min, &max, &step, &def, &caps))) continue;
+    // Nothing to put it back to. A driver that will only run this property on
+    // automatic is deciding for itself, and overruling that needs a value it
+    // has just said it does not take.
+    if ((caps & VideoProcAmp_Flags_Manual) == 0) continue;
+    ++checked;
+
+    long value = 0, flags = 0;
+    if (FAILED(amp->Get(prop, &value, &flags))) continue;
+    if (value == def && (flags & VideoProcAmp_Flags_Manual) != 0) continue;
+
+    if (FAILED(amp->Set(prop, def, VideoProcAmp_Flags_Manual))) {
+      CAP_WARN("Kartenregler %s liess sich nicht neutralisieren",
+               kProcAmpProps[i].name);
+      continue;
+    }
+    CAP_LOG("Kartenregler %s neutralisiert: %ld -> %ld", kProcAmpProps[i].name, value, def);
+    ++moved;
+  }
+  // Der dritte Fall, und auf der PEXHDCAP60L der tatsaechliche: die Karte
+  // beantwortet die Schnittstelle, stellt aber keinen einzigen Regler von Hand
+  // ein. Dann gibt es hier nichts zu neutralisieren -- und ebenso wenig etwas,
+  // das uns das Bild verstellt haben koennte. Was der Treiberdialog anbietet,
+  // laeuft in dem Fall ueber eine eigene Schnittstelle und ist von hier aus
+  // nicht erreichbar.
+  if (checked == 0) {
+    CAP_LOG("Kartenregler: Schnittstelle da, aber keine von Hand einstellbar");
+  } else if (moved == 0) {
+    CAP_LOG("Kartenregler: %d gefunden, alle bereits neutral", checked);
+  }
+  return moved;
+}
+
 int VideoStandardLocked(IBaseFilter* filter) {
   ComPtr<IAMAnalogVideoDecoder> dec = DecoderOf(filter);
   if (!dec) return -1;

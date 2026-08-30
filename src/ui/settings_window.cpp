@@ -1246,6 +1246,71 @@ void SettingsWindow::DrawImageTab() {
   HelpMarker(T("Hebt Kanten nach der Skalierung an. 0 schaltet es ab.",
                "Lifts edges after scaling. 0 turns it off."));
 
+  // Die vier Regler, die sonst jedes Aufnahmeprogramm hat -- hier aber im
+  // Shader statt auf der Karte. Die Regler der Karte werden beim Start
+  // neutralisiert, damit das, was ankommt, das ist, was die Konsole geschickt
+  // hat; siehe NeutraliseProcAmp.
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Bildregler", "Picture controls"));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Helligkeit", "Brightness"), &img.brightness, -1.0f, 1.0f, "%+.2f");
+  ImGui::SameLine();
+  HelpMarker(T("Hebt oder senkt das ganze Bild. 0 ist neutral.",
+               "Lifts or lowers the whole picture. 0 is neutral."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Kontrast", "Contrast"), &img.contrast, 0.0f, 2.0f, "%.2f");
+  ImGui::SameLine();
+  HelpMarker(T("Spreizt um das mittlere Grau. 1 ist neutral.",
+               "Spreads around mid grey. 1 is neutral."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Sättigung", "Saturation"), &img.saturation, 0.0f, 2.0f, "%.2f");
+  ImGui::SameLine();
+  HelpMarker(T("0 macht das Bild grau, 1 ist neutral, 2 doppelt so bunt.",
+               "0 makes the picture grey, 1 is neutral, 2 twice as colourful."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Farbton", "Hue"), &img.hue, -180.0f, 180.0f, "%+.0f°");
+  ImGui::SameLine();
+  HelpMarker(
+      T("Dreht alle Farben um denselben Winkel. 0 ist neutral. Bei NTSC über "
+        "Composite das, was am Fernseher der Farbton-Regler war.",
+        "Turns every colour by the same angle. 0 is neutral. On NTSC over composite this "
+        "is what the tint knob on a television did."));
+
+  const bool neutral = img.brightness == 0.0f && img.contrast == 1.0f &&
+                       img.saturation == 1.0f && img.hue == 0.0f;
+  ImGui::BeginDisabled(neutral);
+  if (ImGui::Button(T("Zurücksetzen", "Reset"))) {
+    img.brightness = 0.0f;
+    img.contrast = 1.0f;
+    img.saturation = 1.0f;
+    img.hue = 0.0f;
+  }
+  ImGui::EndDisabled();
+
+  ImGui::SameLine();
+  ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
+                    "Apply to recording, screenshots and camera"),
+                  &img.procAmpToOutput);
+  ImGui::SameLine();
+  HelpMarker(
+      T("Aus ist Absicht, und die beiden Stellungen sind nicht gleichwertig. Sauber "
+        "aufnehmen und später nachbearbeiten kostet nichts -- dieselbe Korrektur lässt "
+        "sich im Schnittprogramm jederzeit drauflegen. Mit angehobenem Kontrast "
+        "aufnehmen klemmt dagegen die Lichter auf Vollausschlag und drückt die Tiefen "
+        "auf null, und das holt kein Nachbearbeiten zurück.\n\nAn ist richtig, wenn die "
+        "Aufnahme so hochgeladen wird, wie sie herauskommt.\n\nDie Anzeige bekommt die "
+        "Regler in jedem Fall.",
+        "Off on purpose, and the two positions are not equivalent. Recording clean and "
+        "grading later costs nothing -- the same correction goes on in the editor at any "
+        "time. Recording with contrast raised clips the highlights to full scale and "
+        "crushes the shadows to zero, and no amount of editing brings those back.\n\nOn "
+        "is right when the recording gets uploaded exactly as it comes out.\n\nThe "
+        "display gets the controls either way."));
+
   // Natives Raster. Gehört zur Skalierung, nicht zur Bildröhre: es macht das
   // Bild sauberer, nicht nostalgischer.
   //
@@ -1352,6 +1417,29 @@ void SettingsWindow::DrawImageTab() {
   }
   ImGui::SameLine();
   HelpMarker(AspectHelp(aspect));
+
+  // Bei Strecken und Ganzzahlig gibt es nichts umzurechnen: das eine hat
+  // ueberhaupt keine eigene Form, das andere ist ein Versprechen ueber Pixel,
+  // das genau durch Umrechnen gebrochen wuerde.
+  if (img.aspect != AspectMode::Stretch && img.aspect != AspectMode::Integer) {
+    ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
+                      "Apply to recording, screenshots and camera"),
+                    &img.squarePixelOutput);
+    ImGui::SameLine();
+    HelpMarker(
+        T("Das Fenster kann nicht-quadratische Pixel umsonst zeigen -- es zeichnet "
+          "einfach in ein Rechteck der richtigen Form. Eine Datei kann das nicht, sie "
+          "ist ein Raster. Also wird das Bild beim Hinausgehen mit dem oben gewählten "
+          "Skalierungsfilter auf quadratische Pixel gerechnet, und aus 720x576 wird "
+          "768x576.\n\nÜber HDMI ändert das gar nichts: dort sind die Pixel schon "
+          "quadratisch, die Größen kommen gleich heraus und der Durchgang entfällt.",
+          "The window can show non-square pixels for free -- it simply draws into a "
+          "rectangle of the right shape. A file cannot; it is a grid. So the picture is "
+          "resampled to square pixels on its way out, using the scaling filter chosen "
+          "above, and 720x576 leaves as 768x576.\n\nOver HDMI this changes nothing: "
+          "those pixels are already square, the sizes come out equal and the pass is "
+          "skipped."));
+  }
 
   int rotation = (int)img.rotation;
   ImGui::SetNextItemWidth(-260.0f);

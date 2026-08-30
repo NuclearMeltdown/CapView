@@ -217,6 +217,17 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
     return fail(T("Das Gerät hat keinen brauchbaren Capture-Pin",
                   "The device has no usable capture pin"));
 
+  // Bevor irgendetwas anderes eingestellt wird, und bei jedem Start neu: was in
+  // diesen Reglern steht, wird angewendet, bevor das Bild ueberhaupt bei uns
+  // ankommt. Ein Dekoder, der den Schwarzwert anhebt, laesst im ganzen Programm
+  // keine saubere Fassung mehr uebrig -- und der Schaden ist nicht mehr
+  // ruecknehmbar, weil er schon geklemmt hat. Dieselben vier Regler gibt es im
+  // Bild-Tab, dort im Shader, wo das Original darunter erhalten bleibt.
+  //
+  // Die Treiberdialoge (DevicePropertyPages) koennen das jederzeit wieder
+  // verstellen. Das ist in Ordnung: es gilt dann bis zum naechsten Start.
+  NeutraliseProcAmp(captureFilter_.Get());
+
   // Before the formats are read, not after: the standard decides how many lines
   // the card will produce, and therefore which formats it advertises at all.
   capabilities_.availableStandards = AvailableVideoStandards(captureFilter_.Get());

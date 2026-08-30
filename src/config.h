@@ -269,6 +269,24 @@ struct ImageSettings {
   ScaleFilter filter = ScaleFilter::Bilinear;
   float sharpen = 0.0f;  // 0..1, contrast-adaptive sharpening applied after scaling
 
+  // The four knobs every capture program has. Ours are in the shader rather
+  // than on the card, and that is the whole point: the card's own set is
+  // neutralised when the graph is built, so what arrives here is what the
+  // console sent. See NeutraliseProcAmp -- a decoder quietly lifting the black
+  // level would otherwise mean there is no clean signal anywhere to go back to.
+  float brightness = 0.0f;  // -1..1, added; 0 neutral
+  float contrast = 1.0f;    // 0..2, around a pivot; 1 neutral
+  float saturation = 1.0f;  // 0..2, toward luma; 1 neutral
+  float hue = 0.0f;         // -180..180 degrees; 0 neutral
+  // Whether the four above reach past the window, exactly like
+  // squarePixelOutput below -- but off by default, and that asymmetry is
+  // deliberate. Recording clean and grading later costs nothing: the same curve
+  // goes on in the editor. Recording with contrast baked in clips highlights to
+  // full scale and crushes shadows to zero, and no amount of editing brings
+  // those back. Of the two settings only one can destroy, so the one that
+  // cannot is the default.
+  bool procAmpToOutput = false;
+
   // What a cathode ray tube did to the picture. Off by default, and deliberately
   // so: the rest of this program exists to hand over the signal as clean as it
   // arrived, and these put something back that was never in it. They are here
@@ -317,6 +335,18 @@ struct ImageSettings {
   // which is why it is a knob of its own rather than part of the one above.
   float dotNotch = 0.0f;  // 0..1
   AspectMode aspect = AspectMode::Source;
+  // Whether the aspect above reaches past the window. The display gets it for
+  // free -- it simply draws into a rectangle of the right shape -- but a
+  // recording, a screenshot and the virtual camera are all just a pixel grid,
+  // and a grid with no room for "these pixels are not square" in it. So the
+  // picture is resampled to square pixels on its way out, with the scaling
+  // filter chosen above, and 720x576 leaves as 768x576.
+  //
+  // On HDMI this changes nothing at all: those pixels are already square, the
+  // sizes come out equal and the pass is skipped. It exists for the analogue
+  // standards, where leaving it off means a 4:3 console arriving in OBS as 5:4
+  // -- seven percent too narrow, and no way for anything downstream to know.
+  bool squarePixelOutput = true;
   int cropLeft = 0;
   int cropRight = 0;
   int cropTop = 0;

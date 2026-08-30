@@ -454,6 +454,11 @@ json::Value WriteProfile(const Profile& p) {
   json::Value img = json::Value::Object();
   img["filter"] = (int)p.image.filter;
   img["sharpen"] = p.image.sharpen;
+  img["brightness"] = p.image.brightness;
+  img["contrast"] = p.image.contrast;
+  img["saturation"] = p.image.saturation;
+  img["hue"] = p.image.hue;
+  img["procAmpToOutput"] = p.image.procAmpToOutput;
   img["nativeWidth"] = p.image.nativeWidth;
   img["scanlines"] = p.image.scanlines;
   img["mask"] = p.image.mask;
@@ -468,6 +473,7 @@ json::Value WriteProfile(const Profile& p) {
   img["avoidGhosting"] = p.image.avoidGhosting;
   img["dotNotch"] = p.image.dotNotch;
   img["aspect"] = (int)p.image.aspect;
+  img["squarePixelOutput"] = p.image.squarePixelOutput;
   img["cropLeft"] = p.image.cropLeft;
   img["cropRight"] = p.image.cropRight;
   img["cropTop"] = p.image.cropTop;
@@ -508,6 +514,11 @@ Profile ReadProfile(const json::Value& v) {
   const json::Value& i = v["image"];
   p.image.filter = ReadEnum<ScaleFilter>(i, "filter", 5, ScaleFilter::Bilinear);
   p.image.sharpen = (float)Clamp(i["sharpen"].AsNumber(0.0), 0.0, 1.0);
+  p.image.brightness = (float)Clamp(i["brightness"].AsNumber(0.0), -1.0, 1.0);
+  p.image.contrast = (float)Clamp(i["contrast"].AsNumber(1.0), 0.0, 2.0);
+  p.image.saturation = (float)Clamp(i["saturation"].AsNumber(1.0), 0.0, 2.0);
+  p.image.hue = (float)Clamp(i["hue"].AsNumber(0.0), -180.0, 180.0);
+  p.image.procAmpToOutput = i["procAmpToOutput"].AsBool(false);
   // 16384 rather than a round number: it is the longest texture edge D3D11
   // can address, so nothing this program could draw fits above it anyway.
   p.image.nativeWidth = Clamp(i["nativeWidth"].AsInt(0), 0, 16384);
@@ -525,6 +536,7 @@ Profile ReadProfile(const json::Value& v) {
   p.image.avoidGhosting = i["avoidGhosting"].AsBool(false);
   p.image.dotNotch = (float)i["dotNotch"].AsNumber(0.0);
   p.image.aspect = ReadEnum<AspectMode>(i, "aspect", 5, AspectMode::Source);
+  p.image.squarePixelOutput = i["squarePixelOutput"].AsBool(true);
   p.image.cropLeft = Clamp(i["cropLeft"].AsInt(0), 0, 16384);
   p.image.cropRight = Clamp(i["cropRight"].AsInt(0), 0, 16384);
   p.image.cropTop = Clamp(i["cropTop"].AsInt(0), 0, 16384);
