@@ -14,6 +14,50 @@
 
 namespace cap {
 
+// Ein Messwert, der jedes Bild anfaellt, aber viermal in der Sekunde angezeigt
+// wird.
+//
+// Bildalter und Tonpuffer aendern sich mit jedem Bild, und eine Zahl, die
+// sechzig Mal in der Sekunde eine andere ist, kann man nicht lesen -- bis das
+// Auge eine Ziffer aufgeloest hat, steht dort laengst die naechste. Gesammelt
+// wird deshalb weiter jedes Bild, angezeigt aber, was die letzte Viertelsekunde
+// enthielt.
+//
+// Der Mittelwert ist die Zahl, die man eigentlich sehen will; die Extreme sind
+// die, an denen man einen Ruckler erkennt. Die bleiben laenger stehen als der
+// Mittelwert, denn ein Aussetzer dauert ein einziges Bild -- wuerde er nur sein
+// eigenes Fenster lang angezeigt, waere er wieder weg, bevor man hinsieht.
+struct StatMeter {
+  // Ein Messwert. `now` sind Sekunden aus einer monotonen Uhr.
+  void Sample(double value, double now);
+
+  // Die Extreme seit dem letzten Abruf, den sie zuruecksetzt. Fuer die
+  // Statuszeile im Log, die alle paar Sekunden geschrieben wird und sonst einen
+  // einzelnen Augenblickswert meldete -- also genau das, was ein Ruckler nicht
+  // ist. Beide Zeiger duerfen null sein.
+  void TakeRange(double* low, double* high);
+
+  bool valid = false;    // false, bis das erste Fenster geschlossen hat
+  double average = 0.0;  // ueber das letzte geschlossene Fenster
+  double low = 0.0;      // die gehaltenen Extreme
+  double high = 0.0;
+
+ private:
+  double windowStart_ = 0.0;
+  double sum_ = 0.0;
+  int count_ = 0;
+  double windowLow_ = 0.0;
+  double windowHigh_ = 0.0;
+  double lowAt_ = 0.0;
+  double highAt_ = 0.0;
+  // Zweites, unabhaengiges Paar fuer TakeRange: das Log fragt in einem ganz
+  // anderen Takt als das Panel zeichnet, und beide sollen sich nicht in die
+  // Quere kommen.
+  bool sinceValid_ = false;
+  double sinceLow_ = 0.0;
+  double sinceHigh_ = 0.0;
+};
+
 struct OverlayStats {
   std::string profileName;
   std::string deviceName;
@@ -22,14 +66,25 @@ struct OverlayStats {
   SinkStats sink;
   AudioStats audio;
   double presentFps = 0.0;
-  double frameAgeMs = 0.0;  // how old the displayed frame was when it went out
+  // How old the displayed frame was when it went out, and how full the audio
+  // ring was -- both as meters rather than as numbers, see StatMeter.
+  StatMeter frameAge;
+  StatMeter audioBuffer;
   bool vsync = false;
   bool tearing = false;
-  bool deinterlacing = false;
-  // What is actually running. Not simply the setting: on a source whose fields
-  // are co-sited every mode does the same thing, and saying "YADIF" there would
-  // be describing a code path nobody took.
-  std::string deinterlaceLabel;
+  // How the picture is scanned and, when that means work, what is doing it.
+  //
+  // One row that is always there rather than a deinterlacer row that appears out
+  // of nowhere once something latches: the interesting moment is the *change*,
+  // and a row that only exists after the change has no before to compare
+  // against. While it reads "progressiv" you know the detector has looked and
+  // said no -- which is a different statement from a row not being there, and it
+  // is the one you want while wondering whether the thing is working.
+  //
+  // Not simply the setting: on a source whose fields are co-sited every mode
+  // does the same thing, and saying "YADIF" there would name a code path nobody
+  // took.
+  std::string scanLabel;
   int displayWidth = 0;
   int displayHeight = 0;
   const char* filterName = "";

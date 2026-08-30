@@ -576,6 +576,16 @@ class VideoRenderer {
   // of movement in an otherwise still scene and averaging it away.
   int combFrameHits_ = 0;
   int combFramesAnalysed_ = 0;
+  // Of those, the ones only a single tile noticed -- a small thing moving in an
+  // otherwise still picture. Diagnostic only.
+  int combTileOnly_ = 0;
+  // Whether the tile half of the test is allowed to decide. See
+  // SetAnalogueSource.
+  bool analogueSource_ = false;
+  // Worst reading of the current window, whole frame and best tile. Only ever
+  // read back in the log line.
+  double combFrameBest_ = 0.0;
+  double combTileBest_ = 0.0;
   // Sums of the difference between the two rows of a pair, and between two
   // neighbouring pairs. On a line doubled picture the first is nearly zero.
   uint64_t pairInner_ = 0;

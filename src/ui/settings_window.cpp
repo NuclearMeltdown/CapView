@@ -1479,6 +1479,21 @@ void SettingsWindow::DrawImageTab() {
                         *detectedInterlace_ ? *detectedInterlace_
                                             : T("wird gemessen", "measuring"));
   }
+  // Direkt unter der Messung und direkt ueber dem Schalter, mit dem man sie
+  // uebergeht: das ist die Reihenfolge, in der jemand die Sache liest und
+  // erledigt. Warum die Messung hier irren kann, steht bei
+  // App::InterlaceVerdictDoubtful -- kurz: ein Bild von Kammlinien ist von
+  // Kammlinien nicht zu unterscheiden.
+  if (interlaceDoubtful_) {
+    TextWarningWrapped(
+        T("Bei dieser Auflösung ist das ungewöhnlich. Zeigt die Quelle gerade ein Bild "
+          "oder Video mit feinen Zeilenmustern, kann die Erkennung darauf hereinfallen. "
+          "Sieht das Bild richtig aus, ignoriere das; sonst stelle Deinterlacing hier "
+          "von Hand ab.",
+          "Unusual at this resolution. If the source is showing a picture or video with "
+          "fine line patterns, the detection can be fooled by it. If the picture looks "
+          "right, ignore this; otherwise turn deinterlacing off by hand here."));
+  }
 
   int deint = (int)img.deinterlace;
   ImGui::SetNextItemWidth(-260.0f);

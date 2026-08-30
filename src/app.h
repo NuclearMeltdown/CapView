@@ -149,16 +149,28 @@ class App {
   // "interlaced sources only" is ticked, and then it is the measurement that
   // decides, not the media type.
   bool SourceLooksInterlaced(const Profile& profile) const;
+  // Ob das gemessene "interlaced" bei dieser Quelle nach einem Irrtum aussieht
+  // und deshalb nachgefragt statt behauptet wird. Siehe die Umsetzung.
+  bool InterlaceVerdictDoubtful(const Profile& profile) const;
 
   // Finds the analogue video standard by watching whether the decoder locks.
   // Runs only when the source is set to automatic.
   void UpdateVideoStandard();
+  // Die zweite Stufe dahinter: ob die eingerastete Norm auch den richtigen
+  // Farbtraeger hat. Der Lock kann das nicht sagen, ein graues Bild schon --
+  // die Begruendung steht bei der Umsetzung.
+  void VerifyStandardColour(int64_t now);
+  void ResetStandardColourCheck();
   // Whether the decoder has a signal, asked of the driver a few times a second
   // rather than once a frame. Each call crosses into the driver, and doing that
   // twice per frame cost over ten milliseconds of every one -- more than the
   // entire video pipeline, and enough to stop the deinterlacer being shown at
   // its proper rate.
   int PollSignalLocked();
+  // Was das Einstellungsfenster ueber die Normensuche schreiben soll. Der
+  // Dialog kann das nicht selbst wissen: die Suche laeuft hier, stellt die
+  // Karte mehrmals um und baut den Graphen dabei nicht neu.
+  SettingsWindow::StandardSearch StandardSearchDisplay() const;
   // Asking the driver for the signal state takes about ten milliseconds -- it is
   // a round trip into kernel mode -- which is most of a field period and, on the
   // render thread, a visible hitch in the deinterlacer. So a small thread of its
@@ -269,7 +281,10 @@ class App {
   int64_t fpsWindowQpc_ = 0;
   int presentCount_ = 0;
   double presentFps_ = 0.0;
-  double lastFrameAgeMs_ = 0.0;
+  // Die beiden Zahlen, die sich mit jedem Bild aendern. Jedes Bild gefuettert,
+  // gelesen im Anzeigetakt vom Panel und im Fuenfsekundentakt vom Log.
+  StatMeter frameAgeMeter_;
+  StatMeter audioBufferMeter_;
   int statsLogCounter_ = 0;
 
   // Diagnostics for "the card starts but nothing shows up".
@@ -319,6 +334,12 @@ class App {
   // Filled from the renderer each frame; the settings dialog reads it.
   const char* detectedRangeText_ = nullptr;
   const char* detectedInterlaceText_ = nullptr;
+  // Ob der Hinweis auf ein fragwuerdiges "interlaced" schon einmal aufgeploppt
+  // ist. Die Meldung gehoert zum Umschlagen, nicht zum Zustand -- ohne das hier
+  // stuende sie alle paar Sekunden wieder da, solange die Quelle anliegt.
+  // Zurueckgesetzt, sobald der Zweifel weg ist, damit das naechste Umschlagen
+  // wieder eine Meldung wert ist.
+  bool interlaceDoubtToasted_ = false;
   DevicePropertyPages devicePages_;
   SettingsHost settingsHost_;
   Updater updater_;

@@ -2636,6 +2636,36 @@ ImageSettings App::EffectiveImage(const Profile& profile) const {
   return img;
 }
 
+// Ob das gemessene "interlaced" bei dieser Quelle nach einem Irrtum aussieht.
+//
+// Kein Veto, sondern eine Nachfrage, und das mit Absicht: die Messung kann hier
+// nicht widerlegt werden. Ein bildschirmfuellendes Foto von Kammlinien ist
+// raeumlich von Kammlinien nicht zu unterscheiden, und genau das steht auf
+// einem erfassten Desktop schnell einmal im Browser. Also entscheidet weiter
+// die Messung, und danebengestellt wird der Satz, den ein Mensch braucht, um
+// den Fehler in zwei Sekunden selbst zu beheben.
+//
+// Vier Bedingungen, jede mit einem eigenen Grund:
+// * Die Karte hat *nicht* selbst interlaced gemeldet. Sagt sie es, stimmt es,
+//   und dann gibt es nichts zu bezweifeln.
+// * Die Quelle ist digital. An einem Analogeingang ist interlaced der
+//   Normalfall und die Messung ohnehin die einzige Auskunft.
+// * Mindestens 720 Zeilen. Bei 720 ist die Sache klar -- ein 720i hat es nie
+//   gegeben. Bei 1080 ist sie es nicht, 1080i gab es im Fernsehen wirklich,
+//   und deshalb steht hier eine Frage und keine Behauptung. Darunter, etwa bei
+//   480i von einem DVD-Spieler ueber HDMI, ist interlaced schlicht richtig.
+// * Die automatische Erkennung ist eingeschaltet. Ist sie es nicht, laeuft der
+//   Deinterlacer sowieso und die Messung aendert am Bild nichts -- vor etwas zu
+//   warnen, das gar nicht wirkt, zeigt in die falsche Richtung.
+bool App::InterlaceVerdictDoubtful(const Profile& profile) const {
+  if (!profile.image.deinterlaceAuto) return false;
+  if (renderer_.detectedInterlace() != VideoRenderer::InterlaceVerdict::Interlaced) return false;
+  const VideoFormatInfo fmt = renderer_.sourceFormat();
+  if (!fmt.valid() || fmt.interlaced) return false;
+  if (SourceIsAnalogue()) return false;
+  return fmt.height >= 720;
+}
+
 bool App::SourceLooksInterlaced(const Profile& profile) const {
   if (!profile.image.deinterlaceAuto) return true;
   // The media type is believed when it claims interlaced -- a card that bothers
@@ -3283,7 +3313,15 @@ void App::RenderFrame() {
     WriteScreenshot(true);
   }
 
-  if (sink) lastFrameAgeMs_ = sink->stats().lastArrivalAgeMs;
+  // Beide Messwerte jedes Bild, unabhaengig davon, ob das Panel offen ist: das
+  // Log schreibt seine Statuszeile auch dann, und ein Ruckler waehrend einer
+  // geschlossenen Anzeige ist genau der, den man spaeter sucht.
+  if (captureState_ == CaptureState::Running) {
+    const double nowSeconds = QpcToSeconds(now);
+    if (sink) frameAgeMeter_.Sample(sink->stats().lastArrivalAgeMs, nowSeconds);
+    const AudioStats audioNow = audio_.stats();
+    if (audioNow.running) audioBufferMeter_.Sample(audioNow.bufferMs, nowSeconds);
+  }
   SyncMicrophone();
   FeedRecorder();
   UpdateVirtualCamera();
@@ -3307,13 +3345,21 @@ void App::RenderFrame() {
         statsLogCounter_ = 0;
         const SinkStats sinkStats = sink ? sink->stats() : SinkStats{};
         const AudioStats audioStats = audio_.stats();
+        // Mittel und Spitze ueber die ganzen fuenf Sekunden statt eines
+        // Augenblickswerts. Ein Ruckler ist ein einzelnes Bild -- die Chance,
+        // ihn mit einer Stichprobe alle fuenf Sekunden zu erwischen, ist etwa
+        // eins zu dreihundert, und genau danach wird in diesen Zeilen gesucht.
+        double ageHigh = 0.0;
+        frameAgeMeter_.TakeRange(nullptr, &ageHigh);
+        double bufLow = 0.0, bufHigh = 0.0;
+        audioBufferMeter_.TakeRange(&bufLow, &bufHigh);
         CAP_LOG("Status: Quelle %.2f fps, Ausgabe %.1f fps, %llu angezeigt, %llu verworfen, "
-                "Bildalter %.1f ms | Halbbilder %llu/%llu | Ton %.1f/%.0f ms, %llu leer, "
-                "%llu übergelaufen",
+                "Bildalter %.1f ms (Spitze %.1f) | Halbbilder %llu/%llu | "
+                "Ton %.1f/%.0f ms (%.1f-%.1f), %llu leer, %llu übergelaufen",
                 sinkStats.sourceFps, presentFps_, (unsigned long long)sinkStats.displayed,
-                (unsigned long long)sinkStats.dropped, sinkStats.lastArrivalAgeMs,
+                (unsigned long long)sinkStats.dropped, frameAgeMeter_.average, ageHigh,
                 (unsigned long long)fieldsShown_[0], (unsigned long long)fieldsShown_[1],
-                audioStats.bufferMs, audioStats.targetMs,
+                audioBufferMeter_.average, audioStats.targetMs, bufLow, bufHigh,
                 (unsigned long long)audioStats.underruns,
                 (unsigned long long)audioStats.overruns);
       }
@@ -3415,14 +3461,36 @@ void App::DrawUi() {
     if (sink) stats.sink = sink->stats();
     stats.audio = audio_.stats();
     stats.presentFps = presentFps_;
-    stats.frameAgeMs = lastFrameAgeMs_;
+    stats.frameAge = frameAgeMeter_;
+    stats.audioBuffer = audioBufferMeter_;
     stats.vsync = config_.app.vsync;
     stats.tearing = d3d_.tearingSupported();
-    stats.deinterlacing =
-        profile.image.deinterlace != Deinterlace::Off && SourceLooksInterlaced(profile);
-    stats.deinterlaceLabel = renderer_.sourceCoSitedFields()
-                                 ? T("deckungsgleich (240p/288p)", "aligned (240p/288p)")
-                                 : DeinterlaceName((int)profile.image.deinterlace);
+    // Vier Zustaende, und der erste ist derjenige, der sonst wie ein Fehler
+    // aussieht: solange gemessen wird, steht das auch da. Die Erkennung braucht
+    // rund eine Sekunde bewegtes Bild, und wer in dieser Sekunde hinsieht, soll
+    // "wird gemessen" lesen und nicht ein "progressiv", das gleich widerrufen
+    // wird.
+    if (!renderer_.sourceFormat().valid()) {
+      stats.scanLabel = "—";
+    } else if (profile.image.deinterlaceAuto && !renderer_.sourceFormat().interlaced &&
+               renderer_.detectedInterlace() == VideoRenderer::InterlaceVerdict::Pending) {
+      stats.scanLabel = T("wird gemessen", "measuring");
+    } else if (!SourceLooksInterlaced(profile)) {
+      stats.scanLabel = T("progressiv", "progressive");
+    } else if (renderer_.sourceCoSitedFields()) {
+      stats.scanLabel = T("deckungsgleich (240p/288p)", "aligned (240p/288p)");
+    } else if (profile.image.deinterlace == Deinterlace::Off) {
+      stats.scanLabel = T("interlaced, kein Deinterlacer", "interlaced, no deinterlacer");
+    } else {
+      stats.scanLabel = std::string(T("interlaced, ", "interlaced, ")) +
+                        DeinterlaceName((int)profile.image.deinterlace);
+    }
+    // Der Toast ist weg, sobald man kurz weggesehen hat, und die Einstellungen
+    // sind zu. Diese Zeile ist die eine Flaeche, die dauerhaft sichtbar ist --
+    // wer sich fragt, warum das Bild weicher geworden ist, findet die Antwort
+    // dort, wo er ohnehin nachsieht. Ein Fragezeichen und nicht mehr: der
+    // Zustand steht davor, dies ist nur der Zweifel daran.
+    if (InterlaceVerdictDoubtful(profile)) stats.scanLabel += T(" (?)", " (?)");
     const RECT& r = renderer_.videoRect();
     stats.displayWidth = (int)(r.right - r.left);
     stats.displayHeight = (int)(r.bottom - r.top);
@@ -3509,8 +3577,33 @@ void App::DrawUi() {
       break;
   }
   settings_.SetDetectedInterlace(&detectedInterlaceText_);
+  settings_.SetInterlaceDoubtful(InterlaceVerdictDoubtful(profile));
+
+  // Ein 1080p- oder 720p-Bild, das die Karte als progressiv meldet und das hier
+  // trotzdem als interlaced gemessen wurde: das ist kaum je richtig, und wer
+  // gerade zusieht, merkt sonst nur, dass das Bild ploetzlich weicher wird,
+  // ohne den Grund zu finden. Die Meldung nennt deshalb gleich den Reiter, in
+  // dem es abzustellen ist.
+  {
+    const bool doubtful = InterlaceVerdictDoubtful(profile);
+    if (doubtful && !interlaceDoubtToasted_) {
+      interlaceDoubtToasted_ = true;
+      const VideoFormatInfo fmt = renderer_.sourceFormat();
+      CAP_LOG("Interlacing bei %dx%d erkannt, obwohl die Karte progressiv meldet -- Hinweis "
+              "ausgegeben",
+              fmt.width, fmt.height);
+      Toast(Format(T("Halbbilder bei %dx%d erkannt — bitte prüfen (Reiter Bild)",
+                     "Fields detected at %dx%d — please check (Image tab)"),
+                   fmt.width, fmt.height));
+    } else if (!doubtful) {
+      interlaceDoubtToasted_ = false;
+    }
+  }
   settings_.SetCoSitedFields(renderer_.sourceCoSitedFields());
   settings_.SetSignalLocked(PollSignalLocked());
+  settings_.SetStandardSearch(StandardSearchDisplay());
+  settings_.SetLiveStandard(capture_.running() ? signalStandard_.load(std::memory_order_relaxed)
+                                               : 0);
   settings_.SetProbeAllowed(captureState_ != CaptureState::Reconnecting);
   settings_.SetUpdater(&updater_);
   // Auto means: analogue when the card has a decoder for it. A card that only
@@ -3519,6 +3612,9 @@ void App::DrawUi() {
   // gezeichnet wird. Liefen die beiden auseinander, wirkte etwas, das nirgends
   // mehr einstellbar ist.
   settings_.SetAnalogueSource(SourceIsAnalogue());
+  // Und dieselbe Wahrheit noch einmal an den Renderer, der daran entscheidet,
+  // ob die kachelweise Interlacing-Erkennung mitreden darf.
+  renderer_.SetAnalogueSource(SourceIsAnalogue());
   settings_.SetSourceFps(renderer_.sourceFormat().fps);
   // Woraus sich entscheidet, welche Abschnitte im Reiter Bild erscheinen: die
   // Zeilenzahl fuer die Bildroehreneffekte, die Halbbilder fuer das

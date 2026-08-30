@@ -1072,6 +1072,29 @@ static const double kCombThreshold = 0.030;
 // And this many frames in the window have to reach it. One is a noise spike;
 // two is something that was moving.
 static const int kCombFramesNeeded = 2;
+// The same question asked of a small part of the picture. A frame-wide fraction
+// asks "how much of the picture combed", and something that moves in one corner
+// of an otherwise still frame answers "hardly any of it" no matter how badly
+// that corner combed -- a bobbing sprite covers a few per cent of the screen, so
+// even if every one of its samples combs it lands under a three per cent bar.
+// That is a menu whose selection moves, or a title screen with one animated
+// character on it: unmistakably interlaced to look at, invisible to the average.
+//
+// So the frame is also cut into tiles and the worst one asked on its own. What
+// makes this safe rather than just more sensitive is that the two things it must
+// not react to -- sensor noise and composite dot crawl -- are spread out, and
+// spread out evenly they score the same in a tile as they do in the whole frame.
+// Concentrating the measurement only helps something that is itself
+// concentrated. The tile bar therefore sits well above the frame bar: anything
+// uniform enough to reach it in a tile would have tripped the frame test long
+// before.
+static const int kCombTilesX = 8;
+static const int kCombTilesY = 6;
+static const double kCombTileThreshold = 0.10;
+// Below this a tile is ignored rather than judged. Guards the edges of odd
+// geometries, where the division can leave a tile with a handful of samples in
+// it and a single hit would read as a large fraction.
+static const int kCombTileMinSamples = 64;
 // Co-sited fields: the rows within a pair have to differ by at least this factor
 // less than neighbouring pairs do, and there has to be enough vertical detail
 // for the comparison to mean anything in the first place.
@@ -1099,6 +1122,9 @@ void VideoRenderer::ResetAnalysis() {
   combHits_ = 0;
   combFrameHits_ = 0;
   combFramesAnalysed_ = 0;
+  combTileOnly_ = 0;
+  combFrameBest_ = 0.0;
+  combTileBest_ = 0.0;
   pairInner_ = 0;
   pairOuter_ = 0;
 
@@ -1663,6 +1689,8 @@ void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
   uint64_t samples = 0;
   uint64_t inner = 0;
   uint64_t outer = 0;
+  uint32_t tileHits[kCombTilesX * kCombTilesY] = {};
+  uint32_t tileSamples[kCombTilesX * kCombTilesY] = {};
   // y is odd throughout, so rowA/rowM are the two rows of one pair and rowM/rowB
   // straddle the boundary to the next -- which is what makes both tests fall out
   // of the same three reads.
@@ -1670,7 +1698,9 @@ void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
     const uint8_t* rowA = frame.data + offset + (size_t)(y - 1) * pitch;
     const uint8_t* rowM = rowA + pitch;
     const uint8_t* rowB = rowM + pitch;
+    const int tileRow = y * kCombTilesY / h;
     for (int x = 0; x < w; x += stepX) {
+      const int tile = tileRow * kCombTilesX + x * kCombTilesX / w;
       const size_t at = (size_t)x * step;
       const int la = rowA[at];
       const int lm = rowM[at];
@@ -1685,17 +1715,40 @@ void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
       // image is not read as combing.
       const int comb = (lm - la) * (lm - lb);
       const int detail = la > lb ? la - lb : lb - la;
-      if (comb > 900 + detail * 12) ++hits;
+      if (comb > 900 + detail * 12) {
+        ++hits;
+        ++tileHits[tile];
+      }
       ++samples;
+      ++tileSamples[tile];
     }
   }
   if (samples == 0) return;
+
+  double tileWorst = 0.0;
+  for (int i = 0; i < kCombTilesX * kCombTilesY; ++i) {
+    if (tileSamples[i] < (uint32_t)kCombTileMinSamples) continue;
+    const double f = (double)tileHits[i] / (double)tileSamples[i];
+    if (f > tileWorst) tileWorst = f;
+  }
   // Judged per frame. Combing lives where something moved, so it is concentrated
   // in the few frames that had movement in them; spreading those hits across a
   // window full of still ones is how a real interlaced source gets called
   // progressive.
-  if ((double)hits / (double)samples > kCombThreshold) ++combFrameHits_;
+  const double frameFraction = (double)hits / (double)samples;
+  const bool wholeFrame = frameFraction > kCombThreshold;
+  // Measured either way, acted on only where the assumption behind it holds --
+  // see SetAnalogueSource in the header for why that is the analogue input.
+  const bool oneTile = analogueSource_ && tileWorst > kCombTileThreshold;
+  if (wholeFrame || oneTile) ++combFrameHits_;
+  if (oneTile && !wholeFrame) ++combTileOnly_;
   ++combFramesAnalysed_;
+
+  // Only ever read back in the log line, where they turn "it did not trip" into
+  // "it did not trip, and here is by how far" -- the difference between a
+  // threshold one can check against reality and one that is a guess.
+  if (frameFraction > combFrameBest_) combFrameBest_ = frameFraction;
+  if (tileWorst > combTileBest_) combTileBest_ = tileWorst;
 
   combHits_ += hits;
   combSamples_ += samples;
@@ -1726,10 +1779,17 @@ void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
     return;
   }
 
+  // Ohne diesen Zusatz liest sich eine Zeile mit dreissig Prozent in einer
+  // Kachel und dem Urteil "nein" wie ein Fehler. Der Kachelwert wird immer
+  // gemessen, auch wo er nichts entscheiden darf.
+  const char* tileNote = analogueSource_ ? "" : ", Kachelweg aus (digitale Quelle)";
+
   if (combFrameHits_ >= kCombFramesNeeded) {
     interlaceVerdict_ = InterlaceVerdict::Interlaced;
-    CAP_LOG("Interlacing erkannt: ja (%d von %d Bildern mit Kammartefakten)", combFrameHits_,
-            combFramesAnalysed_);
+    CAP_LOG("Interlacing erkannt: ja (%d von %d Bildern mit Kammartefakten, davon %d nur in "
+            "einzelnen Kacheln; hoechstens %.1f%% im Bild, %.1f%% in einer Kachel%s)",
+            combFrameHits_, combFramesAnalysed_, combTileOnly_, combFrameBest_ * 100.0,
+            combTileBest_ * 100.0, tileNote);
     return;
   }
 
@@ -1738,15 +1798,19 @@ void VideoRenderer::AnalyzeInterlace(const FrameView& frame) {
   // window is only a second or two away.
   if (interlaceVerdict_ == InterlaceVerdict::Pending) {
     interlaceVerdict_ = InterlaceVerdict::Progressive;
-    CAP_LOG("Interlacing erkannt: nein (%d von %d Bildern mit Kammartefakten, "
-            "%.2f/%.2f pro Zeilenpaar)",
-            combFrameHits_, combFramesAnalysed_, lo, hi);
+    CAP_LOG("Interlacing erkannt: nein (%d von %d Bildern mit Kammartefakten, hoechstens "
+            "%.1f%% im Bild und %.1f%% in einer Kachel%s, %.2f/%.2f pro Zeilenpaar)",
+            combFrameHits_, combFramesAnalysed_, combFrameBest_ * 100.0, combTileBest_ * 100.0,
+            tileNote, lo, hi);
   }
   combFramesSeen_ = 0;
   combFrameHits_ = 0;
   combFramesAnalysed_ = 0;
+  combTileOnly_ = 0;
   combSamples_ = 0;
   combHits_ = 0;
+  combFrameBest_ = 0.0;
+  combTileBest_ = 0.0;
   pairInner_ = 0;
   pairOuter_ = 0;
 }
