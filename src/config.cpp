@@ -714,8 +714,8 @@ bool Config::Load(std::string* error) {
   app.cameraHdr = a["cameraHdr"].AsBool(false);
   app.statsDetail = ReadEnum<StatsDetail>(a, "statsDetail", 3, StatsDetail::Compact);
   app.logToFile = a["logToFile"].AsBool(false);
-  app.windowX = a["windowX"].AsInt(-1);
-  app.windowY = a["windowY"].AsInt(-1);
+  app.windowX = a["windowX"].AsInt(AppSettings::kWindowPosUnset);
+  app.windowY = a["windowY"].AsInt(AppSettings::kWindowPosUnset);
   app.windowW = Clamp(a["windowW"].AsInt(1280), 160, 16384);
   app.windowH = Clamp(a["windowH"].AsInt(720), 120, 16384);
   app.maximized = a["maximized"].AsBool(false);

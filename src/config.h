@@ -520,8 +520,13 @@ struct AppSettings {
   // Mouse wheel over the picture changes the volume.
   bool wheelVolume = true;
 
-  int windowX = -1;  // -1 = let Windows place the window
-  int windowY = -1;
+  // Where the window was, and a sentinel for "never saved". That sentinel must
+  // be a number no monitor can produce, which -1 is not: a display placed to the
+  // left of the primary one has nothing *but* negative coordinates, so treating
+  // negative as unset means such a monitor can never be restored to.
+  static const int kWindowPosUnset = (-2147483647 - 1);
+  int windowX = kWindowPosUnset;
+  int windowY = kWindowPosUnset;
   int windowW = 1280;
   int windowH = 720;
   bool maximized = false;
