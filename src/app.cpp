@@ -1021,8 +1021,55 @@ void App::StartRecording() {
                                          : VideoRenderer::kReadbackPixelFormat,
                            wideRecording);
 
+  // Mit welcher Bildrate aufgenommen wird -- und die gemeldete ist es nicht.
+  //
+  // `format.fps` kommt aus `AvgTimePerFrame` des Medientyps, und das Feld haelt
+  // nicht, was sein Name verspricht: es steht da, was zuletzt jemand
+  // hineingeschrieben hat. Am 30.08. um 14:00 Uhr erzwang das Profil noch ein
+  // `720x480 @ 59,94 RGB32` aus den NTSC-Testlaeufen, die Karte lehnte es ab,
+  // fiel auf `720x576 YUY2` zurueck -- und liess die 59,94 im Kopf stehen. Die
+  // echte Quelle war PAL mit gemessenen 25,00 Bildern.
+  //
+  // Der Recorder haelt seine Rate gegen die Tonuhr durch und verdoppelt
+  // notfalls Bilder, um sie zu erreichen. Die Aufnahme um 14:02 lief deshalb
+  // mit 59,94 statt der 50,0, die im Status danebenstanden: rund hundert
+  // Bilder wurden gedoppelt, ohne dass eines davon neu war. Falsch abgespielt
+  // wird nichts -- die Dauer stimmte auf 10,41 s genau -- aber die Datei nennt
+  // eine Bildrate, die die Quelle nie hatte, und traegt sie mit.
+  //
+  // Der Deinterlacer weiter unten in `Tick` steht vor derselben Frage und
+  // beantwortet sie seit jeher so: die gemessene Ankunftsrate gewinnt, wenn es
+  // eine gibt. Hier gilt dasselbe -- nur muss das Bobbing dazu, weil dabei aus
+  // jedem Halbbild ein Vollbild wird und wirklich doppelt so viele verschiedene
+  // Bilder den Renderer verlassen. Gemessene 25,00 und Bobbing ergeben also die
+  // 50,0, die die Statuszeile die ganze Aufnahme ueber gezeigt hat; die
+  // gemeldeten 59,94 waren an keiner Stelle die Rate von irgendetwas. An einer
+  // NTSC-Quelle rechnet dieselbe Zeile 29,97 x 2 = 59,94 -- die native Rate
+  // dieser Karte, die 60 gar nicht kann.
+  //
+  // Verdoppelt wird nach der *Einstellung*, nicht nach dem gerade gemessenen
+  // Zustand, und das ist wichtig. `SourceLooksInterlaced` misst bei
+  // eingeschalteter Automatik am Bildinhalt, und ein stehendes Menuebild hat
+  // keine Kammlinien: die Erkennung sagt dort "progressiv" und kippt erst,
+  // wenn sich etwas bewegt. Wer auf dem Menue aufnimmt und dann losfaehrt,
+  // haette die Aufnahme sonst auf 25 fps festgenagelt, und der Recorder wirft
+  // gegen die Tonuhr jedes zweite Bild weg -- also genau die zweiten
+  // Halbbilder, um derentwillen ueberhaupt gebobbt wird. Nach dem Start laesst
+  // sich nichts mehr richten, `-r` steht in der ffmpeg-Zeile fest.
+  //
+  // Die Obergrenze kostet dafuer bei einer wirklich progressiven Quelle mit
+  // eingeschalteter Automatik doppelte Bilder in der Datei. Das ist der
+  // billigere der beiden Fehler: Platz laesst sich nachtraeglich sparen,
+  // weggeworfene Halbbilder nicht.
+  double recordFps = format.fps;
+  if (const FrameSink* sink = capture_.sink()) {
+    const double measured = sink->stats().sourceFps;
+    if (measured > 1.0) recordFps = measured;
+  }
+  if (config_.active().image.deinterlace != Deinterlace::Off) recordFps *= 2.0;
+
   const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.outputWidth(),
-                                  renderer_.outputHeight(), format.fps, mainTrack, micTrack,
+                                  renderer_.outputHeight(), recordFps, mainTrack, micTrack,
                                   config_.active().audio.micTrackMode, &error);
 
   if (!ok) {
