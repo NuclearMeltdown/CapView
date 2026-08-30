@@ -1768,6 +1768,50 @@ void App::VerifyStandardColour(int64_t now) {
   // gefordert wird 1,6, also gut das Doppelte an Luft.
   static const float kDarkCleanerBy = 1.6f;
 
+  // Ab wann die Tiefen eines Kandidaten fuer sich allein als eingefaerbt
+  // gelten -- ohne Vergleich, ohne zweite Norm.
+  //
+  // Der Absatz darueber sagt, ein fester Wert sei untauglich, weil "dunkel"
+  // nicht "schwarz" heisst. Das gilt weiter, und trotzdem steht hier einer.
+  // Der Grund ist der Versuch mit dem Anteil der Tiefen an der Gesamtfarbe,
+  // der genau diesen festen Wert vermeiden sollte und daran gescheitert ist.
+  // Alle Messungen an einem PAL-GameCube, 30.08.2026:
+  //
+  //   Norm                Farbe   Tiefen   Anteil
+  //   PAL B  (richtig)    0,152    0,101    0,66
+  //   PAL B  (richtig)    0,192    0,110    0,57
+  //   PAL B  (richtig)    0,075    0,057    0,76
+  //   SECAM B (falsch)    0,461    0,353    0,77
+  //   SECAM B (falsch)    0,358    0,335    0,94
+  //   SECAM B (falsch)    0,424    0,363    0,86
+  //   SECAM B (falsch)    0,421    0,289    0,69
+  //   PAL N  (falsch)     0,017    0,014    0,82
+  //   PAL N  (falsch)     0,042    0,037    0,88
+  //   PAL N  (falsch)     0,017    0,022    1,29
+  //
+  // Im Anteil ueberlappen richtig (0,57 bis 0,76) und falsch (0,69 bis 1,29).
+  // In den Tiefen selbst nicht: richtig bleibt unter 0,110, falsches SECAM
+  // faengt bei 0,289 an, Faktor 2,6 dazwischen.
+  //
+  // Das Argument fuer den Anteil war, beide Zahlen kaemen aus denselben
+  // Bildern, die Szene kuerze sich also heraus. Das stimmt fuer einen
+  // *Vergleich zweier Kandidaten* -- und dort wird weiter verglichen, siehe
+  // kDarkCleanerBy. Fuer einen festen Wert je Kandidat stimmt es nicht: der
+  // Anteil haengt daran, wie viel des Bildes ueberhaupt dunkel ist, und das
+  // ist selbst eine Szeneneigenschaft. Auf einer Szene mit wenig dunkler
+  // Flaeche faellt der Anteil des falschen Traegers (0,69), auf einer flauen
+  // steigt der des richtigen (0,76), und die beiden tauschen die Plaetze.
+  //
+  // Was den festen Wert hier tragfaehig macht und ihn beim ersten Versuch mit
+  // 0,060 zu Fall brachte, ist die Bedingung davor: geprueft wird nur, wer
+  // schon kraeftig Farbe hat (kChromaConfident). Wer wenig Farbe zeigt, hat
+  // auch wenig davon in den Tiefen und wird gar nicht erst beurteilt.
+  //
+  // Faellt der Wert einmal falsch, kostet das keine falsche Norm: sind alle
+  // Kandidaten eingefaerbt, bleibt die Entscheidung aus und es gilt die
+  // Reihenfolge der Wohnregion.
+  static const float kDarkTinted = 0.18f;
+
   auto darkText = [&](float d) {
     return d < 0.0f ? std::string("keine dunklen Stellen") : Format("%.3f", d);
   };
@@ -1829,11 +1873,10 @@ void App::VerifyStandardColour(int64_t now) {
     // Der Schwellwert hier ist ein *Verdacht*, kein Urteil. Er entscheidet nur,
     // ob ueberhaupt verglichen wird; welche Norm gewinnt, entscheiden danach
     // die Kandidaten untereinander. Ein zu hoher Wert kostet eine
-    // Fehldekodierung, ein zu niedriger ein paar Sekunden Vergleich -- und
-    // gemessen liegt richtiges PAL B bei 0,101 und falsches SECAM bei 0,353,
-    // also 0,20 in die Mitte.
-    static const float kDarkSuspect = 0.20f;
-    if (energy >= kChromaConfident && dark < kDarkSuspect) {
+    // Fehldekodierung, ein zu niedriger ein paar Sekunden Vergleich. Es ist
+    // dieselbe Frage wie beim Vergleich -- sind diese Tiefen eingefaerbt --
+    // und deshalb derselbe Wert; die Messreihe steht bei kDarkTinted.
+    if (energy >= kChromaConfident && dark < kDarkTinted) {
       CAP_LOG("Videonorm: %s hat deutlich Farbe (%.3f), dunkle Bereiche neutral (%s)",
               VideoStandardName(VideoStandardIndexOf(current)), energy, darkText(dark).c_str());
       colourCheckedStandard_ = current;
@@ -1853,13 +1896,35 @@ void App::VerifyStandardColour(int64_t now) {
       colourStartedQpc_ = 0;
       return;
     }
+    const int count = (int)colourCandidates_.size();
+    // Die Ausgangsnorm kommt am Ende ein zweites Mal dran.
+    //
+    // Der Vergleich unterstellt, alle Kandidaten saehen dieselbe Szene. Jeder
+    // braucht gut drei Sekunden, drei Kandidaten also zehn, und in zehn
+    // Sekunden ist eine Spielkonsole im Vorschaumodus laengst woanders. Am
+    // 30.08. um 15:24 Uhr, dieselbe Norm im Abstand von zwanzig Sekunden:
+    // PAL B 0,181/0,217 und PAL B 0,191/0,107. Die Tiefen halbierten sich,
+    // ohne dass sich am Signal etwas geaendert haette.
+    //
+    // Der Schaden daraus ist einseitig. Ueber alle heutigen Messungen streuen
+    // die Tiefen des falschen SECAM B um 12 Prozent (0,289 bis 0,363), die des
+    // richtigen PAL B um 60 (0,057 bis 0,217): eine Schwebung aus dem falschen
+    // Traeger liegt gleichmaessig ueber jedem Bild und haengt kaum an der
+    // Szene, echte Farbe in dunklen Flaechen dagegen sehr. Eine flaue Szene
+    // laesst also nur den *richtigen* Kandidaten schlecht aussehen.
+    //
+    // Deshalb wird die Ausgangsnorm zweimal gemessen und tritt mit der
+    // guenstigeren der beiden Messungen an. Das ist mit Absicht ungleich
+    // verteilt: sie ist der Kandidat, der schon laeuft, und ein Wechsel weg
+    // von einer richtigen Norm ist der teure Fehler.
+    colourCandidates_.push_back(colourCandidates_.front());
     colourEnergies_.assign(colourCandidates_.size(), -1.0f);
     colourDarks_.assign(colourCandidates_.size(), -1.0f);
     colourIndex_ = 0;
     CAP_LOG("Videonorm: %s ist zweifelhaft (Farbe %.3f, dunkle Bereiche %s) -- die %d Normen mit "
             "%d Zeilen werden verglichen",
             VideoStandardName(VideoStandardIndexOf(current)), energy, darkText(dark).c_str(),
-            (int)colourCandidates_.size(), VideoStandardLines(current));
+            count, VideoStandardLines(current));
   }
 
   // Eintragen, was dieser Kandidat gemessen hat, und zum naechsten.
@@ -1880,8 +1945,33 @@ void App::VerifyStandardColour(int64_t now) {
     return;
   }
 
-  // Alle durch. Erst aussortieren, dann vergleichen -- und die Reihenfolge ist
-  // der ganze Punkt.
+  // Alle durch, die Ausgangsnorm zweimal. Von ihren beiden Messungen zaehlt
+  // die mit den saubereren Tiefen, und zwar als Paar: die Farbmenge kommt aus
+  // derselben Messung wie die Tiefen, sonst stuenden Zahlen aus zwei Szenen
+  // nebeneinander. Die Begruendung steht oben beim zweiten Anlauf.
+  if (colourCandidates_.size() > 1 && colourCandidates_.back() == colourCandidates_.front()) {
+    const size_t last = colourCandidates_.size() - 1;
+    const bool better = colourDarks_[last] >= 0.0f &&
+                        (colourDarks_[0] < 0.0f || colourDarks_[last] < colourDarks_[0]);
+    CAP_LOG("Videonorm: %s zum zweiten Mal gemessen -- Farbe %s, dunkle Bereiche %s (zuerst %s "
+            "und %s)%s",
+            VideoStandardName(VideoStandardIndexOf(colourCandidates_.front())),
+            colourEnergies_[last] < 0.0f ? "keine Messung"
+                                         : Format("%.3f", colourEnergies_[last]).c_str(),
+            darkText(colourDarks_[last]).c_str(),
+            colourEnergies_[0] < 0.0f ? "keine Messung" : Format("%.3f", colourEnergies_[0]).c_str(),
+            darkText(colourDarks_[0]).c_str(), better ? " -- die zweite zaehlt" : "");
+    if (better) {
+      colourEnergies_[0] = colourEnergies_[last];
+      colourDarks_[0] = colourDarks_[last];
+    }
+    colourCandidates_.pop_back();
+    colourEnergies_.pop_back();
+    colourDarks_.pop_back();
+  }
+
+  // Erst aussortieren, dann vergleichen -- und die Reihenfolge ist der ganze
+  // Punkt.
   //
   // "Wer hat am meisten Farbe" waere das Naheliegende und ist falsch. Ein
   // falscher Farbtraeger toetet die Farbe nicht nur, er kann sie auch
@@ -1896,37 +1986,19 @@ void App::VerifyStandardColour(int64_t now) {
   // seine Schwebung gleichmaessig ueber alles, Mitten wie Tiefen.
   //
   // Daraus wird ein Test, den ein einzelner Kandidat fuer sich besteht oder
-  // nicht: der Anteil der Tiefen an der Gesamtfarbe. Beide Zahlen stammen aus
-  // denselben Bildern, die Szene kuerzt sich also heraus -- anders als bei
-  // einem absoluten Schwellwert auf den Tiefen, an dem der erste Versuch
-  // gescheitert ist (0,060 erklaerte das richtige PAL B mit 0,101 fuer
-  // eingefaerbt). Alle bisherigen Messungen, richtige wie falsche:
-  //
-  //   Norm                Farbe   Tiefen   Anteil
-  //   PAL B  (richtig)    0,152    0,101    0,66
-  //   PAL B  (richtig)    0,192    0,110    0,57
-  //   SECAM B (falsch)    0,461    0,353    0,77
-  //   SECAM B (falsch)    0,358    0,335    0,94
-  //   SECAM B (falsch)    0,424    0,363    0,86
-  //   PAL N  (falsch)     0,017    0,014    0,82
-  //   PAL N  (falsch)     0,042    0,037    0,88
-  //
-  // Richtig liegt bei 0,57 bis 0,66, falsch bei 0,77 bis 0,94. Dazwischen ist
-  // Platz, und die Grenze liegt in der Mitte.
+  // nicht: wie viel Farbe in den dunklen Stellen steht. Die Messreihe dazu und
+  // der Grund, warum es der absolute Wert ist und nicht sein Anteil an der
+  // Gesamtfarbe, stehen bei kDarkTinted.
   //
   // Der Test greift nur, wo er etwas messen kann: unterhalb kChromaConfident
-  // ist der Anteil das Verhaeltnis zweier Rauschwerte und sagt nichts, und
-  // ohne dunkle Stellen im Bild gibt es ihn gar nicht. In beiden Faellen gilt
-  // der Kandidat als unbeurteilt -- nicht als bestaetigt und nicht als
-  // widerlegt.
-  static const float kDarkShareMax = 0.72f;
-
+  // sind die Tiefen ein Rauschwert und sagen nichts, und ohne dunkle Stellen
+  // im Bild gibt es sie gar nicht. In beiden Faellen gilt der Kandidat als
+  // unbeurteilt -- nicht als bestaetigt und nicht als widerlegt.
   enum class Verdict { Unjudged, Plausible, Tinted };
   std::vector<Verdict> verdicts(colourCandidates_.size(), Verdict::Unjudged);
   for (size_t i = 0; i < colourCandidates_.size(); ++i) {
     if (colourEnergies_[i] < kChromaConfident || colourDarks_[i] < 0.0f) continue;
-    verdicts[i] = colourDarks_[i] <= colourEnergies_[i] * kDarkShareMax ? Verdict::Plausible
-                                                                       : Verdict::Tinted;
+    verdicts[i] = colourDarks_[i] < kDarkTinted ? Verdict::Plausible : Verdict::Tinted;
   }
 
   int best = -1, runnerUp = -1;
