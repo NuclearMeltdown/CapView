@@ -7,7 +7,13 @@ namespace {
 
 // Read from the UI thread and written only when the setting changes, so a
 // plain atomic is enough.
-std::atomic<Language> g_language{Language::German};
+//
+// English to match AppSettings, so that anything translated before the
+// configuration is loaded comes out in the same language the program will
+// settle on. App::Run calls SetLanguage right after loading, so this value is
+// only ever seen by startup errors -- which is exactly when a disagreement
+// would be hardest to explain.
+std::atomic<Language> g_language{Language::English};
 
 }  // namespace
 

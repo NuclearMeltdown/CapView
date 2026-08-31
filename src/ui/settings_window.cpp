@@ -2091,11 +2091,22 @@ void SettingsWindow::DrawDisplayTab() {
   ImGui::Spacing();
 
   ImGui::SeparatorText(T("Sprache", "Language"));
-  int lang = (int)app.language;
+  // Englisch zuerst, obwohl es in `Language` an zweiter Stelle steht: die Zahl
+  // wandert in die Konfigurationsdatei, die Aufzählung darf also nicht nach der
+  // Liste sortiert werden. Deshalb hier eine eigene Reihenfolge statt ComboEnum.
+  // Oben steht, womit das Programm ohne Einstellung hochkommt.
+  static const Language kLanguageOrder[] = {Language::English, Language::German};
   ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Sprache", "Language"), &lang, 2, LanguageName)) {
-    app.language = (Language)lang;
-    SetLanguage(app.language);
+  if (ImGui::BeginCombo(T("Sprache", "Language"), LanguageName((int)app.language))) {
+    for (Language option : kLanguageOrder) {
+      const bool selected = app.language == option;
+      if (ImGui::Selectable(LanguageName((int)option), selected)) {
+        app.language = option;
+        SetLanguage(app.language);
+      }
+      if (selected) ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
   }
 
   ImGui::Spacing();
