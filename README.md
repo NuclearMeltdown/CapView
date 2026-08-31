@@ -131,6 +131,14 @@ black areas are tinted. The winner has to be clearly ahead rather than merely
 ahead, and standards that carry colour identically are not tried twice, since
 nothing in the picture could tell them apart.
 
+Two of them cannot be separated that way at all. PAL 60 and NTSC 4.43 carry
+colour on the same subcarrier and differ only in that PAL reverses the phase on
+every other line — so the wrong one of the pair does not decode nonsense, it
+decodes *less*, and measuring amounts rewards it for the omission. The round
+therefore also measures the reversal directly: colour that flips from line to
+line on one axis and not the other is a decoder working against the signal, and
+that standard is dropped from the comparison rather than scored in it.
+
 Each candidate takes only as long as it actually needs. Rather than giving every
 one of them a fixed moment to settle — which means giving all of them whatever
 the slowest one requires — the round watches the measurement itself: while the
