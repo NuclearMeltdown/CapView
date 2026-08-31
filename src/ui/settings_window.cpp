@@ -2357,8 +2357,10 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
                "öffnen.",
                "MKV survives a crash. An MP4 that was not closed properly will not open."));
 
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderInt(T("Bitrate", "Bitrate"), &rec.bitrateKbps, 1000, 100000, "%d kbit/s");
+  // Die Bitrate stand frueher hier und steht jetzt im Reiter Encoder, direkt
+  // unter der Ratensteuerung. Getrennt waren die beiden nicht zu verstehen: bei
+  // "Feste Qualitaet" ignoriert der Encoder die Bitrate vollstaendig, und der
+  // Regler dafuer sass einen Reiter weiter, voll bedienbar und wirkungslos.
 
   // Recording faster than the card delivers would only duplicate frames, so the
   // ceiling is the source rate. The number below it is only reached when the
@@ -2775,17 +2777,61 @@ void SettingsWindow::DrawEncoderBlock(const EncoderInfo* encoder) {
                "quality ignores the data rate entirely: the file comes out as large as the "
                "picture demands."));
 
-  if (rec.rateControl == RateControl::Quality) {
-    ImGui::SetNextItemWidth(-260.0f);
-    ImGui::SliderInt(T("Qualität", "Quality"), &rec.qualityLevel, 1, 51,
-                     T("%d (kleiner = besser)", "%d (lower is better)"));
-    ImGui::SameLine();
-    HelpMarker(T("Die Skala unterscheidet sich zwischen den Encodern leicht. 18 bis 24 ist "
-                 "der übliche Bereich; darunter wächst die Datei schnell, ohne dass man "
-                 "viel sieht.",
-                 "The scale differs a little between encoders. 18 to 24 is the usual range; "
-                 "below that the file grows quickly for little that anyone can see."));
+  // Bitrate und Qualitaet sind die beiden Zahlen, die an der Ratensteuerung
+  // haengen -- je nach Stellung zaehlt genau eine davon. Beide stehen deshalb
+  // hier, direkt darunter, und die gerade nicht zaehlende wird ausgegraut statt
+  // versteckt: dasselbe Argument wie oben bei den Encoder-Merkmalen. Ausgegraut
+  // sagt "gilt hier nicht", versteckt sagt gar nichts und laesst die Seite
+  // ausserdem springen.
+  const bool byQuality = rec.rateControl == RateControl::Quality;
+
+  ImGui::BeginDisabled(byQuality);
+  // Logarithmisch, weil die Skala sonst am falschen Ende genau ist. 1000 bis
+  // 100000 linear auf die Bahnbreite sind rund 330 kbit je Bildpunkt -- man
+  // findet einen Wert, treffen kann man ihn nicht. Schlimmer ist die
+  // Verteilung: der Bereich, in dem eine Quelle dieser Karte tatsaechlich
+  // landet, 1 bis 10 Mbit, belegt neun Prozent der Bahn, die restlichen
+  // neunzig sind fuer eine Karte gedacht, die es hier nicht gibt.
+  // Logarithmisch bekommt der benutzte Bereich die halbe Bahn.
+  ImGui::SetNextItemWidth(-360.0f);
+  ImGui::SliderInt("##bitrate", &rec.bitrateKbps, 1000, 100000, "%d kbit/s",
+                   ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+  ImGui::SameLine();
+  // Und ein Feld daneben, weil ein Regler eine Zahl nur ungefaehr trifft und
+  // man hier oft eine bestimmte will. Strg+Klick auf den Regler tut dasselbe,
+  // aber das weiss niemand, dem es niemand sagt -- ein sichtbares Feld schon.
+  ImGui::SetNextItemWidth(96.0f);
+  if (ImGui::InputInt(T("Bitrate", "Bitrate"), &rec.bitrateKbps, 0, 0,
+                      ImGuiInputTextFlags_CharsDecimal)) {
+    rec.bitrateKbps = Clamp(rec.bitrateKbps, 1000, 100000);
   }
+  ImGui::SameLine();
+  HelpMarker(byQuality
+                 ? T("Bei fester Qualität ohne Wirkung -- dort entscheidet der Regler "
+                     "darunter, wie groß die Datei wird.",
+                     "Ignored at constant quality -- there the setting below decides how "
+                     "large the file gets.")
+                 : T("In kbit/s. Für 720x576 sind 6000 bis 12000 der übliche Bereich. Die "
+                     "Zahl lässt sich rechts auch eintippen.",
+                     "In kbit/s. For 720x576 the usual range is 6000 to 12000. The number "
+                     "can also be typed on the right."));
+  ImGui::EndDisabled();
+
+  ImGui::BeginDisabled(!byQuality);
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderInt(T("Qualität", "Quality"), &rec.qualityLevel, 1, 51,
+                   T("%d (kleiner = besser)", "%d (lower is better)"),
+                   ImGuiSliderFlags_AlwaysClamp);
+  ImGui::SameLine();
+  HelpMarker(byQuality
+                 ? T("Die Skala unterscheidet sich zwischen den Encodern leicht. 18 bis 24 ist "
+                     "der übliche Bereich; darunter wächst die Datei schnell, ohne dass man "
+                     "viel sieht.",
+                     "The scale differs a little between encoders. 18 to 24 is the usual range; "
+                     "below that the file grows quickly for little that anyone can see.")
+                 : T("Nur bei fester Qualität. Sonst entscheidet die Bitrate darüber.",
+                     "Constant quality only. Otherwise the bitrate decides."));
+  ImGui::EndDisabled();
 
   const char* presetNames[] = {T("Automatisch", "Automatic"),
                                T("Am schnellsten", "Fastest"),
