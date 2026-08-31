@@ -377,6 +377,19 @@ class App {
   // der einzige Weg, die Wartefrist zu begruenden statt zu raten.
   int64_t standardSetQpc_ = 0;
   int standardSweeps_ = 0;          // completed passes through the list without a lock
+  // Seit wann gar kein Bild mehr ankommt, 0 = es kommt eines. Trennt die
+  // ausgeschaltete Quelle (leere Bilder kommen weiter an) von der Norm, die
+  // das anliegende Signal nicht dekodieren kann (es kommt nichts mehr) --
+  // siehe UpdateVideoStandard. Das Logbuch dazu nur einmal je Aussetzer.
+  int64_t standardStarvedSinceQpc_ = 0;
+  bool standardStarvedLogged_ = false;
+
+  // Die Quellgroesse, fuer die der gespeicherte Zuschnitt gemessen wurde.
+  // 0x0 heisst: in dieser Sitzung noch kein Bild gesehen, das erste zaehlt
+  // dann als der Stand, auf den sich die Zahlen beziehen. Siehe
+  // UpdateCropForFormat.
+  int cropFormatWidth_ = 0;
+  int cropFormatHeight_ = 0;
   long standardLastGood_ = 0;       // die zuletzt eingerastete Norm, 0 = noch keine
   // Die Zeilenzahl, unter der das laufende Format ausgesucht wurde. Aus der
   // Karte beim Graphenbau, nicht aus dem Profil -- dort kann "automatisch"
@@ -396,6 +409,10 @@ class App {
   int64_t colourStartedQpc_ = 0;        // seit wann auf eine Messung gewartet wird
   int64_t colourRetryQpc_ = 0;          // vor diesem Zeitpunkt nicht noch einmal
   int colourAttempts_ = 0;              // unentschiedene Anlaeufe fuer diese Norm
+  // Ob gerade auf ein Bild gewartet wird, das hell genug zum Vergleichen ist.
+  // Nur damit die Zeile darueber einmal im Log steht statt sechzig Mal je
+  // Sekunde; entschieden wird jedes Bild neu.
+  bool colourWaitingForPicture_ = false;
   std::thread signalWatch_;
   std::atomic<bool> signalWatchRun_{false};
   std::atomic<int> signalLocked_{-1};

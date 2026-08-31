@@ -277,6 +277,21 @@ class VideoRenderer {
   // fertigen RGB, faellt rotes Schwarz aus der Auswahl heraus und die Messung
   // findet genau die Bloecke nicht, wegen derer sie da ist.
   float darkChromaEnergy() const;
+  // Wie viel vom gemessenen Bild ueberhaupt Licht hatte, 0..1: der Anteil der
+  // Bloecke, die *nicht* als dunkel gezaehlt wurden. -1, solange zu wenige
+  // Bilder gemessen wurden.
+  //
+  // Wofuer das da ist: die beiden Werte oben sagen, wie farbig das Bild war,
+  // nicht ob ueberhaupt eines da war. Ein fast schwarzes Bild misst in jeder
+  // Norm dieselbe Null -- Schwarz ist in allen Normen schwarz --, und eine
+  // Messung, die in jeder Norm gleich ausfaellt, kann zwischen Normen nicht
+  // unterscheiden. Ein Vergleich braucht also nicht nur Farbe, sondern zuerst
+  // beleuchtete Flaeche, in der Farbe stehen koennte.
+  //
+  // Dieselben Bloecke, dasselbe Fenster und derselbe Beschnitt wie chromaEnergy
+  // und darkChromaEnergy, absichtlich: was hier gezaehlt wird, ist genau das,
+  // woraus die beiden anderen Zahlen entstanden sind.
+  float chromaLitFraction() const;
   // Von vorn messen. Wird gerufen, wenn die Norm gewechselt hat: was vor dem
   // Wechsel gemessen wurde, gehoert zu einer anderen Einstellung.
   void ResetChroma();

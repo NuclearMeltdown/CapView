@@ -1380,6 +1380,31 @@ std::string VideoStandardPickerName(long setting) {
   return group < 0 ? VideoStandardSettingName(setting) : VideoStandardGroupName(group);
 }
 
+VideoColourSystem VideoStandardColourSystem(long standard) {
+  // Nach dem, was der Decoder mit der Farbe macht, nicht nach dem Namen. Die
+  // Buchstaben hinter PAL und SECAM sind Rundfunkeigenschaften, und PAL 60,
+  // PAL M und PAL N heissen PAL, weil sie die Phase zeilenweise wenden -- was
+  // sie voneinander trennt, ist Zeilenzahl und Traeger, und beides wird
+  // anderswo gefragt.
+  switch (standard) {
+    case AnalogVideo_NTSC_M:
+    case AnalogVideo_NTSC_M_J:
+    case AnalogVideo_NTSC_433:
+      return VideoColourSystem::Ntsc;
+    case AnalogVideo_SECAM_B:
+    case AnalogVideo_SECAM_D:
+    case AnalogVideo_SECAM_G:
+    case AnalogVideo_SECAM_H:
+    case AnalogVideo_SECAM_K:
+    case AnalogVideo_SECAM_K1:
+    case AnalogVideo_SECAM_L:
+    case AnalogVideo_SECAM_L1:
+      return VideoColourSystem::Secam;
+    default:
+      return VideoColourSystem::Pal;
+  }
+}
+
 double VideoStandardSubcarrierSamples(long standard) {
   // 13.5 MHz of sampling over the active line, from BT.601.
   const double kSampleRate = 13500000.0;
@@ -1534,12 +1559,47 @@ std::vector<long> VideoStandardColourCandidates(long standard, long available,
   // zuletzt gut war.
   const std::vector<long> ordered = AutoStandardCandidates(available, region, 0, nullptr);
 
+  // Und was zweimal dasselbe misst, wird einmal gemessen.
+  //
+  // Der Rundgang urteilt ueber die Farbe und ueber nichts sonst: wieviel
+  // Chroma im Bild steckt und wie eingefaerbt die Tiefen sind. Zwei Normen mit
+  // demselben Farbsystem auf demselben Traeger erzeugen daraus dasselbe Bild,
+  // und die zweite Messung kann deshalb nichts sagen, was die erste nicht
+  // schon gesagt hat -- sie kostet nur ihre Einschwingzeit und stellt ihr
+  // Ergebnis als Konkurrenten neben das Original.
+  //
+  // Bei 525 Zeilen trifft das genau ein Paar: NTSC M und NTSC M (Japan), beide
+  // NTSC auf 3,58 MHz. Sie unterscheiden sich im Schwarzabhebungswert -- 7,5
+  // IRE gegen 0 -- und das ist eine Sache der Helligkeit, die dieser Rundgang
+  // gar nicht misst. Am 31.08.2026 um 02:42 standen sie im Log denn auch
+  // brav nebeneinander, 0,9 Sekunden fuer eine Auskunft, die schon vorlag.
+  //
+  // Bei 625 Zeilen faellt nichts weg: PAL B (4,43), PAL N (3,58) und SECAM
+  // sind drei verschiedene Bilder. Der Rundgang verliert dadurch also nichts
+  // ausser der Wiederholung.
+  //
+  // Welche der beiden stehen bleibt, entscheidet die Reihenfolge und damit die
+  // Region -- dieselbe Regel, die schon ueberall sonst den Gleichstand
+  // aufloest. In Japan kommt die japanische zuerst, sonst die amerikanische.
+  auto sameColour = [](long a, long b) {
+    return VideoStandardColourSystem(a) == VideoStandardColourSystem(b) &&
+           VideoStandardSubcarrierSamples(a) == VideoStandardSubcarrierSamples(b);
+  };
+
   // Die jetzige zuerst, denn sie ist bereits gemessen; sie noch einmal
   // einzustellen waere ein Wechsel und kostete eine Einschwingzeit umsonst.
   if ((available & standard) != 0) out.push_back(standard);
   for (long candidate : ordered) {
     if (candidate == standard) continue;
     if (VideoStandardLines(candidate) != lines) continue;
+    bool duplicate = false;
+    for (long have : out) {
+      if (sameColour(have, candidate)) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) continue;
     out.push_back(candidate);
   }
   return out;
