@@ -142,6 +142,18 @@ decide this either, and is not made to: the measurement is repeated after 3 and
 6 seconds and then left alone. Until it decides, the picture runs on in the
 standard that matches the configured region.
 
+While either stage is running, the picture says which step of how many is on
+screen and what set the search off — colour too pale for a standard that could
+be right, colour reaching into the blacks, or no lock at all. The standards are
+switched in front of you either way; the line is there so that what you are
+watching has a reason attached to it.
+
+The search can also be **asked for**: **F7**, or *Detect video standard* in the
+right-click menu, runs both stages again even when the current standard holds
+and shows plenty of colour. That is the case none of these measurements covers —
+colour that is wrong rather than missing — and the only route to it used to be
+picking a standard by hand and setting it back to automatic.
+
 Every step is written to `CapView.log` with what was measured and why it was
 enough, so a wrong decision can be read back rather than guessed at.
 
@@ -279,6 +291,15 @@ The capture audio serves as the master clock and the video timeline is derived
 from the number of audio samples written, so the output is constant frame rate
 and does not drift: measured at 1 ms over 15 seconds.
 
+Frame size and rate stand fixed in the encoder's command line for the length of
+a file, so a console switched from 60 to 50 Hz while recording no longer fits
+the file being written. When that happens the recording is **cut and continued
+in a new file** at the new shape, rather than stopping at the change or filling
+the rest of the file with frames that do not match its header. A standard search
+walks through several line counts on its way to an answer, so the cut waits
+until the source has held one shape for a moment — a search that ends where it
+started does not cut at all.
+
 More: [Recording](../../wiki/Recording).
 
 ### Screenshots
@@ -319,6 +340,13 @@ are exposed under one set of names and translated into each vendor's own.
 Everything defaults to automatic, which passes nothing at all rather than
 passing the encoder's default. Anything a given encoder has no opinion about is
 greyed out rather than hidden.
+
+**Bitrate and quality sit directly under rate control**, which is what decides
+which of the two counts; whichever is not in use is greyed out rather than
+hidden. The bitrate slider is logarithmic, because the range a card like this
+actually lands in — 1 to 10 Mbit — is nine percent of a linear scale that runs
+to 100, and a field beside it takes a typed number for when the slider is close
+but not right.
 
 More: [Encoder settings](../../wiki/Encoder-settings).
 
@@ -414,6 +442,7 @@ More: [Updates](../../wiki/Updates).
 | F2 | Settings |
 | F5 | Restart capture |
 | Shift+F5 | Reinitialise card |
+| F7 | Detect video standard |
 | F8 | Detect border |
 | F9 | Start / stop recording |
 | F10 | Screenshot |
