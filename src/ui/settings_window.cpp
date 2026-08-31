@@ -1236,21 +1236,31 @@ void SettingsWindow::DrawImageTab() {
   ImageSettings& img = cfg().active().image;
 
   // Der volleste Reiter, also mit einer Reihenfolge und nicht mit einer
-  // Reihung: erst was das Bild richtig macht, dann was es schöner macht.
+  // Reihung: oben, was man an einer frisch angeschlossenen Quelle als Erstes
+  // anfasst, unten, was von allein richtig steht.
   //
-  //   Form (Skalierung samt Seitenverhältnis und Drehung, natives Raster)
-  //   Zeit (Halbbilder)
-  //   Zuschnitt
-  //   Reparatur (Composite-Filter)
-  //   Farbe und Regler
+  //   Skalierung samt Seitenverhältnis, Drehung und Zeilenverdopplung
+  //   Bildregler
+  //   Halbbilder
+  //   Zuschnitt, und direkt darunter das native Raster
+  //   Composite-Filter
   //   Bildröhre
+  //   Farbe
   //
-  // Die beiden Enden sind der Grund für den Rest: der Composite-Filter holt
-  // heraus, was die Übertragung verdorben hat, und die Bildröhre verdeckt
-  // absichtlich Details. Standen sie nebeneinander, sähen sie aus wie zwei
-  // Geschmacksfragen. Seitenverhältnis und Drehung standen früher ohne eigene
+  // Zuschnitt und natives Raster stehen beieinander, weil beide dasselbe
+  // zählen: Pixel der Quelle. Farbe steht ganz unten, weil sie sich selbst
+  // misst -- wer sie anfasst, tut es, weil die Messung danebenlag, und das ist
+  // der seltene Fall.
+  //
+  // Seitenverhältnis, Drehung und Zeilen verdoppeln standen früher ohne eigene
   // Überschrift hinter der Bildröhre und sahen dadurch nach Nostalgie aus,
-  // obwohl sie zur Skalierung gehören und auch in jede Aufnahme durchschlagen.
+  // obwohl sie zur Skalierung gehören und in jede Aufnahme durchschlagen.
+  //
+  // Was diese Reihenfolge schuldig bleibt: Composite-Filter und Bildröhre sind
+  // Nachbarn geworden. Der eine holt heraus, was die Übertragung verdorben
+  // hat, der andere legt mit Absicht wieder etwas darüber, und nebeneinander
+  // sehen sie aus wie zwei Geschmacksfragen. Trennen kann sie nur ein eigener
+  // Reiter, nicht eine andere Sortierung innerhalb dieses hier.
   ImGui::Spacing();
 
   ImGui::SeparatorText(T("Skalierung", "Scaling"));
@@ -1332,60 +1342,74 @@ void SettingsWindow::DrawImageTab() {
                  "For 240p/288p sources that arrive half as tall as they should."));
   }
 
-  // Natives Raster. Gehört zur Skalierung, nicht zur Bildröhre: es macht das
-  // Bild sauberer, nicht nostalgischer.
-  //
-  // Und es ist rein analog. Es rechnet zurück, was das Abtasten einer analogen
-  // Zeile mit fester Rate angerichtet hat -- ein digitaler Eingang überträgt
-  // die Bildpunkte bereits einzeln, da gibt es kein Raster wiederzufinden.
-  if (analogueSource_) {
+  // Die vier Regler, die sonst jedes Aufnahmeprogramm hat -- hier aber im
+  // Shader statt auf der Karte. Die Regler der Karte werden beim Start
+  // neutralisiert, damit das, was ankommt, das ist, was die Konsole geschickt
+  // hat; siehe NeutraliseProcAmp.
   ImGui::Spacing();
-  ImGui::SeparatorText(T("Natives Pixelraster", "Native pixel grid"));
+  ImGui::SeparatorText(T("Bildregler", "Picture controls"));
 
-  // Die Konsole steht in der Liste selbst, nicht nur im Tooltip: wer hier
-  // vorbeikommt, weiß was er angeschlossen hat und sucht die Zahl dazu -- nicht
-  // umgekehrt.
-  static const int kNativePresets[] = {0, 256, 320, 384, 512, 640};
-  const char* kNativeWho[] = {
-      T("aus", "off"),
-      "256  ·  SNES, NES, PS1",
-      T("320  ·  Mega Drive, PS1", "320  ·  Mega Drive, PS1"),
-      T("384  ·  Amiga, PS1 breit", "384  ·  Amiga, PS1 wide"),
-      T("512  ·  SNES hochauflösend", "512  ·  SNES hi-res"),
-      T("640  ·  GameCube, PS2, Dreamcast", "640  ·  GameCube, PS2, Dreamcast"),
-  };
-  int nativeIdx = 0;
-  for (int k = 0; k < 6; ++k) {
-    if (img.nativeWidth == kNativePresets[k]) nativeIdx = k;
-  }
   ImGui::SetNextItemWidth(-260.0f);
-  if (ImGui::BeginCombo(T("Breite der Quelle", "Source width"), kNativeWho[nativeIdx])) {
-    for (int k = 0; k < 6; ++k) {
-      const bool chosen = nativeIdx == k;
-      if (ImGui::Selectable(kNativeWho[k], chosen)) img.nativeWidth = kNativePresets[k];
-      if (chosen) ImGui::SetItemDefaultFocus();
-    }
-    ImGui::EndCombo();
-  }
+  ImGui::SliderFloat(T("Helligkeit", "Brightness"), &img.brightness, -1.0f, 1.0f, "%+.2f");
   ImGui::SameLine();
-  HelpMarker(T("Wie viele Pixel die Konsole waagerecht wirklich zeichnet. Die Karte tastet "
-               "mit fester Rate ab, meist 720 -- ein SNES-Pixel landet damit auf 2,8 "
-               "Proben. Ist die Zahl bekannt, wird jedes Ausgabepixel dem richtigen "
-               "Konsolenpixel zugeordnet statt irgendwo dazwischen.\n\n"
-               "256 SNES, NES, PS1 niedrig · 320 Mega Drive, PS1 · 512 SNES hochauflösend · "
-               "640 GameCube, PS2 in 480p\n\n"
-               "Ersetzt den Filter oben, weil die Zuordnung selbst schon die Entscheidung "
-               "ist. Am besten mit Integer-Skalierung.",
-               "How many pixels the console really draws across. The card samples at a "
-               "fixed rate, usually 720 -- so one SNES pixel lands on about 2.8 samples. "
-               "Given the real number, every output pixel resolves to the console's pixel "
-               "instead of somewhere between two of them.\n\n"
-               "256 SNES, NES, PS1 low · 320 Mega Drive, PS1 · 512 SNES hi-res · "
-               "640 GameCube, PS2 at 480p\n\n"
-               "Replaces the filter above, because the mapping is the decision. Best with "
-               "integer scaling."));
+  HelpMarker(T("Hebt oder senkt das ganze Bild. 0 ist neutral.",
+               "Lifts or lowers the whole picture. 0 is neutral."));
 
-  }  // natives Pixelraster, nur analog
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Kontrast", "Contrast"), &img.contrast, 0.0f, 2.0f, "%.2f");
+  ImGui::SameLine();
+  HelpMarker(T("Spreizt um das mittlere Grau. 1 ist neutral.",
+               "Spreads around mid grey. 1 is neutral."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Sättigung", "Saturation"), &img.saturation, 0.0f, 2.0f, "%.2f");
+  ImGui::SameLine();
+  HelpMarker(T("0 macht das Bild grau, 1 ist neutral, 2 doppelt so bunt.",
+               "0 makes the picture grey, 1 is neutral, 2 twice as colourful."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Farbton", "Hue"), &img.hue, -180.0f, 180.0f, "%+.0f°");
+  ImGui::SameLine();
+  HelpMarker(
+      T("Dreht alle Farben um denselben Winkel. 0 ist neutral. Bei NTSC über "
+        "Composite das, was am Fernseher der Farbton-Regler war.",
+        "Turns every colour by the same angle. 0 is neutral. On NTSC over composite this "
+        "is what the tint knob on a television did."));
+
+  const bool neutral = img.brightness == 0.0f && img.contrast == 1.0f &&
+                       img.saturation == 1.0f && img.hue == 0.0f;
+  ImGui::BeginDisabled(neutral);
+  if (ImGui::Button(T("Zurücksetzen", "Reset"))) {
+    img.brightness = 0.0f;
+    img.contrast = 1.0f;
+    img.saturation = 1.0f;
+    img.hue = 0.0f;
+  }
+  ImGui::EndDisabled();
+
+  ImGui::SameLine();
+  // Eigene ID, siehe oben beim gleichlautenden Kaestchen der quadratischen
+  // Pixel.
+  ImGui::PushID("procamp-to-output");
+  ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
+                    "Apply to recording, screenshots and camera"),
+                  &img.procAmpToOutput);
+  ImGui::PopID();
+  ImGui::SameLine();
+  HelpMarker(
+      T("Aus ist Absicht, und die beiden Stellungen sind nicht gleichwertig. Sauber "
+        "aufnehmen und später nachbearbeiten kostet nichts -- dieselbe Korrektur lässt "
+        "sich im Schnittprogramm jederzeit drauflegen. Mit angehobenem Kontrast "
+        "aufnehmen klemmt dagegen die Lichter auf Vollausschlag und drückt die Tiefen "
+        "auf null, und das holt kein Nachbearbeiten zurück.\n\nAn ist richtig, wenn die "
+        "Aufnahme so hochgeladen wird, wie sie herauskommt.\n\nDie Anzeige bekommt die "
+        "Regler in jedem Fall.",
+        "Off on purpose, and the two positions are not equivalent. Recording clean and "
+        "grading later costs nothing -- the same correction goes on in the editor at any "
+        "time. Recording with contrast raised clips the highlights to full scale and "
+        "crushes the shadows to zero, and no amount of editing brings those back.\n\nOn "
+        "is right when the recording gets uploaded exactly as it comes out.\n\nThe "
+        "display gets the controls either way."));
 
   // Halbbilder. Nicht danach gezeigt, ob die Quelle analog ist, sondern danach,
   // ob sie ueberhaupt Halbbilder hat -- 1080i und 480i gibt es auch ueber HDMI,
@@ -1508,6 +1532,62 @@ void SettingsWindow::DrawImageTab() {
     }
     ImGui::TextDisabled(T("Gespeichert für: %s", "Stored for: %s"), sizes.c_str());
   }
+
+  // Natives Raster. Steht beim Zuschnitt, weil beide in Pixeln der Quelle
+  // rechnen. Und es gehört nicht zur Bildröhre: es macht das Bild sauberer,
+  // nicht nostalgischer.
+  //
+  // Und es ist rein analog. Es rechnet zurück, was das Abtasten einer analogen
+  // Zeile mit fester Rate angerichtet hat -- ein digitaler Eingang überträgt
+  // die Bildpunkte bereits einzeln, da gibt es kein Raster wiederzufinden.
+  if (analogueSource_) {
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Natives Pixelraster", "Native pixel grid"));
+
+  // Die Konsole steht in der Liste selbst, nicht nur im Tooltip: wer hier
+  // vorbeikommt, weiß was er angeschlossen hat und sucht die Zahl dazu -- nicht
+  // umgekehrt.
+  static const int kNativePresets[] = {0, 256, 320, 384, 512, 640};
+  const char* kNativeWho[] = {
+      T("aus", "off"),
+      "256  ·  SNES, NES, PS1",
+      T("320  ·  Mega Drive, PS1", "320  ·  Mega Drive, PS1"),
+      T("384  ·  Amiga, PS1 breit", "384  ·  Amiga, PS1 wide"),
+      T("512  ·  SNES hochauflösend", "512  ·  SNES hi-res"),
+      T("640  ·  GameCube, PS2, Dreamcast", "640  ·  GameCube, PS2, Dreamcast"),
+  };
+  int nativeIdx = 0;
+  for (int k = 0; k < 6; ++k) {
+    if (img.nativeWidth == kNativePresets[k]) nativeIdx = k;
+  }
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::BeginCombo(T("Breite der Quelle", "Source width"), kNativeWho[nativeIdx])) {
+    for (int k = 0; k < 6; ++k) {
+      const bool chosen = nativeIdx == k;
+      if (ImGui::Selectable(kNativeWho[k], chosen)) img.nativeWidth = kNativePresets[k];
+      if (chosen) ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Wie viele Pixel die Konsole waagerecht wirklich zeichnet. Die Karte tastet "
+               "mit fester Rate ab, meist 720 -- ein SNES-Pixel landet damit auf 2,8 "
+               "Proben. Ist die Zahl bekannt, wird jedes Ausgabepixel dem richtigen "
+               "Konsolenpixel zugeordnet statt irgendwo dazwischen.\n\n"
+               "256 SNES, NES, PS1 niedrig · 320 Mega Drive, PS1 · 512 SNES hochauflösend · "
+               "640 GameCube, PS2 in 480p\n\n"
+               "Ersetzt den Filter oben, weil die Zuordnung selbst schon die Entscheidung "
+               "ist. Am besten mit Integer-Skalierung.",
+               "How many pixels the console really draws across. The card samples at a "
+               "fixed rate, usually 720 -- so one SNES pixel lands on about 2.8 samples. "
+               "Given the real number, every output pixel resolves to the console's pixel "
+               "instead of somewhere between two of them.\n\n"
+               "256 SNES, NES, PS1 low · 320 Mega Drive, PS1 · 512 SNES hi-res · "
+               "640 GameCube, PS2 at 480p\n\n"
+               "Replaces the filter above, because the mapping is the decision. Best with "
+               "integer scaling."));
+
+  }  // natives Pixelraster, nur analog
 
   if (analogueSource_) {
     ImGui::Spacing();
@@ -1651,107 +1731,9 @@ void SettingsWindow::DrawImageTab() {
     }
   }
 
-  ImGui::Spacing();
-  ImGui::SeparatorText(T("Farbe", "Colour"));
-  int range = (int)img.range;
-  ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Wertebereich", "Range"), &range, 3, ColorRangeName)) {
-    img.range = (ColorRange)range;
-  }
-  ImGui::SameLine();
-  HelpMarker(T("Falsch gewählt: Schwarz wirkt grau, oder Zeichnung geht verloren. "
-               "Automatisch misst den Wertebereich am Bild.",
-               "Set wrong: black looks grey, or detail is lost. Automatic measures the range "
-               "from the picture."));
-
-  int matrix = (int)img.matrix;
-  ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Farbmatrix", "Colour matrix"), &matrix, 3, ColorMatrixName)) {
-    img.matrix = (ColorMatrix)matrix;
-  }
-  ImGui::SameLine();
-  HelpMarker(T("BT.601 für SD, BT.709 für HD. Falsch gewählt kippen Hauttöne.",
-               "BT.601 for SD, BT.709 for HD. Set wrong, skin tones shift."));
-  if (img.range == ColorRange::Auto && detectedRange_ && *detectedRange_) {
-    ImGui::TextDisabled(T("Gemessen: %s", "Measured: %s"), *detectedRange_);
-  }
-  ImGui::TextDisabled(T("Beides auch per Rechtsklick im Bild erreichbar.",
-                        "Both are also in the right-click menu over the picture."));
-
-  // Die vier Regler, die sonst jedes Aufnahmeprogramm hat -- hier aber im
-  // Shader statt auf der Karte. Die Regler der Karte werden beim Start
-  // neutralisiert, damit das, was ankommt, das ist, was die Konsole geschickt
-  // hat; siehe NeutraliseProcAmp.
-  ImGui::Spacing();
-  ImGui::SeparatorText(T("Bildregler", "Picture controls"));
-
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Helligkeit", "Brightness"), &img.brightness, -1.0f, 1.0f, "%+.2f");
-  ImGui::SameLine();
-  HelpMarker(T("Hebt oder senkt das ganze Bild. 0 ist neutral.",
-               "Lifts or lowers the whole picture. 0 is neutral."));
-
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Kontrast", "Contrast"), &img.contrast, 0.0f, 2.0f, "%.2f");
-  ImGui::SameLine();
-  HelpMarker(T("Spreizt um das mittlere Grau. 1 ist neutral.",
-               "Spreads around mid grey. 1 is neutral."));
-
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Sättigung", "Saturation"), &img.saturation, 0.0f, 2.0f, "%.2f");
-  ImGui::SameLine();
-  HelpMarker(T("0 macht das Bild grau, 1 ist neutral, 2 doppelt so bunt.",
-               "0 makes the picture grey, 1 is neutral, 2 twice as colourful."));
-
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Farbton", "Hue"), &img.hue, -180.0f, 180.0f, "%+.0f°");
-  ImGui::SameLine();
-  HelpMarker(
-      T("Dreht alle Farben um denselben Winkel. 0 ist neutral. Bei NTSC über "
-        "Composite das, was am Fernseher der Farbton-Regler war.",
-        "Turns every colour by the same angle. 0 is neutral. On NTSC over composite this "
-        "is what the tint knob on a television did."));
-
-  const bool neutral = img.brightness == 0.0f && img.contrast == 1.0f &&
-                       img.saturation == 1.0f && img.hue == 0.0f;
-  ImGui::BeginDisabled(neutral);
-  if (ImGui::Button(T("Zurücksetzen", "Reset"))) {
-    img.brightness = 0.0f;
-    img.contrast = 1.0f;
-    img.saturation = 1.0f;
-    img.hue = 0.0f;
-  }
-  ImGui::EndDisabled();
-
-  ImGui::SameLine();
-  // Eigene ID, siehe oben beim gleichlautenden Kaestchen der quadratischen
-  // Pixel.
-  ImGui::PushID("procamp-to-output");
-  ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
-                    "Apply to recording, screenshots and camera"),
-                  &img.procAmpToOutput);
-  ImGui::PopID();
-  ImGui::SameLine();
-  HelpMarker(
-      T("Aus ist Absicht, und die beiden Stellungen sind nicht gleichwertig. Sauber "
-        "aufnehmen und später nachbearbeiten kostet nichts -- dieselbe Korrektur lässt "
-        "sich im Schnittprogramm jederzeit drauflegen. Mit angehobenem Kontrast "
-        "aufnehmen klemmt dagegen die Lichter auf Vollausschlag und drückt die Tiefen "
-        "auf null, und das holt kein Nachbearbeiten zurück.\n\nAn ist richtig, wenn die "
-        "Aufnahme so hochgeladen wird, wie sie herauskommt.\n\nDie Anzeige bekommt die "
-        "Regler in jedem Fall.",
-        "Off on purpose, and the two positions are not equivalent. Recording clean and "
-        "grading later costs nothing -- the same correction goes on in the editor at any "
-        "time. Recording with contrast raised clips the highlights to full scale and "
-        "crushes the shadows to zero, and no amount of editing brings those back.\n\nOn "
-        "is right when the recording gets uploaded exactly as it comes out.\n\nThe "
-        "display gets the controls either way."));
-
-  // Bildröhre. Steht ganz am Ende der Seite, und so weit vom Composite-Filter
-  // entfernt wie diese Seite es hergibt: der räumt auf, was die Übertragung
-  // angerichtet hat, dieser hier legt mit Absicht wieder etwas darüber. Es sind
-  // Anzeigeeffekte und keine Signalbearbeitung, und sie landen weder in einer
-  // Aufnahme noch in einem Screenshot.
+  // Bildröhre. Anzeigeeffekte und keine Signalbearbeitung: sie landen weder in
+  // einer Aufnahme noch in einem Screenshot, und anders als der Filter direkt
+  // darüber stellen sie nichts wieder her, sondern legen etwas obendrauf.
   //
   // Gezeigt wird das nach der Zeilenzahl der Quelle, nicht danach, ob sie
   // analog ist. Der Grund ist ein Geraet, das es wirklich gibt: ein RetroTINK
@@ -1791,6 +1773,33 @@ void SettingsWindow::DrawImageTab() {
                  "Needs a high output resolution to read as a mask rather than as a tint."));
   }
   }  // Bildröhre, nur bei standardaufloesenden Quellen
+
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Farbe", "Colour"));
+  int range = (int)img.range;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Wertebereich", "Range"), &range, 3, ColorRangeName)) {
+    img.range = (ColorRange)range;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Falsch gewählt: Schwarz wirkt grau, oder Zeichnung geht verloren. "
+               "Automatisch misst den Wertebereich am Bild.",
+               "Set wrong: black looks grey, or detail is lost. Automatic measures the range "
+               "from the picture."));
+
+  int matrix = (int)img.matrix;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Farbmatrix", "Colour matrix"), &matrix, 3, ColorMatrixName)) {
+    img.matrix = (ColorMatrix)matrix;
+  }
+  ImGui::SameLine();
+  HelpMarker(T("BT.601 für SD, BT.709 für HD. Falsch gewählt kippen Hauttöne.",
+               "BT.601 for SD, BT.709 for HD. Set wrong, skin tones shift."));
+  if (img.range == ColorRange::Auto && detectedRange_ && *detectedRange_) {
+    ImGui::TextDisabled(T("Gemessen: %s", "Measured: %s"), *detectedRange_);
+  }
+  ImGui::TextDisabled(T("Beides auch per Rechtsklick im Bild erreichbar.",
+                        "Both are also in the right-click menu over the picture."));
 }
 
 // ----------------------------------------------------------------- audio tab
