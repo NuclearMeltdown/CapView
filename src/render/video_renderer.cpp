@@ -1371,6 +1371,42 @@ void VideoRenderer::AnalyzeChroma(const FrameView& frame) {
           darkSum += block;
           darkCount += 1;
         }
+
+        // Die Zeilenalternation, siehe den gleichlautenden Block im RGB-Zweig.
+        // Hier nur, wo die Farbe volle Zeilenaufloesung hat: ist sie
+        // senkrecht unterabgetastet (4:2:0), hat die Karte je zwei Zeilen
+        // schon zusammengefasst, und dabei ist genau das verschwunden, was
+        // hier gemessen werden soll. U und V liegen bereits auf derselben
+        // Skala um 128, also wird nichts umgerechnet.
+        if (cp.cyShift == 0 && by + 6 < y1) {
+          int cb[4] = {0, 0, 0, 0}, cr[4] = {0, 0, 0, 0};
+          bool got = true;
+          for (int k = 0; k < 4; ++k) {
+            const size_t ay = (size_t)(by + k * 2);
+            const uint8_t* aU = frame.data + cp.uOff + ay * cp.uPitch;
+            const uint8_t* aV = frame.data + cp.vOff + ay * cp.vPitch;
+            int au2 = 0, av2 = 0, m = 0;
+            for (int x = bx; x < bx + kChromaBlockW; x += 2) {
+              const size_t cx = (size_t)(x >> cp.cxShift);
+              au2 += (int)aU[cx * cp.uStep];
+              av2 += (int)aV[cx * cp.vStep];
+              ++m;
+            }
+            if (m == 0) {
+              got = false;
+              break;
+            }
+            cb[k] = au2 / m - 128;
+            cr[k] = av2 / m - 128;
+          }
+          if (got) {
+            const int av = (cr[0] - cr[1] + cr[2] - cr[3]) / 4;
+            const int au = (cb[0] - cb[1] + cb[2] - cb[3]) / 4;
+            chromaAltVSum_ += (uint64_t)(av < 0 ? -av : av);
+            chromaAltUSum_ += (uint64_t)(au < 0 ? -au : au);
+            chromaAltCount_ += 1;
+          }
+        }
       }
     }
   } else if (kind_ == FormatKind::Rgb) {
@@ -1417,6 +1453,52 @@ void VideoRenderer::AnalyzeChroma(const FrameView& frame) {
           darkSum += (uint64_t)(hi - lo);
           darkCount += 1;
         }
+
+        // Und derselbe Block noch einmal, aber ueber vier Halbbildzeilen statt
+        // zwei -- die Zeilenalternation, siehe chromaAltV.
+        //
+        // Das Bild kommt gewoben herein, Halbbild an Halbbild verschraenkt
+        // (deshalb sucht AnalyzeInterlace ueberhaupt nach Kammartefakten).
+        // Benachbarte Zeilen *desselben* Halbbilds sind damit die Bildzeilen
+        // y und y+2, und genau zwischen denen kehrt PAL die Phase um. Vier
+        // davon reichen, um das Umklappen vom glatten Verlauf zu trennen:
+        // eine Kante oder ein Farbverlauf hebt sich in der Wechselsumme
+        // weitgehend auf, ein Vorzeichenwechsel je Zeile addiert sich darin
+        // auf.
+        //
+        // Gerechnet wird in Cb/Cr und nicht in U/V, weil beide Achsen dann
+        // dieselbe Spanne haben und die eine Zahl gegen die andere gehalten
+        // werden darf. Darauf kommt es an: PAL klappt nur Cr um, echtes
+        // Bilddetail klappt beide gleichermassen.
+        if (by + 6 < y1) {
+          int cb[4] = {0, 0, 0, 0}, cr[4] = {0, 0, 0, 0};
+          bool got = true;
+          for (int k = 0; k < 4; ++k) {
+            const uint8_t* aRow = frame.data + (size_t)(by + k * 2) * pitch;
+            int ar = 0, ag = 0, ab = 0, m = 0;
+            for (int x = bx; x < bx + kChromaBlockW; x += 2) {
+              const uint8_t* px = aRow + (size_t)x * step;
+              ab += px[0];
+              ag += px[1];
+              ar += px[2];
+              ++m;
+            }
+            if (m == 0) {
+              got = false;
+              break;
+            }
+            const int r2 = ar / m, g2 = ag / m, b2 = ab / m;
+            cb[k] = (-169 * r2 - 331 * g2 + 500 * b2) / 1000;
+            cr[k] = (500 * r2 - 419 * g2 - 81 * b2) / 1000;
+          }
+          if (got) {
+            const int av = (cr[0] - cr[1] + cr[2] - cr[3]) / 4;
+            const int au = (cb[0] - cb[1] + cb[2] - cb[3]) / 4;
+            chromaAltVSum_ += (uint64_t)(av < 0 ? -av : av);
+            chromaAltUSum_ += (uint64_t)(au < 0 ? -au : au);
+            chromaAltCount_ += 1;
+          }
+        }
       }
     }
   } else {
@@ -1458,6 +1540,21 @@ float VideoRenderer::chromaLitFraction() const {
   return (float)((double)lit / (double)chromaCount_);
 }
 
+// Auf dieselbe Skala 0..255 wie chromaEnergy gebracht: gemessen wird in Cb/Cr
+// mit einer Spanne von je +-127,5, und der Wechselanteil davon ist noch einmal
+// halb so gross. Die Zahl selbst muss nur gegen die andere Achse und gegen die
+// anderen Normen zu halten sein -- die Skala ist da, damit sie neben den
+// uebrigen Farbzahlen im Protokoll lesbar bleibt.
+float VideoRenderer::chromaAltV() const {
+  if (chromaFramesAnalysed_ < chromaFramesWanted_ || chromaAltCount_ == 0) return -1.0f;
+  return (float)((double)chromaAltVSum_ / (double)chromaAltCount_ / 255.0);
+}
+
+float VideoRenderer::chromaAltU() const {
+  if (chromaFramesAnalysed_ < chromaFramesWanted_ || chromaAltCount_ == 0) return -1.0f;
+  return (float)((double)chromaAltUSum_ / (double)chromaAltCount_ / 255.0);
+}
+
 void VideoRenderer::ResetChroma() {
   chromaFramesSeen_ = 0;
   chromaFramesAnalysed_ = 0;
@@ -1465,6 +1562,9 @@ void VideoRenderer::ResetChroma() {
   chromaCount_ = 0;
   chromaDarkSum_ = 0;
   chromaDarkCount_ = 0;
+  chromaAltVSum_ = 0;
+  chromaAltUSum_ = 0;
+  chromaAltCount_ = 0;
 }
 
 void VideoRenderer::SetChromaCadence(int everyNth) {
