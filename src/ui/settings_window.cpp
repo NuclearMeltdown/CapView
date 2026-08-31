@@ -1727,6 +1727,24 @@ void SettingsWindow::DrawImageTab() {
     img.cropLeft = img.cropRight = img.cropTop = img.cropBottom = 0;
   }
 
+  ImGui::Checkbox(T("Je Bildgröße getrennt merken", "Remember per picture size"),
+                  &img.cropPerFormat);
+  ImGui::SameLine();
+  HelpMarker(T("Dieselbe Quelle kann zwei Bildgrößen liefern — ein PAL-GameCube 576 Zeilen und im "
+               "60-Hz-Modus 480 —, und an beiden hängt ein anderer Rand. Angehakt behält jede "
+               "Größe ihren eigenen Zuschnitt, statt beim Wechsel zurückgesetzt zu werden.",
+               "One source can deliver two picture sizes — a PAL GameCube 576 lines and 480 in "
+               "60 Hz mode — with a different border on each. Ticked, every size keeps its own "
+               "crop instead of being reset on the change."));
+  if (img.cropPerFormat && !img.cropVariants.empty()) {
+    std::string sizes;
+    for (const CropForFormat& v : img.cropVariants) {
+      if (!sizes.empty()) sizes += ", ";
+      sizes += std::to_string(v.width) + "x" + std::to_string(v.height);
+    }
+    ImGui::TextDisabled(T("Gespeichert für: %s", "Stored for: %s"), sizes.c_str());
+  }
+
   ImGui::Spacing();
   ImGui::SeparatorText(T("Farbe", "Colour"));
   int range = (int)img.range;
