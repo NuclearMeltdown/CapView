@@ -161,6 +161,14 @@ class App {
   // die Begruendung steht bei der Umsetzung.
   void VerifyStandardColour(int64_t now);
   void ResetStandardColourCheck();
+  // Beide Stufen von Hand ausloesen, ohne den Umweg ueber den Normwaehler.
+  // Siehe die Umsetzung: was ein Mensch an einer Norm auszusetzen hat, misst
+  // die Automatik nicht unbedingt mit.
+  void RescanVideoStandard();
+  // Die zwei Zeilen der Einblendung waehrend der Suche: was gerade laeuft, und
+  // warum. Der Grund steht in `colourDoubt_` und den Zaehlern daneben, und
+  // beides ist nur hier beisammen.
+  void StandardSearchText(std::string* headline, std::string* detail) const;
   // Whether the decoder has a signal, asked of the driver a few times a second
   // rather than once a frame. Each call crosses into the driver, and doing that
   // twice per frame cost over ten milliseconds of every one -- more than the
@@ -372,6 +380,12 @@ class App {
   // Automatic video standard. Only the timestamps live here; what the card can
   // do is asked of the card each time, because it is the card that knows.
   int standardCandidate_ = -1;      // index into the candidate list, -1 = not searching
+  // Wie lang die Liste beim letzten Durchgang war. Nur fuer die Einblendung --
+  // "3 von 8" statt drei laufender Punkte --, deshalb hier mitgeschrieben
+  // statt neu berechnet: die Liste haengt an den Faehigkeiten der Karte und
+  // der Wohnregion, und die je Bild noch einmal zusammenzustellen waere Arbeit
+  // fuer eine Zahl.
+  int standardCandidateCount_ = 0;
   int64_t standardLostQpc_ = 0;     // when the lock was first missing
   int64_t standardNextTryQpc_ = 0;  // not before this
   // Wann die aktuell probierte Norm gesetzt wurde. Nur zum Messen: daraus wird
@@ -400,6 +414,25 @@ class App {
 
   // Farbpruefung. Siehe App::VerifyStandardColour.
   long colourCheckedStandard_ = 0;  // fuer diese Norm ist die Sache entschieden
+  // Woran der Rundgang haengt. Steht nur fuer die Einblendung hier: sie soll
+  // den gemessenen Grund nennen, und der ist an der Stelle bekannt, an der der
+  // Rundgang beginnt, nicht mehr an der, an der gezeichnet wird.
+  enum class ColourDoubt {
+    None,    // kein Rundgang
+    Pale,    // zu wenig Farbe fuer eine Norm, die stimmen koennte
+    Tinted,  // Farbe da, aber sie steht auch im Schwarzen
+    Manual,  // von Hand ausgeloest, ohne dass etwas dagegen sprach
+  };
+  ColourDoubt colourDoubt_ = ColourDoubt::None;
+  // Bis zu diesem Zeitpunkt wird der Rundgang gegangen, auch wenn die
+  // anliegende Norm kraeftig Farbe zeigt. Setzt RescanVideoStandard.
+  //
+  // Eine Frist und kein Schalter, weil der Wunsch verfallen koennen muss. Wer
+  // die Taste auf einem schwarzen Bild drueckt, bekommt keinen Rundgang -- auf
+  // Schwarz ist keine Norm zu erkennen, es wird gewartet --, und ein Schalter
+  // stuende dann fuer immer. Zwei Minuten spaeter faengt das Bild ploetzlich an
+  // durchzuschalten, und niemand weiss mehr warum.
+  int64_t standardForceColourUntilQpc_ = 0;
   // Der Rundgang durch die Normen derselben Zeilenzahl. Leer, solange keiner
   // laeuft; sonst die Kandidaten, der Zeiger auf den gerade gemessenen und die
   // beiden Messreihen dazu (-1 = keine Messung zustande gekommen).

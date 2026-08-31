@@ -121,7 +121,12 @@ void DrawToast(const std::string& text, double age, double duration);
 // without this is a picture that changes standard every few seconds for no
 // stated reason. Top centre, clear of the statistics panel (top left), the
 // recording dot (the corners) and the toasts (bottom centre).
-void DrawSearchIndicator(const std::string& text);
+// `detail` steht klein darunter und sagt, *warum* gesucht wird. Ohne das ist
+// die Einblendung eine Behauptung: das Bild schaltet durch mehrere Normen, und
+// die einzige Auskunft dazu sind drei laufende Punkte. Der Grund ist gemessen
+// -- zu blasse Farbe, eingefaerbte Tiefen, kein Lock -- und gehoert deshalb
+// dorthin, wo der Vorgang zu sehen ist. Leer heisst: nur die Kopfzeile.
+void DrawSearchIndicator(const std::string& text, const std::string& detail = {});
 
 // Volume readout with a bar, parked in the chosen corner. Shown for a moment
 // after every change so the level is visible without opening anything.

@@ -390,7 +390,7 @@ void DrawToast(const std::string& text, double age, double duration) {
   ImGui::PopStyleVar();
 }
 
-void DrawSearchIndicator(const std::string& text) {
+void DrawSearchIndicator(const std::string& text, const std::string& detail) {
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 24.0f),
                           ImGuiCond_Always, ImVec2(0.5f, 0.0f));
@@ -406,6 +406,10 @@ void DrawSearchIndicator(const std::string& text) {
       if (i >= phase) dots[(size_t)i] = ' ';
     }
     ImGui::Text("%s%s", text.c_str(), dots.c_str());
+    // Der Grund darunter, klein: die Kopfzeile sagt, was gerade auf der Karte
+    // steht, und die will man im Vorbeigehen lesen koennen. Warum ueberhaupt
+    // gesucht wird, liest man einmal.
+    if (!detail.empty()) ImGui::TextDisabled("%s", detail.c_str());
   }
   ImGui::End();
 }

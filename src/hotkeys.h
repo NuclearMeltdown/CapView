@@ -22,6 +22,7 @@ enum class HotkeyAction {
   Record,
   Screenshot,
   DetectCrop,
+  DetectStandard,
   Mute,
   VolumeUp,
   VolumeDown,

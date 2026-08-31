@@ -1502,6 +1502,125 @@ SettingsWindow::StandardSearch App::StandardSearchDisplay() const {
   return standardSweeps_ >= 1 && standardCandidate_ < 0 ? S::Paused : S::Trying;
 }
 
+// Die beiden Zeilen der Einblendung: was laeuft, und warum es laeuft.
+//
+// Bis hierher standen dort drei laufende Punkte hinter einem Normnamen, und
+// das ist genau die Auskunft, die schon zu sehen war -- das Bild schaltet
+// sichtbar durch mehrere Normen. Was nicht zu sehen ist und den Vorgang erst
+// erklaert, ist der Grund: dass die Farbe zu blass war fuer eine Norm, die
+// stimmen koennte, oder dass Farbe bis ins Schwarze steht, oder dass die Karte
+// gar nicht erst einrastet. Der Grund ist gemessen, er liegt vor, und er
+// gehoert dorthin, wo der Vorgang zu sehen ist.
+//
+// Dazu der Zaehler. Eine Suche ohne Zaehler ist eine Suche ohne Ende -- man
+// kann ihr nicht ansehen, ob sie in einer Sekunde fertig ist oder in zehn --,
+// und der Zaehler ist der Unterschied zwischen Warten und Zusehen.
+void App::StandardSearchText(std::string* headline, std::string* detail) const {
+  const long shown = capture_.running() ? signalStandard_.load(std::memory_order_relaxed) : 0;
+  const int idx = shown != 0 ? VideoStandardIndexOf(shown) : -1;
+  const char* name = idx >= 0 ? VideoStandardName(idx) : "?";
+
+  if (!colourCandidates_.empty()) {
+    // Der Rundgang misst einen Schritt mehr, als er Normen hat: die
+    // Ausgangsnorm kommt am Ende ein zweites Mal dran, siehe
+    // VerifyStandardColour. Gezaehlt wird deshalb in Schritten und nicht in
+    // Normen -- sonst stuende "5 von 4" im Bild --, und die Klammer in der
+    // Zeile darunter sagt, woher der zusaetzliche Schritt kommt.
+    const int steps = (int)colourCandidates_.size();
+    const int done = colourIndex_ + 1 < steps ? colourIndex_ + 1 : steps;
+    *headline = Format(T("Farbe wird geprüft: %s (%d/%d)", "Checking colour: %s (%d/%d)"), name,
+                       done, steps);
+
+    const int lines = shown != 0 ? VideoStandardLines(shown) : 0;
+    const int norms = steps - 1;
+    switch (colourDoubt_) {
+      case ColourDoubt::Tinted:
+        *detail = Format(
+            T("Farbe steht bis ins Schwarze — die %d Normen mit %d Zeilen werden verglichen "
+              "(die erste zweimal)",
+              "Colour reaches into the blacks — comparing the %d standards with %d lines "
+              "(the first one twice)"),
+            norms, lines);
+        break;
+      case ColourDoubt::Manual:
+        *detail = Format(
+            T("Von Hand ausgelöst — die %d Normen mit %d Zeilen werden verglichen "
+              "(die erste zweimal)",
+              "Triggered by hand — comparing the %d standards with %d lines "
+              "(the first one twice)"),
+            norms, lines);
+        break;
+      default:
+        *detail = Format(
+            T("Farbe unklar — die %d Normen mit %d Zeilen werden verglichen "
+              "(die erste zweimal)",
+              "Colour unclear — comparing the %d standards with %d lines "
+              "(the first one twice)"),
+            norms, lines);
+        break;
+    }
+    return;
+  }
+
+  // Stufe eins. Hier steht kein gemessener Grund zur Auswahl -- es gibt genau
+  // einen, naemlich dass der Decoder die Zeilenfrequenz nicht findet --, und
+  // der Zaehler ist die eigentliche Auskunft.
+  if (standardCandidate_ >= 0 && standardCandidateCount_ > 0) {
+    *headline = Format(T("Videonorm wird gesucht: %s (%d/%d)", "Scanning video standard: %s (%d/%d)"),
+                       name, standardCandidate_ + 1, standardCandidateCount_);
+  } else {
+    *headline = Format(T("Videonorm wird gesucht: %s", "Scanning video standard: %s"), name);
+  }
+  *detail = T("Die Karte rastet auf der eingestellten Norm nicht ein",
+              "The card does not lock on the standard that is set");
+}
+
+// Die Normensuche von Hand ausloesen.
+//
+// Die Automatik hat einen blinden Fleck, und es ist kein kleiner: sie greift,
+// wenn der Lock verloren geht oder wenn die Farbe messbar nicht stimmt. Eine
+// Norm, die haelt und kraeftig Farbe zeigt, zweifelt sie nicht an -- auch dann
+// nicht, wenn die Farben schlicht falsch sind. Genau das sieht aber ein Mensch
+// und keine der beiden Messungen: Gras in der falschen Farbe ist Farbe.
+//
+// Der Umweg dafuer war bisher, im Normwaehler irgendeine feste Norm zu setzen
+// und wieder auf Automatisch zu stellen. Das funktioniert und findet niemand,
+// der es nicht schon weiss.
+void App::RescanVideoStandard() {
+  if (captureState_ != CaptureState::Running) {
+    Toast(T("Keine laufende Quelle.", "No source is running."));
+    return;
+  }
+  if (!SourceIsAnalogue()) {
+    Toast(T("Nur analoge Eingänge haben eine Videonorm.",
+            "Only analogue inputs have a video standard."));
+    return;
+  }
+  if (config_.active().capture.videoStandard != -1) {
+    // Die feste Norm bleibt fest. Sie ist eine Entscheidung, die jemand
+    // getroffen hat, und eine Taste, die sie im Vorbeigehen umwirft, waere
+    // eine Ueberraschung -- gesagt wird es trotzdem, sonst sieht der
+    // Tastendruck wie ein Fehler aus.
+    Toast(T("Die Videonorm steht fest — für die Suche auf Automatisch stellen.",
+            "The video standard is fixed — set it to Automatic to search."));
+    return;
+  }
+
+  CAP_LOG("Videonorm: Suche von Hand ausgelöst");
+  // Stufe eins von vorn. Auch die Runden zurueck auf null: wer von Hand sucht,
+  // will keine Pause, in der nichts geschieht.
+  standardCandidate_ = -1;
+  standardLostQpc_ = 0;
+  standardSweeps_ = 0;
+  standardNextTryQpc_ = 0;
+  // Und Stufe zwei von vorn, mitsamt dem Rundgang, den die Abkuerzung sonst
+  // ueberspringt. Die Frist ist grosszuegig: auf einem gerade schwarzen Bild
+  // wartet der Rundgang, und dieses Warten soll er noch tun duerfen.
+  ResetStandardColourCheck();
+  standardForceColourUntilQpc_ = QpcNow() + SecondsToQpc(30.0);
+  Toast(T("Videonorm wird gesucht", "Scanning for the video standard"));
+}
+
 // Ob der Wachthread ueberhaupt etwas zu beobachten hat.
 //
 // Er fragt den Analogdecoder zehnmal in der Sekunde nach seinem Lock. An einem
@@ -1731,6 +1850,7 @@ void App::UpdateVideoStandard() {
   const std::vector<long> candidates =
       AutoStandardCandidates(available, config_.app.videoRegion, standardLastGood_, &preferred);
   if (candidates.empty()) return;
+  standardCandidateCount_ = (int)candidates.size();
 
   // Bei totem Eingang wird nicht weitergeschaltet -- und vor allem gilt nichts
   // als geprueft, was hier gemessen wurde.
@@ -2243,7 +2363,15 @@ void App::VerifyStandardColour(int64_t now) {
     // Fehldekodierung, ein zu niedriger ein paar Sekunden Vergleich. Es ist
     // dieselbe Frage wie beim Vergleich -- sind diese Tiefen eingefaerbt --
     // und deshalb derselbe Wert; die Messreihe steht bei kDarkTinted.
-    if (energy >= kChromaConfident && dark < kDarkTinted) {
+    //
+    // Ausser jemand hat die Suche von Hand ausgeloest. Dann ist der Rundgang
+    // der Zweck des Tastendrucks und nicht das Mittel gegen einen Verdacht:
+    // wer ihn drueckt, sieht etwas, das keine dieser beiden Zahlen misst --
+    // einen Farbstich, Gesichter in der falschen Farbe --, und die Abkuerzung
+    // waere hier die eine Antwort, die er schon hat.
+    const bool forced =
+        standardForceColourUntilQpc_ != 0 && now < standardForceColourUntilQpc_;
+    if (!forced && energy >= kChromaConfident && dark < kDarkTinted) {
       CAP_LOG("Videonorm: %s hat deutlich Farbe (%.3f), dunkle Bereiche neutral (%s)",
               VideoStandardName(VideoStandardIndexOf(current)), energy, darkText(dark).c_str());
       colourCheckedStandard_ = current;
@@ -2300,6 +2428,7 @@ void App::VerifyStandardColour(int64_t now) {
       colourCandidates_.clear();
       colourCheckedStandard_ = current;
       colourStartedQpc_ = 0;
+      standardForceColourUntilQpc_ = 0;
       return;
     }
     const int count = (int)colourCandidates_.size();
@@ -2339,10 +2468,20 @@ void App::VerifyStandardColour(int64_t now) {
     // ausloest. Er ist die Grundlage, auf der sie ueberhaupt etwas entscheiden
     // kann, und wenn ein Rundgang spaeter einmal unerklaerlich lauter Nullen
     // misst, steht die Erklaerung schon in der Zeile davor.
+    // Und woran es lag, fuer die Einblendung festgehalten. Die beiden Gruende
+    // sind nicht dasselbe und sehen auch nicht gleich aus: zu blass heisst ein
+    // graues Bild mit Regenbogengries, eingefaerbt heisst ein Bild mit
+    // kraeftig falschen Farben bis ins Schwarze hinein. Wer davorsitzt, sieht
+    // genau einen der beiden Faelle und erkennt seinen wieder.
+    colourDoubt_ = forced                ? ColourDoubt::Manual
+                   : dark >= kDarkTinted ? ColourDoubt::Tinted
+                                         : ColourDoubt::Pale;
+    standardForceColourUntilQpc_ = 0;
     CAP_LOG("Videonorm: %s ist zweifelhaft (Farbe %.3f, dunkle Bereiche %s, %.0f %% beleuchtet) "
-            "-- die %d Normen mit %d Zeilen werden verglichen",
+            "-- die %d Normen mit %d Zeilen werden verglichen%s",
             VideoStandardName(VideoStandardIndexOf(current)), energy, darkText(dark).c_str(),
-            lit < 0.0f ? 0.0f : lit * 100.0f, count, VideoStandardLines(current));
+            lit < 0.0f ? 0.0f : lit * 100.0f, count, VideoStandardLines(current),
+            colourDoubt_ == ColourDoubt::Manual ? " (von Hand ausgelöst)" : "");
   }
 
   // Eintragen, was dieser Kandidat gemessen hat, und zum naechsten.
@@ -2648,6 +2787,12 @@ void App::ResetStandardColourCheck() {
   colourRetryQpc_ = 0;
   colourAttempts_ = 0;
   colourWaitingForPicture_ = false;
+  colourDoubt_ = ColourDoubt::None;
+  // Der Wunsch nach einem Rundgang von Hand bleibt dagegen stehen. Ein
+  // Graphenumbau setzt hier alles zurueck, und genau einer laeuft haeufig
+  // gerade dann, wenn die Taste gedrueckt wird -- der Wunsch waere weg, bevor
+  // er einmal drankam. Seine eigene Frist beendet ihn.
+  //
   // Auch der Takt zurueck: der Abbruch kann von aussen kommen -- Signal weg,
   // Graph neu -- und dann laeuft VerifyStandardColour nicht mehr, das den Takt
   // sonst selbst zuruecknimmt.
@@ -4201,17 +4346,17 @@ void App::DrawUi() {
   // dieselbe Auskunft schon, ausfuehrlicher.
   if (!settings_.isOpen()) {
     const SettingsWindow::StandardSearch search = StandardSearchDisplay();
-    const long shown = capture_.running() ? signalStandard_.load(std::memory_order_relaxed) : 0;
-    const int idx = shown != 0 ? VideoStandardIndexOf(shown) : -1;
-    const char* name = idx >= 0 ? VideoStandardName(idx) : "?";
     switch (search) {
       case SettingsWindow::StandardSearch::Trying:
-        DrawSearchIndicator(Format(T("Videonorm wird gesucht: %s", "Scanning video standard: %s"),
-                                   name));
+      case SettingsWindow::StandardSearch::Colour: {
+        // Kopfzeile und Grund kommen aus einer Hand, weil sie zusammengehoeren:
+        // welcher Schritt von wie vielen laeuft, haengt daran, welche der
+        // beiden Stufen gerade sucht.
+        std::string headline, detail;
+        StandardSearchText(&headline, &detail);
+        DrawSearchIndicator(headline, detail);
         break;
-      case SettingsWindow::StandardSearch::Colour:
-        DrawSearchIndicator(Format(T("Farbe wird geprüft: %s", "Checking colour: %s"), name));
-        break;
+      }
       // Die Pause ist kein Vorgang, sondern deren Abwesenheit -- dafuer laufende
       // Punkte ins Bild zu setzen, waere gelogen. Der Dialog sagt es weiterhin.
       case SettingsWindow::StandardSearch::Paused:
@@ -4615,6 +4760,19 @@ void App::DrawContextMenu() {
                    "Crops the black border the card delivers. Needs a real picture — measured "
                    "on black it produces nonsense."));
 
+  // Und daneben dasselbe fuer die Norm. Der Grund, es hier anzubieten, ist
+  // derselbe wie beim Rand: ausgeloest wird es, weil man etwas *sieht* -- ein
+  // Bild, dessen Farben nicht stimmen --, und was man sieht, sieht man nicht im
+  // Einstellungsfenster.
+  if (ImGui::MenuItem(T("Videonorm suchen", "Detect video standard"),
+                      sc(HotkeyAction::DetectStandard))) {
+    RescanVideoStandard();
+  }
+  WrappedTooltip(T("Sucht die Videonorm neu, auch wenn die eingestellte hält. Für den Fall, "
+                   "dass die Farben falsch sind, ohne dass es sich messen ließe.",
+                   "Searches for the video standard again, even when the current one holds. "
+                   "For colours that are wrong in a way no measurement catches."));
+
   if (ImGui::MenuItem(T("Aufnahme neu starten", "Restart capture"), sc(HotkeyAction::RestartCapture))) RestartAll(true);
   if (ImGui::MenuItem(T("Karte neu einlesen", "Reinitialise card"), sc(HotkeyAction::ReinitCard))) ReinitialiseCard();
   if (ImGui::MenuItem(T("Beenden", "Quit"), "Alt+F4")) ::PostMessageW(hwnd_, WM_CLOSE, 0, 0);
@@ -4684,6 +4842,9 @@ bool App::HandleKeyDown(WPARAM key) {
       return true;
     case HotkeyAction::DetectCrop:
       DetectCrop();
+      return true;
+    case HotkeyAction::DetectStandard:
+      RescanVideoStandard();
       return true;
     case HotkeyAction::Mute:
       ToggleMute();
