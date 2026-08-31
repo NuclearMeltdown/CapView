@@ -1438,16 +1438,48 @@ static const double kStandardResultSeconds = 5.0;
 // Sie war frueher gratis: der Rundgang wartet nach einem Normwechsel ohnehin
 // auf zwei frische Messwerte des Wachtthreads, und bei 250 ms Takt dauerte das
 // ungefaehr ebenso lange. Seit der Takt bei 100 ms liegt -- siehe
-// kSignalPollNaps -- ist sie es nicht mehr, sondern der laengste Einzelposten
-// eines Kandidaten. Verkuerzt wird sie trotzdem nicht: was sie abwartet, ist
-// der Farb-PLL der Karte, und der wird nicht schneller, weil wir oefter
-// hinsehen.
+// kSignalPollNaps -- ist sie es nicht mehr, sondern war der laengste
+// Einzelposten eines Kandidaten.
+//
+// Sie stand deshalb bei 0,5 s und ist am 31.08. auf 0,10 s gekuerzt worden,
+// zusammen mit einer Aenderung, die ihr die eigentliche Arbeit abnimmt: der
+// Rundgang wartet jetzt nicht mehr auf die Uhr, sondern darauf, dass die
+// Messung nicht mehr steigt (siehe kColourStableGiveUpSeconds und
+// VerifyStandardColour). Was hier stehenbleibt, ist nur noch der Boden -- die
+// paar Bilder, die der Treiber unmittelbar nach put_TVFormat noch aus der
+// alten Einstellung liefert. Wie lange der Farb-PLL darueber hinaus braucht,
+// wird nicht mehr geschaetzt, sondern je Kandidat gemessen; PAL 60 braucht
+// dreimal so lange wie NTSC 4.43, und das ist genau die Sorte Unterschied, die
+// eine gemeinsame Frist nicht abbilden kann.
 //
 // Sie steht hier statt in VerifyStandardColour, weil sie inzwischen von zwei
 // Seiten gebraucht wird: auch der Neubau des Graphen nach einem gefundenen
 // Lock legt sie an, damit die erste Messung der neuen Norm hinter dem Umbau
 // beginnt statt darueber hinweg zu mitteln. Siehe UpdateVideoStandard.
-static const double kColourSettleSeconds = 0.5;
+static const double kColourSettleSeconds = 0.10;
+
+// Wie lange ein Kandidat hoechstens gemessen wird, wenn seine Zahl nicht zur
+// Ruhe kommt. Siehe VerifyStandardColour.
+//
+// PAL 60 -- die langsamste gemessene Norm auf dieser Karte -- ist nach rund
+// 0,8 s so weit. Die Obergrenze liegt darueber mit Luft, aber unter dem, was
+// vier Kandidaten in Serie ertraeglich machen. Sie ist keine Frist, auf die
+// gewartet wird, sondern eine, die nur bei einem bewegten Bild ueberhaupt
+// erreicht wird -- und dann steht im Log, dass sie es war.
+static const double kColourStableGiveUpSeconds = 1.2;
+
+// Ob eine Messung gegenueber der vorigen noch deutlich gestiegen ist.
+//
+// Der absolute Anteil faengt die Werte nahe null, wo ein Verhaeltnis nichts
+// mehr aussagt: von 0,002 auf 0,004 ist eine Verdopplung und trotzdem grau.
+// Der relative faengt die grossen, wo ein fester Abstand zu streng waere.
+// Nachgerechnet an der Einschwingkurve von PAL 60: 0,095 auf 0,119 gilt als
+// gestiegen (Schwelle 0,014), 0,119 auf 0,119 nicht.
+static bool ColourStillRising(float previous, float current) {
+  if (previous < 0.0f || current < 0.0f) return false;
+  const float tol = 0.008f > previous * 0.15f ? 0.008f : previous * 0.15f;
+  return current > previous + tol;
+}
 
 // Wie oft der Wachtthread den Decoder nach seinem Lock fragt, in Zehnteln
 // einer Zehntelsekunde -- er schlaeft in 10-ms-Haeppchen, damit das Beenden
@@ -2478,10 +2510,11 @@ void App::VerifyStandardColour(int64_t now) {
   // vier Zehntel des Ganzen. Drei Laeufe vorher, 11:21 und 11:23, lagen bei
   // 2,66 / 2,68 / 2,67 s: es ist eine Konstante und keine Schwankung.
   //
-  // Der dichte Takt macht daraus zehn Bilder in Folge, also gut ein Drittel
-  // Sekunde. Bezahlt wird er mit derselben Rechenarbeit, die der Rundgang
-  // ohnehin gleich verlangt -- nur ein paar Sekunden frueher. Wer von Hand
-  // sucht, bekommt den Rundgang ohnehin: die Abkuerzung ist fuer ihn
+  // Der dichte Takt macht daraus drei Bilder in Folge, also ein Zehntel
+  // Sekunde -- wie viele es sind, haengt am Takt selbst, siehe
+  // kChromaFramesWantedDense. Bezahlt wird er mit derselben Rechenarbeit, die
+  // der Rundgang ohnehin gleich verlangt, nur ein paar Sekunden frueher. Wer
+  // von Hand sucht, bekommt den Rundgang ohnehin: die Abkuerzung ist fuer ihn
   // abgeschaltet, siehe `forced` weiter unten.
   const bool denseWanted = !colourCandidates_.empty() ||
                            (standardForceColourUntilQpc_ != 0 && now < standardForceColourUntilQpc_);
@@ -2529,10 +2562,17 @@ void App::VerifyStandardColour(int64_t now) {
     if (now < colourSettleUntilQpc_) return;
     colourSettleUntilQpc_ = 0;
     colourStartedQpc_ = now;
+    // Hier faengt der Kandidat an, also hat er noch kein voriges Fenster.
+    colourWindowEnergy_ = -1.0f;
+    colourWindowDark_ = -1.0f;
     renderer_.ResetChroma();
     return;
   }
-  if (colourStartedQpc_ == 0) colourStartedQpc_ = now;
+  if (colourStartedQpc_ == 0) {
+    colourStartedQpc_ = now;
+    colourWindowEnergy_ = -1.0f;
+    colourWindowDark_ = -1.0f;
+  }
 
   const float energy = renderer_.chromaEnergy();
   if (energy < 0.0f) {
@@ -2548,6 +2588,58 @@ void App::VerifyStandardColour(int64_t now) {
     }
   }
   const float dark = energy < 0.0f ? -1.0f : renderer_.darkChromaEnergy();
+
+  // Im Rundgang gilt eine Messung erst, wenn sie nicht mehr steigt.
+  //
+  // Das ersetzt das blosse Abwarten einer Frist, und der Grund dafuer ist am
+  // 31.08. gemessen worden. Mit 0,15 s Frist lieferten drei der vier Normen
+  // ihren Wert auf den Tausendstel genau wie mit 0,5 s -- NTSC M 0,017,
+  // PAL M 0,023, NTSC 4.43 0,065, dreimal hintereinander --, die vierte nicht:
+  // PAL 60 mass bei der Rueckkehr 0,000 / 0,047 / 0,095 statt 0,119, und zwar
+  // umso hoeher, je spaeter das Fenster lag (0,276 / 0,327 / 0,393 s nach dem
+  // Wechsel). Das ist keine Streuung, das ist eine Einschwingkurve, und sie
+  // hat einen Grund: der PAL-Burst wechselt zeilenweise die Phase, und seine
+  // Kennung braucht mehr Zeilen als NTSCs feste Phase.
+  //
+  // Eine feste Frist muss deshalb immer die langsamste Norm bezahlen, und alle
+  // anderen zahlen mit. Zweimal von drei Laeufen verwarf der Rundgang sich
+  // daraufhin selbst, weil die zu frueh gemessene Rueckkehr nicht mehr zur
+  // ersten Messung passte -- also nicht ein bisschen ungenauer, sondern
+  // unbrauchbar.
+  //
+  // Der Dekoder sagt aber selbst, wann er so weit ist: solange er einrastet,
+  // steigt die Messung, danach steht sie. Gefragt wird deshalb nicht "ist die
+  // Frist um", sondern "ist der neue Wert noch hoeher als der vorige" -- und
+  // gerichtet, nicht als blosse Aehnlichkeit. Ein bewegtes Bild schwankt in
+  // beide Richtungen und ist beim ersten nicht gestiegenen Fenster fertig; ein
+  // einrastender Dekoder kann das nicht, er kommt nur von unten.
+  //
+  // Zwei Fenster braucht es dadurch immer, auch bei der schnellsten Norm. Das
+  // ist der Preis und er ist der Sache angemessen: ein einzelnes Fenster hat
+  // nichts, woran es sich pruefen koennte.
+  if (walking && energy >= 0.0f) {
+    const bool rising = colourWindowEnergy_ < 0.0f ||
+                        ColourStillRising(colourWindowEnergy_, energy) ||
+                        ColourStillRising(colourWindowDark_, dark);
+    const double waited = QpcToSeconds(now - colourStartedQpc_);
+    if (rising && waited < kColourStableGiveUpSeconds) {
+      colourWindowEnergy_ = energy;
+      colourWindowDark_ = dark;
+      renderer_.ResetChroma();
+      return;
+    }
+    if (rising) {
+      // Nicht zur Ruhe gekommen. Der zuletzt gemessene Wert ist trotzdem der
+      // beste, den es gibt -- er liegt am weitesten hinter dem Wechsel --,
+      // also zaehlt er. Aber er gehoert ins Log, denn er heisst entweder, dass
+      // diese Karte laenger braucht als die Obergrenze, oder dass sich das
+      // Bild waehrenddessen bewegt hat.
+      CAP_LOG("Videonorm: %s kommt in %.2f s nicht zur Ruhe (%.3f, davor %.3f) "
+              "-- der letzte Wert zaehlt",
+              VideoStandardName(VideoStandardIndexOf(current)), waited, energy,
+              colourWindowEnergy_);
+    }
+  }
 
   if (!walking) {
     // Erster Durchgang, und hier werden zwei Fragen gestellt statt einer: hat
