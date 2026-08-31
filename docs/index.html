@@ -128,13 +128,13 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
 <section class="reveal">
   <div class="wrap">
     <div class="metric">
-      <div><b>~1 ms</b><span>from card to screen at 1080p60</span></div>
+      <div><b>~1 ms</b><span>through CapView, arrival to present</span></div>
       <div><b>1 file</b><span>no installer, no dependencies</span></div>
       <div><b>MIT</b><span>free and open source</span></div>
     </div>
     <figure>
       <img src="viewer.jpg" alt="CapView in fullscreen showing a console at 1080p60, with the statistics overlay reading a frame age of 1.2 ms">
-      <figcaption>The viewer in fullscreen. The overlay is not a mock-up — it is CapView's own statistics panel reporting the source format, the measured rate and, at the bottom, the age of the frame being drawn.</figcaption>
+      <figcaption>The viewer in fullscreen. The overlay is not a mock-up — it is CapView's own statistics panel reporting the source format, the measured rate and, at the bottom, the time a frame spends inside CapView.</figcaption>
     </figure>
   </div>
 </section>
@@ -148,6 +148,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
       <div class="card"><h3>No graph clock</h3><p>The DirectShow graph runs without a reference clock, so nothing is held back waiting for a presentation time.</p></div>
       <div class="card"><h3>Tearing allowed</h3><p>A flip-model swap chain with one frame of queue and VSync off by default — the single biggest lever there is.</p></div>
       <div class="card"><h3>Conversion on the GPU</h3><p>YUY2, UYVY, NV12, planar 4:2:0, RGB and P010 are unpacked in a pixel shader. Nothing touches the CPU between arrival and drawing.</p></div>
+      <div class="card"><h3>And it shows you the bill</h3><p>The overlay times the one stretch CapView is answerable for: from a frame arriving to the present that hands it over. Upload, deinterlacing, filters, scaling and the wait for the flip are all inside that number. What the card did before, and what the panel does after, is nobody's to measure from in here &mdash; so it is not quietly folded in.</p></div>
     </div>
   </div>
 </section>

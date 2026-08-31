@@ -13,7 +13,9 @@
 CapView displays the output of a capture card with as little delay as the
 hardware allows, so the captured signal can be played on rather than only
 watched. Measured on a StarTech PEXHDCAP60L: **1080p60 sustained, around 1 ms
-between a frame arriving from the card and being drawn.**
+from a frame arriving to the present that hands it to the compositor** — the
+whole stretch CapView is answerable for, with nothing before or after it
+quietly folded in.
 
 It is meant for using a capture card to play. Recording, screenshots, a
 microphone track and a virtual camera are included; scenes, overlays,
