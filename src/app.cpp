@@ -512,6 +512,9 @@ bool App::StartCapture(std::string* error) {
   retryCount_ = 0;
   secondFieldPending_ = false;
   sawFirstFrame_ = false;
+  // Sonst misst der erste Durchgang nach einem Neustart gegen die Ankunft von
+  // vor dem Neustart und meldet Sekunden.
+  displayedArrivalQpc_ = 0;
   captureStartQpc_ = QpcNow();
 
   // The dot crawl filter works on the colour subcarrier, so it has to be told
@@ -1881,8 +1884,10 @@ void App::UpdateVideoStandard() {
   // auf NTSC 4.43 (525/60), am Eingang lag wieder ein 625/50-Signal, und der
   // Graph lieferte kein einziges Bild mehr. Der Parkzweig war schon auf seinem
   // Ziel angekommen, tat also nichts, und kehrte um -- alle 1,5 Sekunden, 112
-  // Sekunden lang, bis von Hand neu gestartet wurde. Das Bildalter stieg dabei
-  // von 633 ms auf 112352 ms, und das ist der Messwert, an dem es haengt.
+  // Sekunden lang, bis von Hand neu gestartet wurde. Der Abstand zur letzten
+  // Ankunft stieg dabei von 633 ms auf 112352 ms, und das ist der Messwert, an
+  // dem es haengt. Nicht zu verwechseln mit der Durchlaufzeit im Panel: die
+  // misst eine Strecke, diese hier misst eine Stille.
   //
   // Wenn nichts mehr ankommt, ist Weitersuchen keine Stoerung, sondern das
   // Einzige, was das Bild zurueckholen kann.
@@ -4802,10 +4807,14 @@ void App::RenderFrame() {
       }
       renderer_.SetSourceFormat(sink->format(), nullptr);
       if (delayLine_.active()) {
-        delayLine_.Push(view, now);
+        // Mit der Ankunftszeit und nicht mit `now`: die Verzoegerungsleitung
+        // soll das Bild um die eingestellte Zeit nach seinem Eintreffen
+        // herausgeben, nicht nach dem Zeichendurchgang, der es aufgegriffen hat.
+        delayLine_.Push(view, sink->lastArrivalQpc());
       } else {
         renderer_.UploadFrame(view);
         haveNewFrame = true;
+        displayedArrivalQpc_ = sink->lastArrivalQpc();
       }
     }
     if (delayLine_.active()) {
@@ -4813,6 +4822,7 @@ void App::RenderFrame() {
       if (delayLine_.Pop(&delayed, now)) {
         renderer_.UploadFrame(delayed);
         haveNewFrame = true;
+        displayedArrivalQpc_ = delayLine_.lastPoppedQpc();
       }
     }
   }
@@ -4934,16 +4944,38 @@ void App::RenderFrame() {
   // Log schreibt seine Statuszeile auch dann, und ein Ruckler waehrend einer
   // geschlossenen Anzeige ist genau der, den man spaeter sucht.
   if (captureState_ == CaptureState::Running) {
-    const double nowSeconds = QpcToSeconds(now);
-    if (sink) frameAgeMeter_.Sample(sink->stats().lastArrivalAgeMs, nowSeconds);
     const AudioStats audioNow = audio_.stats();
-    if (audioNow.running) audioBufferMeter_.Sample(audioNow.bufferMs, nowSeconds);
+    if (audioNow.running) audioBufferMeter_.Sample(audioNow.bufferMs, QpcToSeconds(now));
   }
   SyncMicrophone();
   FeedRecorder();
   UpdateVirtualCamera();
   FeedFrameConsumers();
   d3d_.EndFrame(config_.app.vsync);
+
+  // ---- Durchlaufzeit ----
+  // Erst hier, weil erst hier feststeht, wann das Bild CapView verlaesst.
+  // Gemessen wird die Strecke, fuer die dieses Programm geradesteht: von der
+  // Ankunft in der Senke bis zu dem Augenblick, in dem Present zurueckkehrt und
+  // das Bild dem Compositor gehoert. Alles dazwischen zaehlt mit -- das
+  // Hochladen, Deinterlacing, Filter, Skalierung, das Zeichnen, die
+  // Present-Warteschlange und bei eingeschaltetem VSync das Warten auf den
+  // Bildwechsel.
+  //
+  // Was davor liegt (Halbbildaufnahme, Karte, Treiber, Transport) und was
+  // danach kommt (Compositor, Kabel, die Elektronik des Schirms), ist von hier
+  // aus nicht messbar und deshalb auch nicht enthalten. Die Zahl ist der
+  // Beitrag von CapView, nicht das Alter des Lichts.
+  //
+  // Vorher stand hier die Ankunftszeit gegen den Zeichenbeginn, und weil die
+  // Schleife auf das Bildereignis wartet, war das fast immer dieselbe Zehntel
+  // Millisekunde -- eine Zahl, die nur sagte, dass der Renderthread wach
+  // geworden ist.
+  if (captureState_ == CaptureState::Running && displayedArrivalQpc_ != 0) {
+    const int64_t leaving = QpcNow();
+    const double ageMs = QpcToSeconds(leaving - displayedArrivalQpc_) * 1000.0;
+    if (ageMs >= 0.0) frameAgeMeter_.Sample(ageMs, QpcToSeconds(leaving));
+  }
 
   // ---- present rate ----
   ++presentCount_;
@@ -4971,7 +5003,7 @@ void App::RenderFrame() {
         double bufLow = 0.0, bufHigh = 0.0;
         audioBufferMeter_.TakeRange(&bufLow, &bufHigh);
         CAP_LOG("Status: Quelle %.2f fps, Ausgabe %.1f fps, %llu angezeigt, %llu verworfen, "
-                "Bildalter %.1f ms (Spitze %.1f) | Halbbilder %llu/%llu | "
+                "Durchlauf %.1f ms (Spitze %.1f) | Halbbilder %llu/%llu | "
                 "Ton %.1f/%.0f ms (%.1f-%.1f), %llu leer, %llu übergelaufen",
                 sinkStats.sourceFps, presentFps_, (unsigned long long)sinkStats.displayed,
                 (unsigned long long)sinkStats.dropped, frameAgeMeter_.average, ageHigh,

@@ -2169,9 +2169,9 @@ void SettingsWindow::DrawDisplayTab() {
   }
   ImGui::EndDisabled();
   ImGui::SameLine();
-  HelpMarker(T("Kompakt: Bildraten und Bildalter. Normal: zusätzlich Format und Ton. "
+  HelpMarker(T("Kompakt: Bildraten und Durchlaufzeit. Normal: zusätzlich Format und Ton. "
                "Vollständig: alles.",
-               "Compact: frame rates and frame age. Normal: adds format and audio. "
+               "Compact: frame rates and pipeline delay. Normal: adds format and audio. "
                "Full: everything."));
 
   ImGui::Spacing();
