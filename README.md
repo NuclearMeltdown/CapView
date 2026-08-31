@@ -77,10 +77,10 @@ only 1080p30 for a mode it will in fact deliver at 1080p60.
 Cards with an analogue decoder also expose their **video standard** — PAL,
 PAL-60, NTSC, SECAM and the rest. It matters on a console that does both 50 and
 60 Hz: PAL is 625 lines at 50, PAL-60 is 525 at 60, and the wrong one gives
-either no picture or one with the wrong number of lines. An automatic mode
-cycles the plausible standards and keeps the first that locks. The standard
-belongs to the analogue decoder, so it is dropped whenever the input it
-described goes away, and a source declared Digital never gets one.
+either no picture or one with the wrong number of lines. Leaving it on
+**automatic** is the intended way to run it; see below. The standard belongs to
+the analogue decoder, so it is dropped whenever the input it described goes
+away, and a source declared Digital never gets one.
 
 **Configure card** opens the driver's own property pages while the picture keeps
 running. **Reinitialise card** releases the card, finds it again and returns the
@@ -97,17 +97,75 @@ More: [Source and signal](../../wiki/Source-and-signal),
 
 ![The Source tab: the capture device, the analogue video standard set to PAL 60, and the decoder reporting no lock because nothing was connected when this was taken](docs/settings-source.png)
 
+### Finding the video standard
+
+On **automatic**, the standard is not chosen once at startup but kept correct
+for as long as the program runs. Switching a console from 50 to 60 Hz, or
+unplugging the cable and putting it back, is followed without touching the
+settings.
+
+It takes two stages, because the decoder can answer only half the question.
+
+**The lock** settles the line count and the timing. Candidates are tried in turn
+and each is given about a second to report a lock; the standard that was last
+good and its 50/60 Hz partner are tried first and given longer, since a console
+that is restarting needs a moment before anything stable comes out of it. A
+candidate whose line count does not match what is arriving delivers no frames at
+all — that is not evidence against it, so it is not discarded, but the program
+stops waiting on it and moves on. A full pass with nothing locking means the
+console is off, and the card is left alone for a few seconds before looking
+again. In practice a lock is found well under a second.
+
+**The colour round** settles the rest. Several standards lock equally well on
+the same line count and differ only in how colour is carried — PAL B, PAL N and
+SECAM all fit 625 lines, and the decoder reports a lock for the wrong one just
+as confidently as for the right one. So each remaining candidate is set in turn
+and the picture itself is measured: how much colour is present, and how far
+black areas are tinted. The winner has to be clearly ahead rather than merely
+ahead, and standards that carry colour identically are not tried twice, since
+nothing in the picture could tell them apart.
+
+Most of the time none of that happens: a standard that already shows confident
+colour with black that stays black is simply the answer, and nothing is switched
+at all. From a deliberately wrong standard to a confirmed right one takes 6.3
+seconds on the hardware this was built against, half of it the single
+measurement that confirms the result.
+
+A round is only as good as the picture it ran on, so two cases are refused
+rather than believed. If the scene changes while the round is running the
+comparison is void and repeated a second later — what was missing there is
+stillness, and waiting longer does not supply it. If the screen is essentially
+black there is nothing to compare at all, since black is black in every
+standard; the program waits for a picture instead, and waiting costs nothing it
+would need later. A scene that is genuinely grey when decoded correctly cannot
+decide this either, and is not made to: the measurement is repeated after 3 and
+6 seconds and then left alone. Until it decides, the picture runs on in the
+standard that matches the configured region.
+
+Every step is written to `CapView.log` with what was measured and why it was
+enough, so a wrong decision can be read back rather than guessed at.
+
+More: [Automatic video standard](../../wiki/Automatic-video-standard).
+
 ### Picture
 
 Nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear scaling; contrast
 adaptive sharpening; aspect override and integer scaling; rotation in quarter
 turns; line doubling for 240p and 288p sources.
 
-Crop is dragged on the picture, or found by **Detect**, which measures the black
-border as a union across about two seconds so a fade to black is not read as the
-picture getting smaller, and refuses when too little would survive: a GameCube
-home screen leaves 37 % of the area, against 57 % for the widest border that is
-still a border.
+Crop is dragged on the picture, or found by **Detect** — in the settings, in the
+right-click menu, or on **F8** — which measures the black border as a union
+across about two seconds so a fade to black is not read as the picture getting
+smaller, and refuses when too little would survive: a GameCube home screen
+leaves 37 % of the area, against 57 % for the widest border that is still a
+border.
+
+A crop is a count of source pixels, so it stops meaning anything the moment the
+source changes size. When that happens the crop is **dropped** and a notice says
+so, rather than being scaled into a guess or silently cutting the wrong edge off
+a 480-line picture measured on a 576-line one. It is not re-measured
+automatically either: the moment a standard changes is the worst moment to
+measure, since the picture is usually a logo on black or nothing at all.
 
 Colour range and matrix default to automatic, the range measured from the image
 rather than inferred from the pixel format — a console set to full range
@@ -355,6 +413,8 @@ More: [Updates](../../wiki/Updates).
 | F1 | Statistics |
 | F2 | Settings |
 | F5 | Restart capture |
+| Shift+F5 | Reinitialise card |
+| F8 | Detect border |
 | F9 | Start / stop recording |
 | F10 | Screenshot |
 | M | Mute |

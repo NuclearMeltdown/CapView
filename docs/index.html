@@ -182,7 +182,20 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
 
 <section class="reveal">
   <div class="wrap">
-    <h2><span class="num">04</span>Everything else</h2>
+    <h2><span class="num">04</span>It works out the video standard on its own</h2>
+    <p class="lead">An analogue decoder has to be told whether it is looking at PAL, NTSC or SECAM, and getting it wrong costs you either the picture or the colour. Leave it on automatic and CapView finds it &mdash; and keeps finding it, so switching a console between 50 and 60&nbsp;Hz needs nothing from you.</p>
+    <div class="grid">
+      <div class="card"><h3>The card is only half the answer</h3><p>All a decoder reports is whether it has locked, and that is about line frequency. PAL&nbsp;60, NTSC&nbsp;M, PAL&nbsp;M and NTSC&nbsp;4.43 all lock on the same 525 lines, and it reports the wrong one just as confidently.</p></div>
+      <div class="card"><h3>So the picture decides</h3><p>The candidates are compared on what they actually produce: how much colour there is, and whether black stays black. Decoding PAL as SECAM does not give a grey picture &mdash; it gives a bright red one where black should be, and that is what the second measurement catches.</p></div>
+      <div class="card"><h3>6.3 seconds, from wrong to confirmed</h3><p>Measured against a GameCube at 60&nbsp;Hz, starting from a deliberately wrong standard. Half of that is the single measurement that confirms the result; the lock itself takes a quarter of a second.</p></div>
+      <div class="card"><h3>It knows when not to guess</h3><p>A comparison needs a picture to compare on. If the scene moves during the round, or the screen is essentially black, the round is thrown out rather than believed &mdash; a wrong answer held confidently is worse than waiting a moment.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="wrap">
+    <h2><span class="num">05</span>Everything else</h2>
     <div class="grid">
       <div class="card"><h3>Recording</h3><p>H.264, H.265 or AV1 through NVENC, Quick Sync, AMF, x264 or x265. The audio is the master clock, so the output is constant frame rate and does not drift — measured at 1&nbsp;ms over 15&nbsp;seconds.</p></div>
       <div class="card"><h3>Encoder controls</h3><p>Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass, under one set of names translated into each vendor's own.</p></div>
@@ -196,7 +209,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
 
 <section class="reveal">
   <div class="wrap">
-    <h2><span class="num">05</span>What it is not</h2>
+    <h2><span class="num">06</span>What it is not</h2>
     <p class="lead">Scenes, overlays, compositing and streaming are not here and are not planned. For those, use OBS — and note that a card grants its capture pin to one process at a time, so the two cannot hold the same card at once.</p>
     <table>
       <tr><th>Requirement</th><th></th></tr>
