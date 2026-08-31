@@ -131,6 +131,14 @@ black areas are tinted. The winner has to be clearly ahead rather than merely
 ahead, and standards that carry colour identically are not tried twice, since
 nothing in the picture could tell them apart.
 
+Each candidate takes only as long as it actually needs. Rather than giving every
+one of them a fixed moment to settle — which means giving all of them whatever
+the slowest one requires — the round watches the measurement itself: while the
+decoder is still locking the reading climbs, and once it stands the candidate is
+done. On the hardware this was built against that is a third of a second for
+most standards and about twice that for PAL 60, which recovers its colour
+noticeably more slowly than the rest.
+
 Most of the time none of that happens: a standard that already shows confident
 colour with black that stays black is simply the answer, and nothing is switched
 at all. From a deliberately wrong standard to a confirmed right one takes 6.3
