@@ -2390,6 +2390,62 @@ void App::VerifyStandardColour(int64_t now) {
   // gefordert wird 1,6, also gut das Doppelte an Luft.
   static const float kDarkCleanerBy = 1.6f;
 
+  // Um wie viel mehr Farbe der Kandidat mit den schmutzigeren Tiefen haben
+  // muss, damit die Tiefenregel darueber nicht mehr entscheidet.
+  //
+  // Die Messreihe oben hat einen blinden Fleck, und der hat CapView zwei
+  // Rundgaenge lang die falsche Norm eingestellt. Sie besteht ganz aus
+  // SECAM B gegen PAL B -- ein falscher Traeger, der Farbe *erfindet*: mehr
+  // Farbe als die richtige Norm und dazu eingefaerbte Tiefen. Gegen den ist
+  // "das sauberste Schwarz gewinnt" genau richtig.
+  //
+  // Es gibt den umgekehrten Fehler, und der GameCube zeigt ihn. NTSC 4.43 und
+  // PAL 60 teilen sich den Farbtraeger bei 4,43 MHz und unterscheiden sich
+  // nur in der zeilenweisen Phasenumkehr. NTSC 4.43 auf einem PAL-60-Signal
+  // dekodiert deshalb nicht Unsinn, sondern *weniger*: weniger Farbe im
+  // ganzen Bild und damit auch weniger davon im Schwarzen. Am 31.08.2026,
+  // zweimal aus NTSC M heraus erzwungen:
+  //
+  //   Norm                 Farbe   Tiefen
+  //   PAL 60  (richtig)    0,159   0,109      0,206   0,134
+  //   NTSC 4.43 (falsch)   0,099   0,031      0,116   0,081
+  //
+  // Beide bestehen die Tinted-Pruefung, beide treten in Stufe eins an, und
+  // dort gewinnt zweimal der falsche -- weil er weniger arbeitet. Die
+  // Begruendung der Tiefenregel gilt fuer ihn nicht: wer seine Schwebung
+  // gleichmaessig ueber alles legt, hat *mehr* Farbe, nicht weniger.
+  //
+  // Also tritt sie zurueck, sobald der mit den schmutzigeren Tiefen deutlich
+  // mehr Farbe hat. Dann ist die Farbe in seinen Tiefen die, die er auch im
+  // Rest des Bildes dekodiert, und nicht die eines fremden Traegers.
+  //
+  // Zuruecktreten kostet dabei fast nichts, und daran haengt die Hoehe des
+  // Werts. Die Tiefenregel gibt die Entscheidung nicht an den anderen ab,
+  // sondern an Stufe zwei -- und die verlangt ihrerseits kChromaBetterBy.
+  // Reicht es dort nicht, stellt die Runde gar nichts ein, bleibt bei der
+  // Ausgangsnorm und versucht es spaeter noch einmal. Ein zu frueher Rueckzug
+  // kostet also eine Runde, ein zu spaeter eine falsche Norm.
+  //
+  // Deshalb 1,25 und nicht 1,5. Der erste Versuch stand bei 1,5, gemessen an
+  // den 1,61 und 1,78 zweier Rundgaenge -- und liess prompt den naechsten
+  // durch: am 31.08. um 15:38:01 stand PAL 60 mit 0,156/0,115 gegen NTSC 4.43
+  // mit 0,114/0,067, ein Vorsprung von 1,37, und die Tiefen stellten wieder
+  // die falsche Norm ein. Mit 1,25 tritt die Regel dort zurueck, Stufe zwei
+  // entscheidet auf diesen Zahlen ebenfalls nichts (1,37 < 1,6), und genau das
+  // ist das richtige Ergebnis: es bleibt bei PAL 60.
+  //
+  // Nach unten haelt die Gegenprobe. Am selben Abend um 15:35:34 hatte
+  // NTSC 4.43 mit 0,161 gegen 0,160 einen Vorsprung von 1,006, waehrend die
+  // Tiefen mit 0,039 gegen 0,129 klar fuer PAL 60 sprachen. Bei 1,25 kommt die
+  // Regel dort nicht zum Zug und die Tiefen entscheiden richtig.
+  //
+  // Was das kostet: ein falscher Traeger, der es unter kDarkTinted schafft
+  // *und* ein Viertel mehr Farbe zeigt, kann jetzt bis in Stufe zwei kommen.
+  // In allen Messungen des 30.08. kommt SECAM B nie unter 0,204 und faellt
+  // schon vorher aus -- der Fall steht nicht in der Reihe. Und Stufe zwei
+  // schliesst eingefaerbte Kandidaten selbst noch einmal aus.
+  static const float kDarkYieldsToColourBy = 1.25f;
+
   // Ab wann die Tiefen eines Kandidaten fuer sich allein als eingefaerbt
   // gelten -- ohne Vergleich, ohne zweite Norm.
   //
@@ -2953,8 +3009,44 @@ void App::VerifyStandardColour(int64_t now) {
       dark2 = (int)i;
     }
   }
-  if (dark1 >= 0 && (dark2 < 0 || colourDarks_[(size_t)dark2] >
-                                      colourDarks_[(size_t)dark1] * kDarkCleanerBy)) {
+  // Sauberes Schwarz gewinnt aber nicht gegen deutlich mehr Farbe.
+  //
+  // Verglichen wird mit dem farbigsten Kandidaten und nicht mit dem
+  // zweitsaubersten: welcher die zweitsaubersten Tiefen hat, sagt nichts
+  // darueber, wer am meisten dekodiert, und bei mehr als zwei Kandidaten sind
+  // das nicht dieselben. Die Begruendung steht bei kDarkYieldsToColourBy.
+  //
+  // Mitgezaehlt wird dabei auch, wer *unbeurteilt* geblieben ist -- nur die
+  // eingefaerbten sind draussen. Unbeurteilt heisst nicht widerlegt, und die
+  // Frage hier ist nicht "wer hat den Tiefentest bestanden", sondern "gibt es
+  // jemanden, der deutlich mehr dekodiert". Am 31.08.2026 um 15:38:48 hing
+  // genau daran die falsche Norm: PAL 60 stand mit Farbe 0,136 da, hatte in
+  // dieser Szene aber keinen einzigen dunklen Block und damit keine Tiefen,
+  // fiel deshalb aus Stufe eins heraus -- und NTSC 4.43 gewann mit 0,081 als
+  // vermeintlich "einzige kraeftig farbige mit neutralen Tiefen". Sie war
+  // nicht die einzige, sie war nur die einzige mit dunklen Stellen im Bild.
+  int colour1 = -1;
+  for (size_t i = 0; i < colourCandidates_.size(); ++i) {
+    if (verdicts[i] == Verdict::Tinted || colourEnergies_[i] < 0.0f) continue;
+    if (colour1 < 0 || colourEnergies_[i] > colourEnergies_[(size_t)colour1]) colour1 = (int)i;
+  }
+  const bool darksYield =
+      dark1 >= 0 && colour1 >= 0 && colour1 != dark1 &&
+      colourEnergies_[(size_t)colour1] > colourEnergies_[(size_t)dark1] * kDarkYieldsToColourBy;
+  if (darksYield) {
+    CAP_LOG("Videonorm: %s hat zwar die saubereren Tiefen (%s gegen %s), aber %s hat %.1f mal so "
+            "viel Farbe (%.3f gegen %.3f) -- darueber entscheidet die Farbmenge",
+            VideoStandardName(VideoStandardIndexOf(colourCandidates_[(size_t)dark1])),
+            darkText(colourDarks_[(size_t)dark1]).c_str(),
+            darkText(colourDarks_[(size_t)colour1]).c_str(),
+            VideoStandardName(VideoStandardIndexOf(colourCandidates_[(size_t)colour1])),
+            colourEnergies_[(size_t)colour1] / colourEnergies_[(size_t)dark1],
+            colourEnergies_[(size_t)colour1], colourEnergies_[(size_t)dark1]);
+  }
+
+  if (dark1 >= 0 && !darksYield &&
+      (dark2 < 0 || colourDarks_[(size_t)dark2] >
+                        colourDarks_[(size_t)dark1] * kDarkCleanerBy)) {
     best = dark1;
     runnerUp = dark2;
     byDarks = true;
