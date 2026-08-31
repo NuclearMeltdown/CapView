@@ -3203,6 +3203,60 @@ void App::DetectCrop() {
   }
 }
 
+// Ein Zuschnitt gilt fuer die Groesse, an der er gemessen wurde.
+//
+// Die vier Zahlen sind Bildpunkte der Quelle, nicht Anteile: "links 20" heisst
+// zwanzig Punkte von 720. Wechselt die Norm von 525 auf 625 Zeilen, wechselt
+// mit ihr die Bildhoehe, und "oben 17" beschreibt dann einen anderen Streifen
+// als den gemessenen. Im besten Fall steht ein schmaler schwarzer Rand wieder
+// im Bild, im schlechteren wird echter Bildinhalt weggeschnitten -- und beides
+// sieht nicht nach einer Einstellung aus, die noch von vorhin steht, sondern
+// nach einem kaputten Bild.
+//
+// Zurueckgesetzt statt neu gemessen, und das ist eine Entscheidung. Ein
+// automatischer zweiter Anlauf laege nahe -- die Norm hat gerade gewechselt,
+// gleich einmal nachmessen --, aber genau in diesem Moment ist das Bild am
+// wenigsten dazu geeignet: der Graph ist eben erst wieder aufgebaut, die
+// Konsole schaltet gerade um oder faehrt hoch, und was anliegt, ist ein
+// Startlogo auf Schwarz oder noch gar nichts. Die Messung hat gegen genau
+// diesen Fall bereits eine Schranke (siehe DetectCrop), aber sie noch dazu
+// ungefragt in ihn hineinzuschicken hiesse, sie gegen ihre eigene Schranke
+// laufen zu lassen. Also: sauber aufraeumen, es sagen, und die Entscheidung
+// dem ueberlassen, der das Bild sieht -- der Knopf dafuer liegt jetzt im
+// Rechtsklickmenue.
+void App::UpdateCropForFormat() {
+  const VideoFormatInfo fmt = renderer_.sourceFormat();
+  if (!fmt.valid()) return;
+  // Waehrend des Ziehens sind die Zahlen ohnehin auf null gesetzt und das
+  // Format zu merken waere verfrueht.
+  if (cropPick_.active) return;
+
+  const int w = fmt.width;
+  const int h = fmt.height;
+  if (cropFormatWidth_ == w && cropFormatHeight_ == h) return;
+
+  // Das erste Format einer Sitzung hat nichts geaendert; es ist das, wofuer
+  // die gespeicherten Zahlen gelten sollen.
+  const bool first = cropFormatWidth_ == 0 && cropFormatHeight_ == 0;
+  cropFormatWidth_ = w;
+  cropFormatHeight_ = h;
+  if (first) return;
+
+  ImageSettings& img = config_.active().image;
+  if (!img.cropLeft && !img.cropRight && !img.cropTop && !img.cropBottom) return;
+
+  CAP_LOG("Zuschnitt zurueckgesetzt: Quelle jetzt %dx%d (Rand war links %d, rechts %d, oben %d, "
+          "unten %d)",
+          w, h, img.cropLeft, img.cropRight, img.cropTop, img.cropBottom);
+  img.cropLeft = 0;
+  img.cropRight = 0;
+  img.cropTop = 0;
+  img.cropBottom = 0;
+  Toast(Format(T("Videoformat geändert (%dx%d) — Zuschnitt zurückgesetzt.",
+                 "Video format changed (%dx%d) — crop reset."),
+               w, h));
+}
+
 // Ob das Bild aus dem Analogdekoder kommt. Dieselbe Frage, die entscheidet, was
 // in den Einstellungen erscheint -- und sie muss dieselbe Antwort geben, sonst
 // wirkt etwas, das nirgends mehr zu sehen ist.
@@ -3754,6 +3808,7 @@ void App::Tick() {
   // spaeter wieder angehalten, sobald sich die Quelle als digital erweist.
   UpdateSignalWatch();
   UpdateVideoStandard();
+  UpdateCropForFormat();
 
   if (captureState_ == CaptureState::Running) {
     std::string message;
@@ -4462,6 +4517,21 @@ void App::DrawContextMenu() {
     }
   }
   if (ImGui::MenuItem(T("Screenshot", "Screenshot"), sc(HotkeyAction::Screenshot))) RequestScreenshot();
+
+  // Der schwarze Rand ist etwas, das man sieht, und das Suchen danach gehoert
+  // deshalb dorthin, wo man hinsieht, statt in einen Reiter des
+  // Einstellungsfensters. Zumal die Messung nur so gut ist wie das Bild, das
+  // gerade anliegt: sie sucht die Grenzen dessen, was nicht schwarz ist, und
+  // auf einem Ladebildschirm sind das die Grenzen des Ladebildschirms. Wer den
+  // Knopf im Vorbeigehen erreicht, drueckt ihn im richtigen Moment noch einmal.
+  if (ImGui::MenuItem(T("Rand suchen", "Detect border"), sc(HotkeyAction::DetectCrop))) {
+    DetectCrop();
+  }
+  WrappedTooltip(T("Schneidet den schwarzen Rand weg, den die Karte mitliefert. Braucht ein "
+                   "richtiges Bild — auf Schwarz gemessen kommt Unsinn heraus.",
+                   "Crops the black border the card delivers. Needs a real picture — measured "
+                   "on black it produces nonsense."));
+
   if (ImGui::MenuItem(T("Aufnahme neu starten", "Restart capture"), sc(HotkeyAction::RestartCapture))) RestartAll(true);
   if (ImGui::MenuItem(T("Karte neu einlesen", "Reinitialise card"), sc(HotkeyAction::ReinitCard))) ReinitialiseCard();
   if (ImGui::MenuItem(T("Beenden", "Quit"), "Alt+F4")) ::PostMessageW(hwnd_, WM_CLOSE, 0, 0);
@@ -4528,6 +4598,9 @@ bool App::HandleKeyDown(WPARAM key) {
       return true;
     case HotkeyAction::Screenshot:
       RequestScreenshot();
+      return true;
+    case HotkeyAction::DetectCrop:
+      DetectCrop();
       return true;
     case HotkeyAction::Mute:
       ToggleMute();

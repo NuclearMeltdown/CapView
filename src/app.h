@@ -197,6 +197,8 @@ class App {
 
   void OpenDeviceConfig();
   void DetectCrop();
+  // Wirft den Zuschnitt weg, wenn die Quelle ihre Groesse gewechselt hat.
+  void UpdateCropForFormat();
 
   void BeginCropPick();
   void EndCropPick(bool apply);

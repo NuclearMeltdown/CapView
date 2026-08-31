@@ -15,6 +15,11 @@ Hotkeys::Hotkeys() {
   (*this)[HotkeyAction::ReinitCard].shift = true;
   (*this)[HotkeyAction::Record].vk = VK_F9;
   (*this)[HotkeyAction::Screenshot].vk = VK_F10;
+  // Der Zuschnitt wird im Zweifel mehrmals hintereinander gesucht -- die
+  // Messung braucht ein richtiges Bild, und wann eines anliegt, weiss nur der,
+  // der hinsieht. F8 liegt frei und in derselben Reihe wie das uebrige, was
+  // man im Vorbeigehen ausloest.
+  (*this)[HotkeyAction::DetectCrop].vk = VK_F8;
   (*this)[HotkeyAction::Mute].vk = 'M';
   (*this)[HotkeyAction::VolumeUp].vk = VK_OEM_PLUS;
   (*this)[HotkeyAction::VolumeDown].vk = VK_OEM_MINUS;
@@ -36,6 +41,7 @@ const char* HotkeyActionName(HotkeyAction action) {
     case HotkeyAction::ReinitCard: return T("Karte neu einlesen", "Reinitialise card");
     case HotkeyAction::Record: return T("Aufnahme starten/stoppen", "Start/stop recording");
     case HotkeyAction::Screenshot: return T("Screenshot", "Screenshot");
+    case HotkeyAction::DetectCrop: return T("Rand suchen", "Detect border");
     case HotkeyAction::Mute: return T("Stumm", "Mute");
     case HotkeyAction::VolumeUp: return T("Lauter", "Volume up");
     case HotkeyAction::VolumeDown: return T("Leiser", "Volume down");
@@ -52,6 +58,7 @@ const char* HotkeyActionKey(HotkeyAction action) {
     case HotkeyAction::ReinitCard: return "reinitCard";
     case HotkeyAction::Record: return "record";
     case HotkeyAction::Screenshot: return "screenshot";
+    case HotkeyAction::DetectCrop: return "detectCrop";
     case HotkeyAction::Mute: return "mute";
     case HotkeyAction::VolumeUp: return "volumeUp";
     case HotkeyAction::VolumeDown: return "volumeDown";
