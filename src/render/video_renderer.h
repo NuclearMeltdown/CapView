@@ -292,6 +292,17 @@ class VideoRenderer {
   // und darkChromaEnergy, absichtlich: was hier gezaehlt wird, ist genau das,
   // woraus die beiden anderen Zahlen entstanden sind.
   float chromaLitFraction() const;
+  // Wie stark die Farbe von Halbbildzeile zu Halbbildzeile *umklappt*, auf der
+  // V-Achse (R-Y) und auf der U-Achse (B-Y) getrennt. -1, solange zu wenige
+  // Bilder gemessen wurden oder das Format keine Zeilen mit voller
+  // Farbaufloesung hat.
+  //
+  // Wofuer das da ist, steht bei AnalyzeChroma: PAL kehrt die V-Phase in jeder
+  // Zeile um, NTSC nicht. Ein NTSC-Dekoder auf einem PAL-Signal dreht sie
+  // nicht zurueck, und dann steht der Unterschied zwischen den beiden Normen
+  // nicht in der Farbmenge, sondern hier.
+  float chromaAltV() const;
+  float chromaAltU() const;
   // Von vorn messen. Wird gerufen, wenn die Norm gewechselt hat: was vor dem
   // Wechsel gemessen wurde, gehoert zu einer anderen Einstellung.
   void ResetChroma();
@@ -624,6 +635,12 @@ class VideoRenderer {
   // ein Bild auch ganz ohne dunkle Stellen auskommen kann.
   uint64_t chromaDarkSum_ = 0;
   uint64_t chromaDarkCount_ = 0;
+  // Die Zeilenalternation, eigene Zaehlung: sie braucht vier Halbbildzeilen je
+  // Block statt zwei und faellt deshalb an anderen Bloecken aus als die
+  // Summen darueber.
+  uint64_t chromaAltVSum_ = 0;
+  uint64_t chromaAltUSum_ = 0;
+  uint64_t chromaAltCount_ = 0;
 
   InterlaceVerdict interlaceVerdict_ = InterlaceVerdict::Pending;
   bool coSitedFields_ = false;
