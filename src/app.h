@@ -435,6 +435,20 @@ class App {
   double toastStart_ = 0.0;
   double volumeOsdStart_ = -1000.0;
   double lastSplitCheck_ = 0.0;
+  // Die Bildrate der Quelle, wie sie beim Start der Aufnahme gemessen wurde --
+  // ungedoppelt, also ohne das Bobbing eingerechnet. Verglichen wird die rohe
+  // Rate, damit ein Deinterlacer, den jemand mitten in der Aufnahme umstellt,
+  // die Datei nicht schneidet: das ist eine Einstellung, keine andere Quelle.
+  // Die Bildgroesse steht im Recorder selbst (`frameWidth`, `frameHeight`).
+  double recordSourceFps_ = 0.0;
+  // Was die Quelle gerade zeigt, seit wann sie es unveraendert zeigt, und ob
+  // das ueberhaupt von der laufenden Datei abweicht. Ein Normsuchlauf geht
+  // durch mehrere Zeilenzahlen; geschnitten wird erst, wenn eine davon stehen
+  // bleibt. `pendingSince_ < 0` heisst: passt zusammen, nichts zu tun.
+  int pendingWidth_ = 0;
+  int pendingHeight_ = 0;
+  double pendingFps_ = 0.0;
+  double pendingSince_ = -1.0;
   // lParam of the key message being handled, for telling a real key press apart
   // from a synthesised one in the log.
   uint64_t lastKeyLParam_ = 0;
