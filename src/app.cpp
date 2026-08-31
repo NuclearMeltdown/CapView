@@ -3733,6 +3733,76 @@ void App::UpdateCropForFormat() {
                w, h));
 }
 
+// Das Profil zur erkannten Videonorm.
+//
+// Die Suche beantwortet eine Frage ueber das Signal; welches Profil dazu
+// gehoert, ist eine Frage ueber den Nutzer, und die beantwortet er einmal in
+// den Einstellungen. Erkannt wird PAL 60, und wer dafuer ein Profil angelegt
+// hat -- anderer Zuschnitt, andere Filter, anderer Ton --, bekommt es, statt es
+// von Hand zu waehlen.
+//
+// Verglichen wird ueber die Gruppe, siehe Profile::autoSelectStandard. Und
+// ausgeloest wird am *Wechsel* des Ergebnisses, nicht an seinem Bestand:
+// `profileMatchedStandard_` haelt fest, worauf zuletzt reagiert wurde. Damit
+// wirkt die Regel einmal je erkannter Norm, und wer danach von Hand ein anderes
+// Profil waehlt, behaelt es -- bis sich die Quelle wirklich aendert. Ohne das
+// waere jeder Handgriff nach einer Sekunde wieder rueckgaengig gemacht, und
+// zwar von etwas, das der Nutzer nicht angefasst hat.
+//
+// Die Schleife ist die eigentliche Gefahr: schaltet Profil A nach B und B nach
+// A, wechselt CapView im Sekundentakt zwischen zwei Graphen. Drei Bedingungen
+// schliessen sie aus. Passt die Regel des *aktiven* Profils schon, geschieht
+// nichts -- dann ist das Ziel erreicht, ganz gleich, wie viele andere Profile
+// dieselbe Norm beanspruchen. Ein Ziel mit fester Norm scheidet aus, weil dort
+// nie wieder etwas erkannt wuerde. Und ein Ziel auf einer anderen Karte oder
+// einem anderen Eingang scheidet aus, weil die erkannte Norm dann gar nichts
+// ueber das aussagt, was nach dem Wechsel anliegt.
+void App::UpdateProfileForStandard() {
+  const long standard = colourCheckedStandard_;
+  if (standard == 0) {
+    // Die Suche laeuft wieder. Was als naechstes herauskommt, ist ein neues
+    // Ergebnis und darf wieder wirken -- auch wenn dieselbe Norm herauskommt.
+    profileMatchedStandard_ = 0;
+    return;
+  }
+  if (standard == profileMatchedStandard_) return;
+  // Gemerkt wird auch dann, wenn nichts passt: die Norm ist abgehandelt.
+  profileMatchedStandard_ = standard;
+
+  // Mitten in einer Aufnahme nicht. Ein Profilwechsel baut den Graphen neu auf,
+  // und was dabei aus der laufenden Datei wird, ist keine Frage, die ungefragt
+  // beantwortet werden darf.
+  if (recorder_.recording()) return;
+  if (cropPick_.active) return;
+
+  const int group = VideoStandardGroupOf(standard);
+  if (group < 0) return;
+
+  const Profile& active = config_.active();
+  if (active.autoSelectStandard != 0 &&
+      VideoStandardGroupOf(active.autoSelectStandard) == group) {
+    return;
+  }
+
+  for (int i = 0; i < (int)config_.profiles.size(); ++i) {
+    if (i == config_.activeProfile) continue;
+    const Profile& p = config_.profiles[i];
+    if (p.autoSelectStandard == 0) continue;
+    if (VideoStandardGroupOf(p.autoSelectStandard) != group) continue;
+    if (p.capture.videoStandard != -1) continue;
+    if (!(p.capture.video == active.capture.video)) continue;
+    if (p.capture.crossbarInput != active.capture.crossbarInput) continue;
+
+    CAP_LOG("Profil %d (%s) uebernimmt: erkannt wurde %s", i + 1, p.name.c_str(),
+            VideoStandardName(VideoStandardIndexOf(standard)));
+    const std::string name = p.name;
+    SwitchProfile(i);
+    Toast(Format(T("%s erkannt — Profil „%s“", "%s detected — profile \"%s\""),
+                 VideoStandardGroupName(group), name.c_str()));
+    return;
+  }
+}
+
 // Ob das Bild aus dem Analogdekoder kommt. Dieselbe Frage, die entscheidet, was
 // in den Einstellungen erscheint -- und sie muss dieselbe Antwort geben, sonst
 // wirkt etwas, das nirgends mehr zu sehen ist.
@@ -4362,6 +4432,7 @@ void App::Tick() {
   // spaeter wieder angehalten, sobald sich die Quelle als digital erweist.
   UpdateSignalWatch();
   UpdateVideoStandard();
+  UpdateProfileForStandard();
   UpdateCropForFormat();
 
   if (captureState_ == CaptureState::Running) {

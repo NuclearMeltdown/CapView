@@ -476,6 +476,23 @@ struct RecordSettings {
 
 struct Profile {
   std::string name = "Standard";
+  // Bei welcher erkannten Videonorm dieses Profil von selbst gewaehlt wird.
+  // 0 heisst: nie, und das ist die Voreinstellung -- ein Profil zu wechseln
+  // ist ein sichtbarer Eingriff, und ungefragt geschieht er nicht.
+  //
+  // Gespeichert wird eine Norm wie in `capture.videoStandard`, verglichen wird
+  // aber ueber die Gruppe (VideoStandardGroupOf): PAL B und PAL D sehen am
+  // Kabel gleich aus, und ein Profil, das nur bei genau einem der beiden
+  // greift, waere eine Falle. Die Gruppe ist zugleich die Unterscheidung, um
+  // die es hier ueberhaupt geht -- PAL gegen PAL 60 ist der GameCube, der
+  // zwischen 50 und 60 Hz wechselt.
+  //
+  // Wirkt nur, solange `capture.videoStandard` auf Automatisch steht. Eine
+  // feste Norm wird nicht gesucht, also wird auch nichts erkannt, und ein
+  // Profil, das nach dem Umschalten nichts mehr erkennen kann, waere eine
+  // Einbahnstrasse. Die Einstellungen sagen das an der Stelle, an der es
+  // auffaellt.
+  long autoSelectStandard = 0;
   CaptureSettings capture;
   ImageSettings image;
   AudioSettings audio;

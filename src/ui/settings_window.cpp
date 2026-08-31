@@ -540,7 +540,7 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
     if (ImGui::BeginTabItem(T("Profile###profiles", "Profiles###profiles"), nullptr, tabFlags())) {
       activeTab_ = tabIndex;
       ImGui::BeginChild("scroll_profiles", ImVec2(0, -footer));
-      DrawProfilesTab();
+      DrawProfilesTab(caps);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
@@ -3018,7 +3018,7 @@ void SettingsWindow::OfferKey(int vk, bool ctrl, bool shift, bool alt) {
 
 // -------------------------------------------------------------- profiles tab
 
-void SettingsWindow::DrawProfilesTab() {
+void SettingsWindow::DrawProfilesTab(const DeviceProbeResult& caps) {
   Config& c = cfg();
   ImGui::Spacing();
   ImGui::TextWrapped(
@@ -3035,8 +3035,12 @@ void SettingsWindow::DrawProfilesTab() {
         "controls by hand every time a cable changes."));
   ImGui::Spacing();
 
-  const float listHeight =
-      ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 1.6f;
+  // Nur was der Decoder wirklich kann, und nur wenn ueberhaupt einer im Spiel
+  // ist. An einem HDMI-Eingang gibt es keine Videonorm, nach der sich etwas
+  // richten koennte.
+  const bool canAutoSelect = caps.availableStandards != 0 && analogueSource_;
+  const float listHeight = ImGui::GetContentRegionAvail().y -
+                           ImGui::GetFrameHeightWithSpacing() * (canAutoSelect ? 4.4f : 1.6f);
   if (ImGui::BeginListBox("##profiles", ImVec2(-1.0f, std::max(120.0f, listHeight)))) {
     for (int i = 0; i < (int)c.profiles.size(); ++i) {
       const bool selected = (i == c.activeProfile);
@@ -3088,6 +3092,59 @@ void SettingsWindow::DrawProfilesTab() {
     c.activeProfile = Clamp(c.activeProfile, 0, (int)c.profiles.size() - 1);
   }
   ImGui::EndDisabled();
+
+  // Welche erkannte Videonorm dieses Profil holt.
+  //
+  // Es steht hier und nicht bei der Videonorm auf der Quellenseite, obwohl es
+  // dieselbe Liste ist: dort beantwortet die Norm die Frage "was soll die Karte
+  // einstellen", hier die Frage "wann bin ich gemeint". Das ist eine Aussage
+  // ueber das Profil, und die gehoert dorthin, wo die Profile stehen.
+  if (canAutoSelect) {
+    Profile& prof = c.active();
+    ImGui::Spacing();
+    ImGui::SeparatorText(T("Von selbst wählen", "Choose automatically"));
+
+    const char* never = T("Nie — nur von Hand", "Never — by hand only");
+    const int chosen =
+        prof.autoSelectStandard != 0 ? VideoStandardGroupOf(prof.autoSelectStandard) : -1;
+    // Eine feste Norm wird nie gesucht, also wird bei ihr auch nie etwas
+    // erkannt. Die Regel liefe dann ins Leere -- und das faellt niemandem auf,
+    // solange sie einfach dasteht.
+    const bool pinned = prof.capture.videoStandard != -1;
+    ImGui::BeginDisabled(pinned);
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::BeginCombo("##autoselect",
+                          chosen >= 0 ? VideoStandardGroupName(chosen) : never)) {
+      if (ImGui::Selectable(never, chosen < 0)) prof.autoSelectStandard = 0;
+      ImGui::Separator();
+      for (int i = 0; i < VideoStandardGroupCount(); ++i) {
+        const long value = VideoStandardGroupPick(i, caps.availableStandards);
+        if (value == 0) continue;
+        if (ImGui::Selectable(VideoStandardGroupName(i), chosen == i)) {
+          prof.autoSelectStandard = value;
+        }
+        WrappedTooltip(VideoStandardGroupHint(i));
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+
+    if (pinned) {
+      ImGui::TextWrapped(
+          T("Nicht möglich, solange dieses Profil eine feste Videonorm hat: gesucht wird nur "
+            "bei „Automatisch“, und was nicht gesucht wird, wird auch nicht erkannt.",
+            "Not possible while this profile pins a video standard: the search only runs on "
+            "\"Automatic\", and what is not searched for is not detected either."));
+    } else {
+      ImGui::TextWrapped(
+          T("Wird diese Norm erkannt, schaltet CapView von selbst hierher — dasselbe Gerät und "
+            "denselben Eingang vorausgesetzt, und nicht während einer Aufnahme. Ein von Hand "
+            "gewähltes Profil bleibt, bis sich die Quelle wirklich ändert.",
+            "When this standard is detected, CapView switches here on its own — same device and "
+            "same input, and never during a recording. A profile chosen by hand stays until the "
+            "source really changes."));
+    }
+  }
 
   if (ImGui::BeginPopupModal("rename_profile", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     const bool creating = renameTarget_ < 0;
