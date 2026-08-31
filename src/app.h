@@ -393,6 +393,12 @@ class App {
   // der einzige Weg, die Wartefrist zu begruenden statt zu raten.
   int64_t standardSetQpc_ = 0;
   int standardSweeps_ = 0;          // completed passes through the list without a lock
+  // Welcher der beiden Durchgaenge gerade laeuft. Falsch heisst: der schnelle,
+  // in dem jeder Kandidat nur kStandardFastSeconds bekommt. Kippt am Ende eines
+  // erfolglosen schnellen Durchgangs auf wahr und mit der Pause danach zurueck,
+  // so dass jeder Anlauf mit dem billigen Durchgang beginnt. Siehe
+  // kStandardFastSeconds fuer die Begruendung.
+  bool standardPatientPass_ = false;
   // Seit wann gar kein Bild mehr ankommt, 0 = es kommt eines. Trennt die
   // ausgeschaltete Quelle (leere Bilder kommen weiter an) von der Norm, die
   // das anliegende Signal nicht dekodieren kann (es kommt nichts mehr) --

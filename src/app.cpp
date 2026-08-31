@@ -763,6 +763,7 @@ void App::SyncConfigChanges() {
     standardCandidate_ = -1;
     standardSweeps_ = 0;
     standardNextTryQpc_ = 0;
+    standardPatientPass_ = false;
     ResetStandardColourCheck();
   }
 
@@ -1354,6 +1355,43 @@ static const double kStandardLostSeconds = 1.5;
 // Rechnung; kommen sie in die Naehe von 1,25, gehoert die Frist zurueck auf
 // 1,5.
 static const double kStandardSettleSeconds = 1.25;
+// Und die kurze Frist des ersten Durchgangs.
+//
+// Die Frist darueber deckt jeden gemessenen Lock ab, auch den einer Quelle,
+// die selbst noch hochfaehrt. Das ist richtig fuer den Kandidaten, der die
+// Antwort ist, und Verschwendung fuer die uebrigen: eine Norm mit der falschen
+// Zeilenzahl rastet nie ein, sie sitzt die Frist nur ab. In einer Liste von
+// acht Kandidaten sind das im schlechtesten Fall zehn Sekunden, von denen neun
+// auf Normen entfallen, die von der ersten Zehntelsekunde an widerlegt sind.
+//
+// Also zwei Durchgaenge. Der erste geht die Liste schnell ab und nimmt in Kauf,
+// einen langsamen Lock zu verpassen; findet er nichts, geht der zweite dieselbe
+// Liste mit der vollen Frist. Verworfen wird dabei nie etwas endgueltig -- was
+// der schnelle Durchgang liegen laesst, bekommt der geduldige --, und der
+// schlechteste Fall waechst nur um die Laenge des schnellen Durchgangs.
+//
+// Der Wert kommt aus derselben Messreihe wie kStandardSettleSeconds. Sechs
+// echte Locks: 0,78 / 0,72 / 0,76 s bei frisch eingeschalteter Quelle, 0,30 /
+// 0,39 / 0,55 s bei bereits anliegendem Signal, dazu 0,73 s bei einem
+// verlorenen Lock. Die Trennlinie liegt nicht zufaellig zwischen diesen beiden
+// Gruppen: was den Unterschied macht, ist nicht die Karte, sondern ob die
+// Quelle selbst schon stabil ist.
+//
+// 0,6 s liegt ueber der langsamsten Messung an einem anliegenden Signal (0,55)
+// und unter der schnellsten an einer hochfahrenden Quelle (0,72). Genau das
+// ist die richtige Stelle: eine Quelle, die noch nicht liefert, verliert den
+// ersten Durchgang ohnehin -- zu dem Zeitpunkt rastet auch die *richtige* Norm
+// nicht ein, ob man ihr nun 0,6 oder 1,25 s gibt --, und sie wird vom zweiten
+// eingefangen. Was der schnelle Durchgang gewinnen soll, ist der haeufigste
+// Fall ueberhaupt: eine laufende Konsole, die zwischen 50 und 60 Hz umgestellt
+// wurde. Dort liegt ein Signal an, und dort liegt jeder gemessene Lock unter
+// 0,6 s.
+//
+// Nachpruefbar an "Videonorm automatisch gefunden: ... (Lock nach %.2f s)" --
+// dieselbe Zeile wie oben. Steht davor "schneller Durchgang" und liegt der Wert
+// dicht unter 0,6, ist die Grenze zu eng; landen umgekehrt Faelle mit
+// anliegendem Signal regelmaessig erst im zweiten Durchgang, ebenso.
+static const double kStandardFastSeconds = 0.6;
 // Die vorgezogenen Kandidaten nach einem verlorenen Lock -- der Partner der
 // zuletzt guten Norm und sie selbst -- bekommen deutlich mehr. Eine Konsole,
 // die gerade neu startet oder von 50 auf 60 Hz umschaltet, braucht ein paar
@@ -1499,7 +1537,16 @@ SettingsWindow::StandardSearch App::StandardSearchDisplay() const {
   // laufenden Runde. Die Pause ist der Zustand *zwischen* den Runden, und den
   // erkennt man nicht am Zaehler, sondern daran, dass gerade kein Kandidat
   // gesetzt ist.
-  return standardSweeps_ >= 1 && standardCandidate_ < 0 ? S::Paused : S::Trying;
+  //
+  // Seit es zwei Durchgaenge gibt, reicht auch das nicht mehr ganz: zwischen
+  // dem schnellen und dem geduldigen steht ebenfalls kein Kandidat, und dort
+  // wird nicht pausiert, sondern sofort weitergemacht. Der Unterschied ist
+  // `standardPatientPass_` -- die Fahne steht in dem Moment schon auf wahr, in
+  // dem der geduldige Durchgang beginnt, und faellt erst mit seinem Ende
+  // zusammen mit dem Beginn der Pause zurueck. Ohne das haette die Zeile fuer
+  // ein Bild lang "Suche pausiert" gezeigt, mitten in der Suche.
+  return standardSweeps_ >= 1 && standardCandidate_ < 0 && !standardPatientPass_ ? S::Paused
+                                                                                 : S::Trying;
 }
 
 // Die beiden Zeilen der Einblendung: was laeuft, und warum es laeuft.
@@ -1571,8 +1618,17 @@ void App::StandardSearchText(std::string* headline, std::string* detail) const {
   } else {
     *headline = Format(T("Videonorm wird gesucht: %s", "Scanning video standard: %s"), name);
   }
-  *detail = T("Die Karte rastet auf der eingestellten Norm nicht ein",
-              "The card does not lock on the standard that is set");
+  // Dazu, welcher der beiden Durchgaenge laeuft. Das ist keine Kleinigkeit
+  // fuer den, der zusieht: derselbe Normname taucht ein zweites Mal auf, und
+  // ohne diese Zeile sieht das aus, als drehe sich die Suche im Kreis. Die
+  // Frist steht mit dabei, weil sie der ganze Unterschied ist.
+  *detail = standardPatientPass_
+                ? Format(T("Karte rastet nicht ein — zweiter Durchgang, %.2f s je Norm",
+                           "Card does not lock — second pass, %.2f s per standard"),
+                         kStandardSettleSeconds)
+                : Format(T("Karte rastet nicht ein — erster Durchgang, %.1f s je Norm",
+                           "Card does not lock — first pass, %.1f s per standard"),
+                         kStandardFastSeconds);
 }
 
 // Die Normensuche von Hand ausloesen.
@@ -1608,11 +1664,14 @@ void App::RescanVideoStandard() {
 
   CAP_LOG("Videonorm: Suche von Hand ausgelöst");
   // Stufe eins von vorn. Auch die Runden zurueck auf null: wer von Hand sucht,
-  // will keine Pause, in der nichts geschieht.
+  // will keine Pause, in der nichts geschieht. Und von vorn heisst mit dem
+  // schnellen Durchgang: von Hand gesucht wird an einer Quelle, die laeuft und
+  // ein Bild liefert -- genau der Fall, fuer den die kurze Frist gemessen ist.
   standardCandidate_ = -1;
   standardLostQpc_ = 0;
   standardSweeps_ = 0;
   standardNextTryQpc_ = 0;
+  standardPatientPass_ = false;
   // Und Stufe zwei von vorn, mitsamt dem Rundgang, den die Abkuerzung sonst
   // ueberspringt. Die Frist ist grosszuegig: auf einem gerade schwarzen Bild
   // wartet der Rundgang, und dieses Warten soll er noch tun duerfen.
@@ -1648,6 +1707,7 @@ void App::UpdateSignalWatch() {
   standardLostQpc_ = 0;
   standardSweeps_ = 0;
   standardNextTryQpc_ = 0;
+  standardPatientPass_ = false;
   // Auch die Erinnerung. Wer von digital zurueck auf analog wechselt, haengt
   // etwas anderes an -- die alte Norm zu bevorzugen waere dann ein Rat aus
   // einem anderen Leben.
@@ -1747,6 +1807,7 @@ void App::UpdateVideoStandard() {
     // it is ever needed again.
     standardLostQpc_ = 0;
     standardSweeps_ = 0;
+    standardPatientPass_ = false;
     // Woran nach dem naechsten Aussetzer zuerst gedacht wird. Auch dann
     // gemerkt, wenn gar nicht gesucht wurde: eine Norm, die von selbst
     // eingerastet ist, ist genauso ein guter Hinweis wie eine gefundene.
@@ -1934,6 +1995,28 @@ void App::UpdateVideoStandard() {
   if (standardCandidate_ + 1 >= (int)candidates.size()) {
     ++standardSweeps_;
     standardCandidate_ = -1;
+
+    // Der schnelle Durchgang ist durch und hat nichts gefunden. Dann war er
+    // entweder zu ungeduldig, oder es liegt wirklich nichts an -- und welches
+    // von beidem, sagt genau ein weiterer Durchgang mit der vollen Frist.
+    //
+    // Ohne Pause dazwischen und ohne Parken. Beides gehoert ans Ende der
+    // *Suche* und nicht in ihre Mitte: die Pause ist die Antwort auf "hier ist
+    // nichts", und die steht nach einem schnellen Durchgang noch gar nicht
+    // fest. Auch die Karte bleibt stehen, wo sie steht -- der naechste
+    // Kandidat ist ohnehin wieder der erste der Liste.
+    if (!standardPatientPass_) {
+      standardPatientPass_ = true;
+      standardNextTryQpc_ = now;
+      if (standardSweeps_ == 1) {
+        CAP_LOG("Videonorm: schneller Durchgang ohne Lock (%d Normen zu je %.2f s), "
+                "zweiter Durchgang mit %.2f s",
+                (int)candidates.size(), kStandardFastSeconds, kStandardSettleSeconds);
+      }
+      return;
+    }
+
+    standardPatientPass_ = false;
     standardNextTryQpc_ = now + SecondsToQpc(kStandardBackoffSeconds);
     // Und dabei nicht stehen lassen, was zuletzt probiert wurde.
     //
@@ -1973,11 +2056,17 @@ void App::UpdateVideoStandard() {
   // Verworfen -- und in der ersten Runde steht im Log, nach wie langer Frist.
   // Genau hier entsteht der Fehler, wenn die Frist zu kurz ist: eine Norm, die
   // nur noch nicht fertig eingefangen hat, sieht genauso aus wie eine falsche.
-  // Nur die erste Runde, sonst schreibt eine Quelle ohne Signal das Log voll.
-  if (standardSweeps_ == 0 && standardCandidate_ >= 0 && standardSetQpc_ != 0) {
-    CAP_LOG("Videonorm: %s nach %.2f s ohne Lock verworfen",
+  // Nur die ersten beiden Runden, sonst schreibt eine Quelle ohne Signal das
+  // Log voll -- und die ersten beiden sind es deshalb, weil das jetzt der
+  // schnelle und der geduldige Durchgang sind. Genau ihr Vergleich ist die
+  // Auskunft: eine Norm, die im schnellen Durchgang durchfaellt und im
+  // geduldigen einrastet, sagt, dass kStandardFastSeconds zu knapp bemessen
+  // ist. Darum steht auch dabei, welcher Durchgang gerade verwirft.
+  if (standardSweeps_ <= 1 && standardCandidate_ >= 0 && standardSetQpc_ != 0) {
+    CAP_LOG("Videonorm: %s nach %.2f s ohne Lock verworfen (%s Durchgang)",
             VideoStandardName(VideoStandardIndexOf(candidates[(size_t)standardCandidate_])),
-            QpcToSeconds(now - standardSetQpc_));
+            QpcToSeconds(now - standardSetQpc_),
+            standardPatientPass_ ? "geduldiger" : "schneller");
   }
 
   ++standardCandidate_;
@@ -2011,9 +2100,17 @@ void App::UpdateVideoStandard() {
   //
   // Steht das Aushungern hier noch nicht fest, faellt es weiter oben nach --
   // die Frist wird dann nachtraeglich gekuerzt statt vorher verweigert.
+  //
+  // Im schnellen Durchgang bekommt jeder Kandidat dieselbe kurze Frist, auch
+  // die vorgezogenen. Die zusaetzliche Geduld der vorderen Plaetze ist fuer
+  // eine Quelle gedacht, die noch nicht stabil ist -- und die gewinnt der
+  // schnelle Durchgang ohnehin nicht, sie gehoert dem zweiten. Wer hier
+  // vorgezogen wird, wird es dadurch, dass er als erster drankommt.
   standardNextTryQpc_ =
-      now + SecondsToQpc(!starved && standardCandidate_ < preferred ? kStandardPreferredSeconds
-                                                                   : kStandardSettleSeconds);
+      now + SecondsToQpc(!standardPatientPass_ ? kStandardFastSeconds
+                         : !starved && standardCandidate_ < preferred
+                             ? kStandardPreferredSeconds
+                             : kStandardSettleSeconds);
   // Die Norm hat gewechselt, also gehoert die bisherige Farbmessung zu einer
   // anderen Einstellung.
   ResetStandardColourCheck();
@@ -2910,7 +3007,15 @@ bool App::HaveLiveSignal() const {
   // Nach einer vollen Runde ohne Lock ist die Sache aber entschieden: es wurde
   // jede Norm durchprobiert, die die Karte kann, und keine hat gegriffen. Was
   // das Bild dann noch zeigt, haben wir selbst verursacht.
-  if (standardSweeps_ >= 1 && signalLocked_.load(std::memory_order_relaxed) == 0) {
+  //
+  // Eine volle Runde ist seit dem zweiten Durchgang beides zusammen. Der
+  // schnelle allein entscheidet nichts -- er darf zu ungeduldig gewesen sein,
+  // das ist sein Zweck --, und "kein Signal" auf eine Auskunft zu stuetzen,
+  // die gerade nachgeprueft wird, waere voreilig. `!standardPatientPass_`
+  // trifft genau den Zustand nach einem beendeten geduldigen Durchgang: die
+  // Fahne steht waehrend des zweiten Durchgangs und faellt mit seinem Ende.
+  if (standardSweeps_ >= 1 && !standardPatientPass_ &&
+      signalLocked_.load(std::memory_order_relaxed) == 0) {
     return false;
   }
 
