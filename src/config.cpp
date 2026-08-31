@@ -716,7 +716,10 @@ bool Config::Load(std::string* error) {
 
   const json::Value& a = root["app"];
   app.theme = ReadEnum<Theme>(a, "theme", 3, Theme::Dark);
-  app.language = ReadEnum<Language>(a, "language", 2, Language::German);
+  // Englisch, wie in AppSettings. Stand hier auf Deutsch und war damit ein
+  // stiller Widerspruch: eine frische Installation kam auf Englisch hoch, eine
+  // Konfiguration ohne diesen Schlüssel auf Deutsch.
+  app.language = ReadEnum<Language>(a, "language", 2, Language::English);
   app.videoRegion = ReadEnum<VideoRegion>(a, "videoRegion", kVideoRegionCount, VideoRegion::Auto);
   app.accentColor = (unsigned)Clamp(a["accentColor"].AsInt(0x8B5CF6), 0, 0xFFFFFF);
   app.osdCorner = ReadEnum<OsdCorner>(a, "osdCorner", 4, OsdCorner::TopRight);
