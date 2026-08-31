@@ -265,6 +265,11 @@ struct CaptureSettings {
   FormatSel format;
 };
 
+// Bis zu welcher Zeilenzahl eine Quelle als halbe Bildhoehe gilt -- siehe
+// lineDouble weiter unten. 288 ist PAL 288p, 240 ist NTSC 240p; alles darueber
+// hat seine Zeilen schon.
+inline constexpr int kHalfHeightLines = 288;
+
 struct ImageSettings {
   ScaleFilter filter = ScaleFilter::Bilinear;
   float sharpen = 0.0f;  // 0..1, contrast-adaptive sharpening applied after scaling
@@ -307,6 +312,12 @@ struct ImageSettings {
   // Every source line filled into two. For a 240p or 288p console that the card
   // hands over at its true line count, which otherwise arrives half as tall as
   // it should be.
+  //
+  // Nur dort. Eine Quelle mit voller Zeilenzahl hat nichts zu verdoppeln, und
+  // das Ergebnis waere im Fenster unsichtbar (dort entscheidet das
+  // Seitenverhaeltnis, nicht die Zeilenzahl) und in der Aufnahme falsch.
+  // kHalfHeightLines zieht die Grenze: 288 ist die groesste Hoehe, die noch als
+  // halbe Bildhoehe durchgeht -- PAL 288p, darunter NTSC 240p.
   bool lineDouble = false;
   Rotation rotation = Rotation::None;
 

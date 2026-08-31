@@ -3298,6 +3298,15 @@ ImageSettings App::EffectiveImage(const Profile& profile) const {
     img.dotNotch = 0.0f;
     // Das native Raster rechnet das Abtasten einer analogen Zeile zurueck.
     img.nativeWidth = 0;
+  }
+
+  // Verdoppeln nur, wo wirklich die halbe Bildhoehe ankommt.
+  //
+  // Das Kaestchen wird sonst gar nicht erst gezeigt, aber ein gespeichertes
+  // Haekchen aus einer Sitzung mit 240p-Quelle wuerde hier weiterwirken -- und
+  // zwar unsichtbar: das Fenster passt das Bild auf das eingestellte
+  // Seitenverhaeltnis, die Aufnahme dagegen kaeme doppelt so hoch heraus.
+  if (!SourceIsAnalogue() || !fmt.valid() || fmt.height > kHalfHeightLines) {
     img.lineDouble = false;
   }
 

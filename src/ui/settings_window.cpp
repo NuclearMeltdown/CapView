@@ -1450,7 +1450,16 @@ void SettingsWindow::DrawImageTab() {
   HelpMarker(T("Gilt auch für Aufnahme und Screenshots.",
                "Applies to recordings and screenshots as well."));
 
-  if (analogueSource_) {
+  // Nur wenn die Quelle wirklich halb so hoch ankommt.
+  //
+  // Frueher stand hier bloss `analogueSource_`, und damit war das Kaestchen an
+  // jedem Composite-Eingang anklickbar -- auch an einem GameCube mit 576i.
+  // Sichtbar passiert dort nichts, denn das Bild wird ohnehin auf das
+  // eingestellte Seitenverhaeltnis gepasst und nicht auf die Zeilenzahl; die
+  // Aufnahme dagegen kam mit 720x1152 heraus. Eine Einstellung, die dort nichts
+  // tut, wo man hinsieht, und etwas dort, wo man nicht hinsieht, ist die
+  // schlechteste Sorte.
+  if (analogueSource_ && sourceHeight_ > 0 && sourceHeight_ <= kHalfHeightLines) {
     ImGui::Checkbox(T("Zeilen verdoppeln", "Double lines"), &img.lineDouble);
     ImGui::SameLine();
     HelpMarker(T("Für 240p/288p-Quellen, die halb so hoch ankommen wie sie sollen.",
