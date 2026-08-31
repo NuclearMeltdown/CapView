@@ -106,10 +106,16 @@ settings.
 
 It takes two stages, because the decoder can answer only half the question.
 
-**The lock** settles the line count and the timing. Candidates are tried in turn
-and each is given about a second to report a lock; the standard that was last
-good and its 50/60 Hz partner are tried first and given longer, since a console
-that is restarting needs a moment before anything stable comes out of it. A
+**The lock** settles the line count and the timing. Candidates are tried in
+turn, and the list is walked twice: a fast pass giving each 0.6 s, and — only if
+that finds nothing — a patient one at the full deadline. A standard with the
+wrong line count never locks at all, it only sits out its deadline, and in a
+list of eight that is most of the time the search spends. Nothing is discarded
+for good, so a slow lock the fast pass misses is caught by the second, and the
+overlay names which pass is running. The standard that was last good and its
+50/60 Hz partner are tried first and given longer in the patient pass, since a
+console that is restarting needs a moment before anything stable comes out of
+it. A
 candidate whose line count does not match what is arriving delivers no frames at
 all — that is not evidence against it, so it is not discarded, but the program
 stops waiting on it and moves on. A full pass with nothing locking means the
@@ -152,7 +158,10 @@ The search can also be **asked for**: **F7**, or *Detect video standard* in the
 right-click menu, runs both stages again even when the current standard holds
 and shows plenty of colour. That is the case none of these measurements covers —
 colour that is wrong rather than missing — and the only route to it used to be
-picking a standard by hand and setting it back to automatic.
+picking a standard by hand and setting it back to automatic. A search asked for
+this way **says what it found** when it stops: the standard, and which of its
+ways out it took — corrected by colour, confirmed, nothing to decide with, no
+signal at all.
 
 Every step is written to `CapView.log` with what was measured and why it was
 enough, so a wrong decision can be read back rather than guessed at.
@@ -178,6 +187,13 @@ so, rather than being scaled into a guess or silently cutting the wrong edge off
 a 480-line picture measured on a 576-line one. It is not re-measured
 automatically either: the moment a standard changes is the worst moment to
 measure, since the picture is usually a logo on black or nothing at all.
+
+A console that keeps changing between 50 and 60 Hz would then want its border
+measured twice over, every time. **Remember per picture size** keeps one crop
+per source size instead, so a PAL GameCube's 576-line crop and its 480-line one
+both stay set up and the switch puts the right one back. Off by default, because
+dropping the crop is the right answer for a source that has genuinely become
+something else.
 
 Colour range and matrix default to automatic, the range measured from the image
 rather than inferred from the pixel format — a console set to full range
@@ -422,6 +438,15 @@ Settings that do not apply to the current source are **not applied**, not merely
 hidden. The values stay in the profile — that console will be back — but they
 are not restored on the way out and back, since the next analogue source may
 well be a different console.
+
+A profile can also say **which video standard means it**. Give the PAL profile
+PAL and the NTSC one NTSC, and the standard the search settles on picks the
+profile: the same cable, two consoles, and neither a keystroke nor a menu. It
+fires when the colour round has settled rather than when the lock comes in,
+because until then the standard is only a line count — and never during a
+recording, never onto a profile on a different input, and never away from a
+profile that already answers to what is on screen. A profile chosen by hand
+stays until the source really changes.
 
 ### Updates
 

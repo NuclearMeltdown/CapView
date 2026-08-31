@@ -188,6 +188,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
       <div class="card"><h3>The card is only half the answer</h3><p>All a decoder reports is whether it has locked, and that is about line frequency. PAL&nbsp;60, NTSC&nbsp;M, PAL&nbsp;M and NTSC&nbsp;4.43 all lock on the same 525 lines, and it reports the wrong one just as confidently.</p></div>
       <div class="card"><h3>So the picture decides</h3><p>The candidates are compared on what they actually produce: how much colour there is, and whether black stays black. Decoding PAL as SECAM does not give a grey picture &mdash; it gives a bright red one where black should be, and that is what the second measurement catches.</p></div>
       <div class="card"><h3>6.3 seconds, from wrong to confirmed</h3><p>Measured against a GameCube at 60&nbsp;Hz, starting from a deliberately wrong standard. Half of that is the single measurement that confirms the result; the lock itself takes a quarter of a second.</p></div>
+      <div class="card"><h3>It does not sit out the wrong ones</h3><p>A standard with the wrong line count never locks; it only uses up its deadline. So the list is walked quickly first and patiently only if that finds nothing &mdash; nothing is ruled out for good, and the common case, a console switched between 50 and 60&nbsp;Hz, is over in a fraction of the time.</p></div>
       <div class="card"><h3>It knows when not to guess</h3><p>A comparison needs a picture to compare on. If the scene moves during the round, or the screen is essentially black, the round is thrown out rather than believed &mdash; a wrong answer held confidently is worse than waiting a moment.</p></div>
     </div>
   </div>
@@ -202,7 +203,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
       <div class="card"><h3>Virtual camera</h3><p>Offer the picture to OBS, Discord or a browser at the source's own resolution and frame rate &mdash; and to anything that cannot take that, at whatever it asks for instead.</p></div>
       <div class="card"><h3>High dynamic range</h3><p>PQ and HLG are decoded to linear light, tone mapped with BT.2390 for an ordinary screen or passed through as scRGB for an HDR one.</p></div>
       <div class="card"><h3>Screenshots</h3><p>PNG or JPEG at source resolution through Windows Imaging Component, so no ffmpeg is needed. JPEG&nbsp;XR keeps the HDR range and needs none either; AVIF does. A switch grabs the finished window instead, interface and all.</p></div>
-      <div class="card"><h3>Profiles</h3><p>Device, input, capture format and every picture and audio setting, one per source, on Ctrl+1 to Ctrl+9.</p></div>
+      <div class="card"><h3>Profiles</h3><p>Device, input, capture format and every picture and audio setting, one per source, on Ctrl+1 to Ctrl+9 &mdash; or on none at all: a profile can name the video standard that means it, and the standard the search settles on then picks the profile.</p></div>
     </div>
   </div>
 </section>
