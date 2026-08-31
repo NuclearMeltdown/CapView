@@ -1419,6 +1419,14 @@ float VideoRenderer::darkChromaEnergy() const {
   return (float)((double)chromaDarkSum_ / (double)chromaDarkCount_ / 255.0);
 }
 
+float VideoRenderer::chromaLitFraction() const {
+  if (chromaFramesAnalysed_ < kChromaFramesWanted || chromaCount_ == 0) return -1.0f;
+  // Ohne eigene Untergrenze fuer die hellen Bloecke, anders als oben: dass es
+  // keine gibt, ist hier kein fehlender Messwert, sondern das Ergebnis.
+  const uint64_t lit = chromaCount_ > chromaDarkCount_ ? chromaCount_ - chromaDarkCount_ : 0;
+  return (float)((double)lit / (double)chromaCount_);
+}
+
 void VideoRenderer::ResetChroma() {
   chromaFramesSeen_ = 0;
   chromaFramesAnalysed_ = 0;

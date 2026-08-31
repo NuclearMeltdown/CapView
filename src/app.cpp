@@ -1323,16 +1323,103 @@ static const double kStandardLostSeconds = 1.5;
 // Durchlauf ohnehin, weil zu dem Zeitpunkt auch die *richtige* Norm nicht
 // einrastet -- gerettet wird er nicht von einem laengeren Fenster, sondern vom
 // naechsten Durchlauf.
-static const double kStandardSettleSeconds = 1.5;
+//
+// Von 1,5 auf 1,25 s heruntergesetzt, und zwar nicht, weil enger gerechnet
+// wird, sondern weil das Gemessene kleiner geworden ist. In jedem der zehn
+// Werte oben steckt das Warten auf zwei frische Messwerte des Wachtthreads
+// mit drin, und das waren bei 250 ms Takt bis zu 0,5 s davon; bei 100 ms sind
+// es bis zu 0,2 s.
+//
+// Hier stand zuerst 1,0 s, hergeleitet aus genau dieser Rechnung: der
+// schlechteste alte Wert von 0,88 s muesste auf gut 0,6 s fallen, und 1,0 s
+// stuende dazu wie vorher 1,5 s zu 0,88 s. Die erste Messung mit dem neuen
+// Takt hat das nicht bestaetigt -- am 31.08. um 03:09:16, ein verlorener Lock
+// auf PAL B und der Wechsel zurueck auf PAL 60: **0,73 s**. Gegen 1,0 s ist
+// das Faktor 1,37, wo vorher 1,7 stand, und da der Poll-Anteil jetzt bis zu
+// 0,2 s betraegt, liegt der schlechteste Fall dieser Art bei rund 0,83 s.
+//
+// 1,25 s stellt das Verhaeltnis wieder her (Faktor 1,5 auf 0,83 s) und behaelt
+// den groesseren Teil des Gewinns: die Frist faellt um ein Sechstel, das
+// Warten davor um bis zu 0,3 s, und die wirklich teuren Faelle nimmt ohnehin
+// die Kuerzung bei Bildmangel weiter unten weg. Eine Vorhersage durch eine
+// Messung ersetzt, nicht durch eine zweite Vorhersage.
+//
+// Nachpruefbar bleibt es an derselben Zeile: "Videonorm automatisch gefunden:
+// ... (Lock nach %.2f s)". Bleiben diese Werte unter 0,85 s, stimmt die
+// Rechnung; kommen sie in die Naehe von 1,25, gehoert die Frist zurueck auf
+// 1,5.
+static const double kStandardSettleSeconds = 1.25;
 // Die vorgezogenen Kandidaten nach einem verlorenen Lock -- der Partner der
 // zuletzt guten Norm und sie selbst -- bekommen deutlich mehr. Eine Konsole,
 // die gerade neu startet oder von 50 auf 60 Hz umschaltet, braucht ein paar
 // Sekunden, bis ueberhaupt wieder etwas Stabiles aus ihr herauskommt; mit
 // 0,6 Sekunden waere man laengst weitergezogen, wenn sie so weit ist.
-static const double kStandardPreferredSeconds = 3.0;
+//
+// Von 3,0 auf 2,0 s, und das ist der doppelte Sprung: die Frist selbst faellt
+// um eine Sekunde, und sie faellt ganz weg, sobald gar kein Bild mehr ankommt
+// -- siehe die Kuerzung in UpdateVideoStandard. Was bleibt, ist der Fall, fuer
+// den sie gedacht war: es kommen Bilder, sie rasten nur noch nicht ein. Zwei
+// Sekunden sind auch dann noch das Doppelte einer gewoehnlichen Frist, und die
+// Konsole, die laenger braucht, wird ohnehin erst von der naechsten Runde
+// eingefangen.
+static const double kStandardPreferredSeconds = 2.0;
 // After a full pass with nothing locking, there is probably no signal at all --
 // the console is off. Stop poking the card and look again in a while.
 static const double kStandardBackoffSeconds = 6.0;
+// Ab wann "es kommt kein Bild mehr" heisst, dass die eingestellte Norm das
+// anliegende Signal nicht dekodieren kann. Grosszuegig gegen den Neuaufbau
+// des Graphen gewaehlt: waehrenddessen kommt naturgemaess nichts, und ein
+// frisch gestarteter Graph liefert an der SA7160 nach rund 0,3 s wieder --
+// gemessen am 31.08. um 02:29:37, Neubau in 118 ms. Zwei Sekunden sind das
+// Sechsfache davon und trotzdem kurz genug, dass ein wieder angestecktes Kabel
+// nicht sekundenlang ins Leere laeuft.
+static const double kStandardStarvedSeconds = 2.0;
+
+// Bis die Karte nach einem Normwechsel wieder saubere Bilder liefert. Die
+// Zeilenzahl bleibt gleich, es geht nur um den Farb-PLL, deshalb kurz.
+//
+// Dass die Frist ueberhaupt etwas tut, ist am 30.08. nachgestellt worden,
+// indem sie auf null gesetzt wurde: dann misst jeder Kandidat den
+// Umschaltmoment mit und wird zu seinem Vorgaenger hin verschmiert -- PAL N
+// 0,047 und 0,064 statt 0,012 bis 0,021, SECAM B in den Tiefen 0,246 statt
+// 0,271 bis 0,410. Wie weit sie darueber hinaus Reserve hat, ist nicht
+// gemessen.
+//
+// Sie war frueher gratis: der Rundgang wartet nach einem Normwechsel ohnehin
+// auf zwei frische Messwerte des Wachtthreads, und bei 250 ms Takt dauerte das
+// ungefaehr ebenso lange. Seit der Takt bei 100 ms liegt -- siehe
+// kSignalPollNaps -- ist sie es nicht mehr, sondern der laengste Einzelposten
+// eines Kandidaten. Verkuerzt wird sie trotzdem nicht: was sie abwartet, ist
+// der Farb-PLL der Karte, und der wird nicht schneller, weil wir oefter
+// hinsehen.
+//
+// Sie steht hier statt in VerifyStandardColour, weil sie inzwischen von zwei
+// Seiten gebraucht wird: auch der Neubau des Graphen nach einem gefundenen
+// Lock legt sie an, damit die erste Messung der neuen Norm hinter dem Umbau
+// beginnt statt darueber hinweg zu mitteln. Siehe UpdateVideoStandard.
+static const double kColourSettleSeconds = 0.5;
+
+// Wie oft der Wachtthread den Decoder nach seinem Lock fragt, in Zehnteln
+// einer Zehntelsekunde -- er schlaeft in 10-ms-Haeppchen, damit das Beenden
+// nicht darauf warten muss.
+//
+// Das ist der Boden unter allen Fristen dieser Datei, und er war lange
+// unsichtbar. Bevor ueber eine frisch gesetzte Norm geurteilt werden darf,
+// wartet `UpdateVideoStandard` auf zwei frische Messwerte -- bei 250 ms Takt
+// sind das 0,25 bis 0,5 s, in denen nichts gemessen wird, sondern nur gewartet.
+// Genau diese Spanne steckt in jedem gemessenen "Lock nach"-Wert mit drin:
+// zehn davon aus drei Sitzungen liegen zwischen 0,32 und 0,88 s, und ein
+// gutes Drittel davon ist dieses Warten.
+//
+// Bei 100 ms schrumpft es auf 0,1 bis 0,2 s. Das ist die Voraussetzung dafuer,
+// dass die Fristen darunter kuerzer werden koennen, ohne enger zu werden --
+// gekuerzt wird das Warten, nicht die Messung. Der Preis sind zwei
+// Property-Gets auf dem Decoder zehnmal statt viermal je Sekunde, auf einem
+// eigenen Thread, weit weg vom Bildweg.
+//
+// Der Rundgang profitiert genauso: auch er wartet je Kandidat auf zwei frische
+// Messwerte, fuenfmal je Runde.
+static const int kSignalPollNaps = 10;
 
 void App::StartSignalWatch() {
   StopSignalWatch();
@@ -1355,8 +1442,9 @@ void App::StartSignalWatch() {
       signalStandard_.store(CurrentVideoStandard(held.Get()), std::memory_order_relaxed);
       signalLocked_.store(VideoStandardLocked(held.Get()), std::memory_order_relaxed);
       signalSeq_.fetch_add(1, std::memory_order_release);
-      // Split into short naps so shutdown does not have to wait a quarter second.
-      for (int i = 0; i < 25 && signalWatchRun_.load(std::memory_order_relaxed); ++i) {
+      // Split into short naps so shutdown does not have to wait for the interval.
+      for (int i = 0; i < kSignalPollNaps && signalWatchRun_.load(std::memory_order_relaxed);
+           ++i) {
         ::Sleep(10);
       }
     }
@@ -1411,7 +1499,7 @@ SettingsWindow::StandardSearch App::StandardSearchDisplay() const {
 
 // Ob der Wachthread ueberhaupt etwas zu beobachten hat.
 //
-// Er fragt den Analogdecoder viermal in der Sekunde nach seinem Lock. An einem
+// Er fragt den Analogdecoder zehnmal in der Sekunde nach seinem Lock. An einem
 // digitalen Eingang haengt der Decoder gar nicht im Signalweg -- seine Antwort
 // ist dort bedeutungslos, und alles, was auf ihr aufbaut, soll sie deshalb
 // auch nicht bekommen: weder die automatische Normensuche noch die kuerzere
@@ -1482,14 +1570,53 @@ void App::UpdateVideoStandard() {
     }
   }
 
+  const int64_t now = QpcNow();
+
+  // Kommt ueberhaupt noch ein Bild an? Vor allen Ausstiegen weiter unten, damit
+  // diese Uhr auch dann laeuft, wenn die Funktion an anderer Stelle umkehrt.
+  //
+  // Das ist der Unterschied zwischen den beiden Arten von "kein Signal", die
+  // sich sonst gleich anfuehlen. Ist die Quelle aus, liefert die Karte weiter
+  // Bilder, nur eben leere -- daraus wird das Urteil Flat, und dann ist Parken
+  // richtig. Steht die Karte dagegen auf einer Norm mit der falschen
+  // Zeilenzahl, kommt gar nichts mehr; das letzte Urteil bleibt als Flat
+  // stehen, obwohl es ein Bild von vorhin beschreibt.
+  //
+  // Genau das hat sich am 31.08.2026 aufgehaengt: um 02:02:46 stand die Karte
+  // auf NTSC 4.43 (525/60), am Eingang lag wieder ein 625/50-Signal, und der
+  // Graph lieferte kein einziges Bild mehr. Der Parkzweig war schon auf seinem
+  // Ziel angekommen, tat also nichts, und kehrte um -- alle 1,5 Sekunden, 112
+  // Sekunden lang, bis von Hand neu gestartet wurde. Das Bildalter stieg dabei
+  // von 633 ms auf 112352 ms, und das ist der Messwert, an dem es haengt.
+  //
+  // Wenn nichts mehr ankommt, ist Weitersuchen keine Stoerung, sondern das
+  // Einzige, was das Bild zurueckholen kann.
+  // Gemessen wird am Alter des letzten Bildes selbst, nicht daran, wann uns
+  // zum ersten Mal aufgefallen ist, dass keines mehr kommt. Der Unterschied
+  // sind volle kNoSignalSeconds, die sonst vor der eigentlichen Frist noch
+  // einmal verstreichen -- am 31.08. um 02:29:44 standen dadurch 4,3 s im Log,
+  // wo 3,0 gemeint waren. Nur solange die Senke ueberhaupt schon einmal ein
+  // Bild gesehen hat; danach ist ihr Alter die Messung. Vorher -- frischer
+  // Graph, noch nichts angekommen -- bleibt nur, ab dem ersten Hinsehen zu
+  // zaehlen.
+  const FrameSink* frameSink = capture_.sink();
+  const double frameAgeMs = frameSink ? frameSink->stats().lastArrivalAgeMs : -1.0;
+  bool starved = false;
+  if (frameAgeMs >= 0.0) {
+    standardStarvedSinceQpc_ = 0;
+    starved = frameAgeMs >= kStandardStarvedSeconds * 1000.0;
+  } else {
+    if (standardStarvedSinceQpc_ == 0) standardStarvedSinceQpc_ = now;
+    starved = QpcToSeconds(now - standardStarvedSinceQpc_) >= kStandardStarvedSeconds;
+  }
+  if (!starved) standardStarvedLogged_ = false;
+
   // Two fresh readings since the standard was last changed, so what is being
   // judged is the standard that is actually set.
   if (signalSeq_.load(std::memory_order_acquire) - standardSeqAtSet_ < 2) return;
 
   const int locked = signalLocked_.load(std::memory_order_relaxed);
   if (locked < 0) return;  // no analogue decoder, or nothing measured yet
-
-  const int64_t now = QpcNow();
 
   if (locked == 1) {
     // Settled. Whatever is set is right, and the search starts from scratch if
@@ -1525,6 +1652,27 @@ void App::UpdateVideoStandard() {
       } else {
         Toast(error);
       }
+      // Und die Farbmessung von vorn, hinter dem Umbau.
+      //
+      // Das hat gefehlt, und es war teuer. Die laufende Messung mittelt ueber
+      // rund drei Sekunden; wird der Graph mittendrin neu gebaut, steht in ihr
+      // die alte Norm, die alte Groesse und der Umbau selbst. Genau das ist am
+      // 31.08. um 03:09 passiert: PAL 60 mass unmittelbar nach dem Wechsel von
+      // 720x576 auf 720x480 eine Farbe von 0,005 -- gemessen wurde in
+      // Wahrheit das Nichts davor. Damit galt die frisch gefundene, richtige
+      // Norm als zweifelhaft, und es lief ein voller Rundgang ueber vier
+      // Normen los, der zu allem Ueberfluss verworfen wurde, weil die zweite
+      // Messung derselben Norm dann 0,258 ergab. Drei Sekunden spaeter stand
+      // ohne einen einzigen Normwechsel "PAL 60 hat deutlich Farbe (0,149)"
+      // im Log -- die Antwort war die ganze Zeit da, sie wurde nur zu frueh
+      // gefragt. Rund sechseinhalb der elfeinhalb Sekunden zwischen
+      // Signalverlust und Urteil gingen dafuer drauf.
+      //
+      // Die Frist darunter ist dieselbe wie im Rundgang und aus demselben
+      // Grund da: sie setzt die Messung an ihrem Ende noch einmal zurueck, so
+      // dass das Fenster sicher hinter dem Umbau beginnt und nicht davor.
+      ResetStandardColourCheck();
+      colourSettleUntilQpc_ = now + SecondsToQpc(kColourSettleSeconds);
     }
     VerifyStandardColour(now);
     return;
@@ -1547,6 +1695,31 @@ void App::UpdateVideoStandard() {
     return;
   }
   if (QpcToSeconds(now - standardLostQpc_) < kStandardLostSeconds) return;
+
+  // Eine Frist, die auf ein Bild wartet, das nicht kommt, ist kein Zuhoeren.
+  //
+  // Beim Setzen des Kandidaten wird entschieden, wieviel Zeit er bekommt, und
+  // an dem Punkt ist `starved` fast immer noch falsch: das letzte Bild ist
+  // erst ein, zwei Sekunden alt, die Schwelle noch nicht erreicht. Die
+  // Unterscheidung stand also da, wo sie nichts entscheiden konnte -- am
+  // 31.08. um 02:43:39 bekam PAL B seine vollen kStandardPreferredSeconds und
+  // lief sie voll aus, obwohl schon beim Setzen seit sieben Sekunden kein Bild
+  // mehr angekommen war. 02:43:42,6 "nach 3,00 s ohne Lock verworfen",
+  // 02:43:43,2 wieder Bild: die halbe Wartezeit war diese eine Frist.
+  //
+  // Also wird die Frist nachtraeglich gekuerzt, sobald das Aushungern
+  // feststeht. Gekuerzt und nicht gestrichen: der Kandidat braucht seine
+  // kStandardSettleSeconds, um seinen Lock ueberhaupt zeigen zu koennen, und
+  // dass gerade kein Bild ankommt, sagt darueber nichts -- eine Norm mit der
+  // anderen Zeilenzahl liefert grundsaetzlich nichts in einen Graphen der
+  // alten Groesse, und trotzdem kann genau sie die richtige sein. Was hier
+  // wegfaellt, ist allein die zusaetzliche Geduld der vorgezogenen Plaetze.
+  // Die ist fuer eine Konsole gedacht, die noch hochfaehrt, und die liefert
+  // dabei Bilder -- nur noch keine stabilen.
+  if (starved && standardCandidate_ >= 0 && standardSetQpc_ != 0) {
+    const int64_t shortened = standardSetQpc_ + SecondsToQpc(kStandardSettleSeconds);
+    if (shortened < standardNextTryQpc_) standardNextTryQpc_ = shortened;
+  }
   if (now < standardNextTryQpc_) return;
 
   int preferred = 0;
@@ -1570,16 +1743,48 @@ void App::UpdateVideoStandard() {
   // der Pause unten, ein auftauchendes Signal bestaetigt sich sonst auf der
   // zuletzt zufaellig eingestellten Norm selbst -- und die Runde von vorn
   // beginnen lassen, sobald wieder etwas anliegt.
-  if (renderer_.detectedSignal() == VideoRenderer::SignalVerdict::Flat) {
+  if (starved && !standardStarvedLogged_) {
+    standardStarvedLogged_ = true;
+    CAP_LOG("Videonorm: seit %.1f s kommt kein Bild mehr an -- %s passt nicht zum anliegenden "
+            "Signal, die Suche laeuft weiter",
+            frameAgeMs >= 0.0 ? frameAgeMs / 1000.0
+                              : QpcToSeconds(now - standardStarvedSinceQpc_),
+            VideoStandardName(VideoStandardIndexOf(capture_.currentStandard())));
+  }
+  if (!starved && renderer_.detectedSignal() == VideoRenderer::SignalVerdict::Flat) {
     if (standardCandidate_ >= 0 || capture_.currentStandard() != candidates.front()) {
+      bool switched = false;
       if (capture_.currentStandard() != candidates.front()) {
         capture_.SetStandard(candidates.front());
         standardSeqAtSet_ = signalSeq_.load(std::memory_order_acquire);
         ResetStandardColourCheck();
+        switched = true;
       }
       CAP_LOG("Videonorm: kein Signal am Eingang, Suche angehalten und auf %s geparkt",
               VideoStandardName(VideoStandardIndexOf(candidates.front())));
       standardCandidate_ = -1;
+
+      // Parken heisst die Karte umstellen, und eine Norm bringt ihre Zeilenzahl
+      // mit. Der Graph muss also mit, genau wie beim Einrasten weiter oben --
+      // sonst laeuft er auf der alten Groesse weiter, und die Karte schiebt ein
+      // 625-Zeilen-Bild in einen 480 Zeilen hohen Graphen.
+      //
+      // Auch das ist gemessen: am 31.08.2026 wurde der GameCube von 60 auf 50 Hz
+      // zurueckgestellt. 01:48:03 wurde auf PAL B geparkt, 01:48:04 kamen 25,03
+      // Bilder/s an -- und der Graph stand noch auf 720x480. Neunundvierzig
+      // Sekunden lang war das Bild gestaucht, die Kammpruefung urteilte auf
+      // einer Groesse, die es nicht gab, und die Aufloesungsliste zeigte die
+      // Formate der alten Norm. Erst ein Neustart von Hand hat es geradegezogen.
+      //
+      // Ohne Signal neu aufzubauen ist dabei kein Nachteil, sondern der Sinn:
+      // wenn das Bild wiederkommt, steht der Graph schon richtig. Und oefter
+      // als noetig geschieht es nicht -- geparkt wird nur, wenn die Karte noch
+      // nicht auf der Vermutung steht, und losgelassen nur, wenn sich die
+      // Zeilenzahl wirklich geaendert hat.
+      if (switched && ReleaseStandardBoundFormat(VideoStandardLines(candidates.front()))) {
+        std::string error;
+        if (!StartCapture(&error)) Toast(error);
+      }
     }
     // Die Frist des laufenden Kandidaten immer wieder von vorn, damit sie erst
     // zu laufen beginnt, wenn es etwas zu messen gibt.
@@ -1652,6 +1857,20 @@ void App::UpdateVideoStandard() {
 
   ++standardCandidate_;
 
+  // Wer uns gerade aushungert, ist schon widerlegt und braucht keine Frist.
+  //
+  // Nach dem Parken steht die Karte bereits auf candidates.front(), und genau
+  // die ist der naechste Kandidat. Ohne diesen Schritt wird sie noch einmal
+  // gesetzt -- ein Nichts -- und bekommt dann als vorgezogene Norm ihre vollen
+  // kStandardPreferredSeconds, obwohl seit Sekunden kein Bild kommt. Am
+  // 31.08. um 02:29 waren das drei geschenkte Sekunden von elf: 02:29:44,7
+  // PAL B gesetzt, 02:29:47,6 "nach 3,03 s ohne Lock verworfen", 02:29:48,3
+  // Lock auf PAL 60.
+  if (starved && standardCandidate_ + 1 < (int)candidates.size() &&
+      candidates[(size_t)standardCandidate_] == capture_.currentStandard()) {
+    ++standardCandidate_;
+  }
+
   const long next = candidates[(size_t)standardCandidate_];
   capture_.SetStandard(next);
   standardSetQpc_ = now;
@@ -1659,9 +1878,17 @@ void App::UpdateVideoStandard() {
   // Setting it is not the same as it working. Give the decoder a moment, then
   // this function will look at the lock again and either keep it or move on.
   // Den vorgezogenen Kandidaten wird laenger zugehoert, siehe oben.
-  standardNextTryQpc_ = now + SecondsToQpc(standardCandidate_ < preferred
-                                               ? kStandardPreferredSeconds
-                                               : kStandardSettleSeconds);
+  //
+  // Ausser es kommt gar kein Bild. Die laengere Frist ist fuer eine Konsole
+  // gedacht, die noch hochfaehrt -- die liefert dabei Bilder, nur noch keine
+  // stabilen. Kommt nichts, ist Warten nur Warten, und der Rueckweg zu einem
+  // Bild fuehrt ausschliesslich ueber den naechsten Kandidaten.
+  //
+  // Steht das Aushungern hier noch nicht fest, faellt es weiter oben nach --
+  // die Frist wird dann nachtraeglich gekuerzt statt vorher verweigert.
+  standardNextTryQpc_ =
+      now + SecondsToQpc(!starved && standardCandidate_ < preferred ? kStandardPreferredSeconds
+                                                                   : kStandardSettleSeconds);
   // Die Norm hat gewechselt, also gehoert die bisherige Farbmessung zu einer
   // anderen Einstellung.
   ResetStandardColourCheck();
@@ -1768,23 +1995,32 @@ void App::VerifyStandardColour(int64_t now) {
   // Der Abstand war einmal 30 s, weil "die naechste Kurve" bei Mario Kart
   // ungefaehr so lange braucht. Das war zu vorsichtig gedacht: solange nichts
   // entschieden ist, laeuft das Bild in der Ausgangsnorm weiter und der
-  // Gegenversuch kostet zwei Sekunden. Zehn Sekunden, verdoppelt, ergeben
-  // 10 + 20 + 40 -- nach etwa einer Minute ist das Urteil gefaellt statt nach
-  // dreien.
-  static const int kColourRetries = 3;
-  static const double kColourRetryBaseSeconds = 10.0;
-  // Bis die Karte nach einem Normwechsel wieder saubere Bilder liefert. Die
-  // Zeilenzahl bleibt gleich, es geht nur um den Farb-PLL, deshalb kurz.
+  // Gegenversuch kostet zwei Sekunden. Drei Sekunden, verdoppelt, ergeben
+  // 3 + 6 + 12 -- nach gut zwanzig Sekunden ist das Urteil gefaellt.
   //
-  // Dass die Frist ueberhaupt etwas tut, ist am 30.08. nachgestellt worden,
-  // indem sie auf null gesetzt wurde: dann misst jeder Kandidat den
-  // Umschaltmoment mit und wird zu seinem Vorgaenger hin verschmiert -- PAL N
-  // 0,047 und 0,064 statt 0,012 bis 0,021, SECAM B in den Tiefen 0,246 statt
-  // 0,271 bis 0,410. Wie weit sie darueber hinaus Reserve hat, ist nicht
-  // gemessen; sie kostet nichts, weil die Suche nach einem Normwechsel ohnehin
-  // auf zwei frische Messwerte des Wachtthreads wartet und das ungefaehr
-  // ebenso lange dauert.
-  static const double kColourSettleSeconds = 0.5;
+  // Vorher standen hier 10 + 20 + 40. Das war zu vorsichtig gerechnet: der
+  // Wiederholungsfall ist nicht teuer, weil er meistens gar keine Runde ist.
+  // Steht ueber die Farbe der eingestellten Norm inzwischen genug fest, kostet
+  // er nur den Blick darauf -- so am 31.08. um 02:17:47 und 02:25:41, beide
+  // Male "PAL 60 hat deutlich Farbe", ohne einen einzigen Normwechsel. Nur
+  // wenn es wieder nicht reicht, laeuft eine volle Runde, und die kostet die
+  // vier Sekunden, gegen die die Pause gedacht war.
+  static const int kColourRetries = 3;
+  static const double kColourRetryBaseSeconds = 3.0;
+  // Und was ein verworfener Rundgang wartet, naemlich fast nichts.
+  //
+  // Die Pause oben ist gegen eine graue Szene gedacht, und dort ist das Warten
+  // der Zweck: die Szene soll erst farbig werden. Ein Rundgang, der verworfen
+  // wurde, weil sich das Bild waehrenddessen geaendert hat, ist der
+  // entgegengesetzte Fall -- gefehlt hat nicht die Farbe, sondern die Ruhe,
+  // und ein Rennspiel wird durch Zuwarten nicht ruhiger. Sechs Sekunden
+  // spaeter ist die Szene genauso in Bewegung, nur ist die Antwort dann sechs
+  // Sekunden aelter.
+  //
+  // Die Zahl der Anlaeufe bleibt bei kColourRetries, also bleibt auch die
+  // sichtbare Stoerung dieselbe: gleich viele Normwechsel, nur ohne die
+  // Totzeit dazwischen. Aus 3 + 6 s werden 1 + 1 s.
+  static const double kColourMotionRetrySeconds = 1.0;
   // Kommt in dieser Zeit keine Messung zustande, kommt keine. Das Format hat
   // dann keine lesbare Farbe -- siehe VideoRenderer::AnalyzeChroma -- oder es
   // laufen zu wenige Bilder durch. Beides ist kein Fehler, nur ein Nein.
@@ -1878,6 +2114,39 @@ void App::VerifyStandardColour(int64_t now) {
   // Kandidaten eingefaerbt, bleibt die Entscheidung aus und es gilt die
   // Reihenfolge der Wohnregion.
   static const float kDarkTinted = 0.18f;
+
+  // Wie viel des Bildes beleuchtet sein muss, damit ein Rundgang ueberhaupt
+  // etwas entscheiden kann.
+  //
+  // Schwarz ist in jeder Norm schwarz. Auf einem fast schwarzen Bild messen
+  // alle Kandidaten dieselbe Null, und aus lauter gleichen Zahlen laesst sich
+  // keine Norm auswaehlen -- der Rundgang laeuft, schaltet sichtbar durch drei
+  // falsche Normen und kommt mit nichts zurueck.
+  //
+  // Genau so geschehen am 31.08. um 05:30:03. Der Wertebereichsmesser hatte
+  // eine Sekunde vorher "95,135 % unter 16" notiert, das Bild war bis auf einen
+  // hellen Rest schwarz. Gemessen wurde dann PAL 60 mit 0,005, NTSC M mit
+  // 0,002, PAL M mit 0,003, NTSC 4.43 mit 0,003. Zweieinhalb Sekunden
+  // Durchschalten fuer vier Mal nichts; als das Bild zurueck war, stand PAL 60
+  // bei 0,194 und die Sache war in einer Messung erledigt.
+  //
+  // Der vorhandene Waechter greift hier nicht und soll es auch nicht: er fragt
+  // SignalVerdict::Flat, also ob ueberhaupt etwas anliegt, und es lag etwas an
+  // -- die Spanne war 154. "Es ist etwas zu sehen" und "es ist genug zu sehen,
+  // um Farbe daran zu messen" sind zwei Fragen.
+  //
+  // Ein Zehntel, und die Wahl ist bewusst weit weg von dem, was ein Spielbild
+  // trifft: gemeint ist nicht "dunkle Szene", sondern "praktisch nichts da".
+  //
+  // Nachgemessen am 31.08. um 05:43, mit kuenstlich hochgesetztem
+  // kChromaConfident, damit ein Rundgang auf laufendem Bild erzwungen wird:
+  // **54 % beleuchtet**. Das Fuenffache der Schwelle -- auf gewoehnlichem
+  // Spielinhalt kann sie nicht danebengreifen. Der Fall, um den es geht, lag
+  // mit "95 % unter Luma 16" auf der anderen Seite.
+  //
+  // Und falsch herum kostet sie nichts: eingefaerbte Tiefen laufen unten an ihr
+  // vorbei, und wer wartet, verbraucht keinen Anlauf.
+  static const float kChromaLitWanted = 0.10f;
 
   auto darkText = [&](float d) {
     return d < 0.0f ? std::string("keine dunklen Stellen") : Format("%.3f", d);
@@ -1975,8 +2244,47 @@ void App::VerifyStandardColour(int64_t now) {
       colourCheckedStandard_ = current;
       colourStartedQpc_ = 0;
       colourAttempts_ = 0;
+      colourWaitingForPicture_ = false;
       return;
     }
+
+    // Zweifel ja -- aber ist genug Bild da, um ihn auszuraeumen?
+    //
+    // Der Zweifel hat zwei ganz verschiedene Gruende, und nur einer davon ist
+    // eine Frage, die ein Rundgang beantworten kann. Zeigt ein *helles* Bild
+    // keine Farbe, dann hat der Farbtraeger nicht gestimmt, und welcher es
+    // stattdessen ist, entscheiden die Kandidaten untereinander. Zeigt ein
+    // schwarzes Bild keine Farbe, dann ist es schwarz. Da ist nichts zu
+    // entscheiden, und die vier gleichen Nullen von oben sind die Antwort
+    // darauf.
+    //
+    // Eingefaerbte Tiefen fuehren *nicht* hierher, sondern in den Rundgang, und
+    // zwar auch auf einem dunklen Bild: eine Farbe, die im Schwarzen steht, ist
+    // ein Beleg fuer einen falschen Traeger und kein fehlender Messwert. Sie
+    // ist auf einem dunklen Bild sogar am deutlichsten -- dort sind die
+    // Bloecke, um die es geht.
+    //
+    // Gewartet wird, ohne etwas zu verbrauchen: kein Anlauf wird gezaehlt,
+    // keine Norm als geprueft vermerkt. Ein Rundgang, der nie stattgefunden
+    // hat, darf weder als unentschieden zaehlen noch die drei Anlaeufe
+    // aufbrauchen, bevor das Bild ueberhaupt da ist -- eine Konsole, die
+    // hochfaehrt, ist ein paar Sekunden lang schwarz, und danach soll die
+    // Pruefung noch alle Anlaeufe haben. Zurueckgesetzt wird dabei wie beim
+    // toten Eingang, damit die erste Messung nach dem Warten nicht durch das
+    // Schwarze davor verduennt wird.
+    const float lit = renderer_.chromaLitFraction();
+    if (lit >= 0.0f && lit < kChromaLitWanted && dark >= 0.0f && dark < kDarkTinted) {
+      if (!colourWaitingForPicture_) {
+        colourWaitingForPicture_ = true;
+        CAP_LOG("Videonorm: %s ist zweifelhaft (Farbe %.3f), aber nur %.0f %% des Bildes sind "
+                "beleuchtet -- auf Schwarz ist keine Norm zu erkennen, es wird gewartet",
+                VideoStandardName(VideoStandardIndexOf(current)), energy, lit * 100.0f);
+      }
+      renderer_.ResetChroma();
+      colourStartedQpc_ = 0;
+      return;
+    }
+    colourWaitingForPicture_ = false;
 
     colourCandidates_ = VideoStandardColourCandidates(
         current, capture_.capabilities().availableStandards, config_.app.videoRegion);
@@ -2022,10 +2330,14 @@ void App::VerifyStandardColour(int64_t now) {
     colourEnergies_.assign(colourCandidates_.size(), -1.0f);
     colourDarks_.assign(colourCandidates_.size(), -1.0f);
     colourIndex_ = 0;
-    CAP_LOG("Videonorm: %s ist zweifelhaft (Farbe %.3f, dunkle Bereiche %s) -- die %d Normen mit "
-            "%d Zeilen werden verglichen",
+    // Der beleuchtete Anteil steht mit in der Zeile, obwohl er die Runde nicht
+    // ausloest. Er ist die Grundlage, auf der sie ueberhaupt etwas entscheiden
+    // kann, und wenn ein Rundgang spaeter einmal unerklaerlich lauter Nullen
+    // misst, steht die Erklaerung schon in der Zeile davor.
+    CAP_LOG("Videonorm: %s ist zweifelhaft (Farbe %.3f, dunkle Bereiche %s, %.0f %% beleuchtet) "
+            "-- die %d Normen mit %d Zeilen werden verglichen",
             VideoStandardName(VideoStandardIndexOf(current)), energy, darkText(dark).c_str(),
-            count, VideoStandardLines(current));
+            lit < 0.0f ? 0.0f : lit * 100.0f, count, VideoStandardLines(current));
   }
 
   // Eintragen, was dieser Kandidat gemessen hat, und zum naechsten.
@@ -2050,10 +2362,47 @@ void App::VerifyStandardColour(int64_t now) {
   // die mit den saubereren Tiefen, und zwar als Paar: die Farbmenge kommt aus
   // derselben Messung wie die Tiefen, sonst stuenden Zahlen aus zwei Szenen
   // nebeneinander. Die Begruendung steht oben beim zweiten Anlauf.
+  // Um wie viel die beiden Messungen derselben Norm auseinanderliegen duerfen,
+  // bevor die Runde als ungueltig gilt. Siehe sceneChanged gleich darunter.
+  static const float kSceneAgreeBy = 2.0f;
+  bool sceneChanged = false;
+
   if (colourCandidates_.size() > 1 && colourCandidates_.back() == colourCandidates_.front()) {
     const size_t last = colourCandidates_.size() - 1;
     const bool better = colourDarks_[last] >= 0.0f &&
                         (colourDarks_[0] < 0.0f || colourDarks_[last] < colourDarks_[0]);
+
+    // Und hier wird die Zweitmessung das, wofuer sie eigentlich da ist: die
+    // Probe darauf, ob die Runde ueberhaupt eine Szene gesehen hat.
+    //
+    // Die Kandidaten werden nacheinander gemessen, eine ganze Runde dauert
+    // ein paar Sekunden, und das Bild wartet nicht. Aendert sich die Szene
+    // dazwischen -- ein Bootbildschirm wird zum Spiel --, dann sahen die
+    // frueheren Kandidaten etwas anderes als die spaeteren, und der Vergleich
+    // vergleicht nichts. Wer zufaellig drankam, als es bunt wurde, gewinnt.
+    //
+    // Genau das ist am 31.08.2026 um 02:02 passiert. Die Runde ueber die fuenf
+    // 525-Zeilen-Normen fing auf einem dunklen Bild an und endete auf einem
+    // farbigen: PAL 60 zuerst 0.005, am Ende 0.122, und dazwischen bekam
+    // NTSC 4.43 mit 0.157 den Zuschlag -- gegen einen GameCube, der PAL 60
+    // ausgibt. Danach stand die Karte auf einer Norm, die das Signal nicht
+    // dekodieren kann.
+    //
+    // Gemessen wird die Abweichung an den beiden Schwellen, die in dieser
+    // Runde ueberhaupt etwas entscheiden: kChromaConfident trennt "beurteilt"
+    // von "unbeurteilt", kDarkTinted "plausibel" von "eingefaerbt". Springt
+    // eine der beiden Messungen ueber eine dieser Schwellen, hat sich der
+    // Massstab selbst bewegt. Der Faktor daneben faengt die Faelle, die
+    // innerhalb einer Schwelle bleiben und trotzdem eine andere Szene sind.
+    const float e0 = colourEnergies_[0], e1 = colourEnergies_[last];
+    const float d0 = colourDarks_[0], d1 = colourDarks_[last];
+    if (e0 >= 0.0f && e1 >= 0.0f) {
+      if ((e0 < kChromaConfident) != (e1 < kChromaConfident)) sceneChanged = true;
+      const float lo = e0 < e1 ? e0 : e1, hi = e0 < e1 ? e1 : e0;
+      if (hi > lo * kSceneAgreeBy && hi >= kChromaConfident) sceneChanged = true;
+    }
+    if (d0 >= 0.0f && d1 >= 0.0f && (d0 < kDarkTinted) != (d1 < kDarkTinted)) sceneChanged = true;
+
     CAP_LOG("Videonorm: %s zum zweiten Mal gemessen -- Farbe %s, dunkle Bereiche %s (zuerst %s "
             "und %s)%s",
             VideoStandardName(VideoStandardIndexOf(colourCandidates_.front())),
@@ -2061,7 +2410,10 @@ void App::VerifyStandardColour(int64_t now) {
                                          : Format("%.3f", colourEnergies_[last]).c_str(),
             darkText(colourDarks_[last]).c_str(),
             colourEnergies_[0] < 0.0f ? "keine Messung" : Format("%.3f", colourEnergies_[0]).c_str(),
-            darkText(colourDarks_[0]).c_str(), better ? " -- die zweite zaehlt" : "");
+            darkText(colourDarks_[0]).c_str(),
+            sceneChanged ? " -- die Szene hat sich waehrend der Runde geaendert, der Vergleich "
+                           "gilt nicht"
+                         : (better ? " -- die zweite zaehlt" : ""));
     if (better) {
       colourEnergies_[0] = colourEnergies_[last];
       colourDarks_[0] = colourDarks_[last];
@@ -2158,8 +2510,13 @@ void App::VerifyStandardColour(int64_t now) {
   // etwas bestanden. Ueber die blosse Farbmenge dagegen ist ein einzelner nur
   // eine gelungene Messung ohne Vergleich, und die entscheidet nichts.
   const bool alone = best >= 0 && runnerUp < 0;
+  // sceneChanged sticht alles: hat die Runde zwei Szenen gesehen, sind die
+  // Zahlen nicht falsch, sie gehoeren nur nicht zusammen. Dann entscheidet
+  // hier nichts, und der Weg unten -- zurueck zum Ausgangspunkt, spaeter noch
+  // einmal -- ist derselbe wie bei einer zu farbarmen Szene.
   const bool decided =
-      byDarks || (best >= 0 && !alone && winner >= kChromaFloor && winner > second * needed);
+      !sceneChanged &&
+      (byDarks || (best >= 0 && !alone && winner >= kChromaFloor && winner > second * needed));
 
   const long chosen = best >= 0 ? colourCandidates_[(size_t)best] : origin;
   const long runnerUpStandard = runnerUp >= 0 ? colourCandidates_[(size_t)runnerUp] : 0;
@@ -2209,22 +2566,68 @@ void App::VerifyStandardColour(int64_t now) {
     return;
   }
 
+  // Der Vergleich ist hin -- die Ausgangsnorm ist es deshalb nicht.
+  //
+  // "Verworfen" heisst: die Kandidaten haben verschiedene Szenen gesehen, also
+  // sagt ihr Verhaeltnis zueinander nichts. Ueber die Ausgangsnorm allein sagt
+  // das nichts aus. Ihre Messung ist eine vollstaendige Messung einer
+  // einzelnen Norm, und fuer die gibt es oben laengst ein Urteil: kraeftig
+  // Farbe und neutrale Tiefen heisst richtig dekodiert. Es ist woertlich
+  // dieselbe Pruefung wie die im Normalbetrieb, nur spaeter im Ablauf -- also
+  // wird sie hier gestellt statt eine Wiederholung dafuer zu bezahlen.
+  //
+  // Am 31.08.2026 um 05:24 hat genau das drei Sekunden gekostet. Die Runde
+  // wurde um 39.908 verworfen, und in derselben Zeile stand PAL 60 mit Farbe
+  // 0,194 und Tiefen 0,107 -- beides klar innerhalb der Schwellen. Der
+  // Wiederholer stellte um 42.573 fest, was schon dagestanden hatte:
+  // "PAL 60 hat deutlich Farbe (0.192), dunkle Bereiche neutral (0.107)".
+  //
+  // Neu ist daran kein Massstab. Damit eine falsche Norm hier durchkaeme,
+  // muesste sie kraeftig Farbe *und* neutrale Tiefen zeigen, und das ist die
+  // Beschreibung einer richtigen -- ein falsch dekodiertes SECAM lag in den
+  // Tiefen bei 0,353 gegen eine Schwelle von 0,18.
+  if (sceneChanged && originEnergy >= kChromaConfident && originDark >= 0.0f &&
+      originDark < kDarkTinted) {
+    CAP_LOG("Videonorm: Vergleich verworfen, aber %s steht fuer sich (Farbe %.3f, dunkle "
+            "Bereiche %s) -- es bleibt dabei",
+            VideoStandardName(VideoStandardIndexOf(origin)), originEnergy,
+            darkText(originDark).c_str());
+    colourCheckedStandard_ = origin;
+    standardLastGood_ = origin;
+    colourAttempts_ = 0;
+    return;
+  }
+
   // Kein klarer Sieger. Zurueck zum Ausgangspunkt -- und nicht abgehakt,
   // sondern spaeter noch einmal, denn eine graue Szene sagt nichts ueber den
   // Farbtraeger. Erst nach einigen Anlaeufen ist die Quelle wohl wirklich
   // schwarzweiss.
   ++colourAttempts_;
   if (colourAttempts_ >= kColourRetries) {
-    CAP_LOG("Videonorm: nach %d Anlaeufen entscheidet nichts -- die Quelle ist wohl "
-            "schwarzweiss, es bleibt bei %s (Farbe %.3f, dunkle Bereiche %s)",
-            colourAttempts_, VideoStandardName(VideoStandardIndexOf(origin)), originEnergy,
-            darkText(originDark).c_str());
+    // Auch hier zaehlt der Grund. "Die Quelle ist schwarzweiss" ist eine
+    // Aussage ueber das Signal, und die darf nicht fallen, wenn gar nicht die
+    // Farbe gefehlt hat, sondern die Ruhe. Aufgegeben wird trotzdem: nach drei
+    // Anlaeufen ueber gut siebzig Sekunden bewegt sich das Bild eben staendig,
+    // und ohne verlaesslichen Vergleich bleibt der Ausgangspunkt das Beste,
+    // was wir haben.
+    if (sceneChanged) {
+      CAP_LOG("Videonorm: nach %d Anlaeufen war das Bild jedesmal in Bewegung -- kein "
+              "verlaesslicher Vergleich moeglich, es bleibt bei %s",
+              colourAttempts_, VideoStandardName(VideoStandardIndexOf(origin)));
+    } else {
+      CAP_LOG("Videonorm: nach %d Anlaeufen entscheidet nichts -- die Quelle ist wohl "
+              "schwarzweiss, es bleibt bei %s (Farbe %.3f, dunkle Bereiche %s)",
+              colourAttempts_, VideoStandardName(VideoStandardIndexOf(origin)), originEnergy,
+              darkText(originDark).c_str());
+    }
     colourCheckedStandard_ = origin;
     return;
   }
-  const double wait = kColourRetryBaseSeconds * (double)(1 << (colourAttempts_ - 1));
-  CAP_LOG("Videonorm: Vergleich unentschieden, die Szene ist zu farbarm -- in %.0f s noch "
-          "einmal, bis dahin %s",
+  const double wait = sceneChanged ? kColourMotionRetrySeconds
+                                   : kColourRetryBaseSeconds * (double)(1 << (colourAttempts_ - 1));
+  CAP_LOG("Videonorm: Vergleich %s -- in %.0f s noch einmal, bis dahin %s",
+          sceneChanged ? "verworfen, waehrenddessen hat sich das Bild geaendert"
+                       : "unentschieden, die Szene ist zu farbarm",
           wait, VideoStandardName(VideoStandardIndexOf(origin)));
   colourRetryQpc_ = now + SecondsToQpc(wait);
 }
@@ -2239,6 +2642,7 @@ void App::ResetStandardColourCheck() {
   colourStartedQpc_ = 0;
   colourRetryQpc_ = 0;
   colourAttempts_ = 0;
+  colourWaitingForPicture_ = false;
   // Auch der Takt zurueck: der Abbruch kann von aussen kommen -- Signal weg,
   // Graph neu -- und dann laeuft VerifyStandardColour nicht mehr, das den Takt
   // sonst selbst zuruecknimmt.

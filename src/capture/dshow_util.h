@@ -316,6 +316,13 @@ std::string VideoStandardSettingName(long setting);
 // pickers show, so that what they echo back is something they also offered.
 std::string VideoStandardPickerName(long setting);
 
+// Wie die Farbe getragen wird. Zusammen mit dem Traeger unten und der
+// Zeilenzahl beschreibt das ein Bild vollstaendig -- was darueber hinaus
+// verschieden heisst, ist im Kabel nicht mehr verschieden. Der Farbrundgang
+// misst danach, ob es sich lohnt, eine Norm ueberhaupt zu probieren.
+enum class VideoColourSystem { Pal, Ntsc, Secam };
+VideoColourSystem VideoStandardColourSystem(long standard);
+
 // How many samples of a 720 pixel line one cycle of the colour subcarrier
 // occupies. This is what the dot crawl filter needs to know: the crawl *is* the
 // subcarrier leaking into brightness, so removing it means knowing its
