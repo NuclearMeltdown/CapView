@@ -1234,6 +1234,23 @@ void DotCrawlEffect(int window, float* removed, float* softer) {
 
 void SettingsWindow::DrawImageTab() {
   ImageSettings& img = cfg().active().image;
+
+  // Der volleste Reiter, also mit einer Reihenfolge und nicht mit einer
+  // Reihung: erst was das Bild richtig macht, dann was es schöner macht.
+  //
+  //   Form (Skalierung samt Seitenverhältnis und Drehung, natives Raster)
+  //   Zeit (Halbbilder)
+  //   Zuschnitt
+  //   Reparatur (Composite-Filter)
+  //   Farbe und Regler
+  //   Bildröhre
+  //
+  // Die beiden Enden sind der Grund für den Rest: der Composite-Filter holt
+  // heraus, was die Übertragung verdorben hat, und die Bildröhre verdeckt
+  // absichtlich Details. Standen sie nebeneinander, sähen sie aus wie zwei
+  // Geschmacksfragen. Seitenverhältnis und Drehung standen früher ohne eigene
+  // Überschrift hinter der Bildröhre und sahen dadurch nach Nostalgie aus,
+  // obwohl sie zur Skalierung gehören und auch in jede Aufnahme durchschlagen.
   ImGui::Spacing();
 
   ImGui::SeparatorText(T("Skalierung", "Scaling"));
@@ -1251,77 +1268,69 @@ void SettingsWindow::DrawImageTab() {
   HelpMarker(T("Hebt Kanten nach der Skalierung an. 0 schaltet es ab.",
                "Lifts edges after scaling. 0 turns it off."));
 
-  // Die vier Regler, die sonst jedes Aufnahmeprogramm hat -- hier aber im
-  // Shader statt auf der Karte. Die Regler der Karte werden beim Start
-  // neutralisiert, damit das, was ankommt, das ist, was die Konsole geschickt
-  // hat; siehe NeutraliseProcAmp.
-  ImGui::Spacing();
-  ImGui::SeparatorText(T("Bildregler", "Picture controls"));
-
+  int aspect = (int)img.aspect;
   ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Helligkeit", "Brightness"), &img.brightness, -1.0f, 1.0f, "%+.2f");
-  ImGui::SameLine();
-  HelpMarker(T("Hebt oder senkt das ganze Bild. 0 ist neutral.",
-               "Lifts or lowers the whole picture. 0 is neutral."));
-
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Kontrast", "Contrast"), &img.contrast, 0.0f, 2.0f, "%.2f");
-  ImGui::SameLine();
-  HelpMarker(T("Spreizt um das mittlere Grau. 1 ist neutral.",
-               "Spreads around mid grey. 1 is neutral."));
-
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Sättigung", "Saturation"), &img.saturation, 0.0f, 2.0f, "%.2f");
-  ImGui::SameLine();
-  HelpMarker(T("0 macht das Bild grau, 1 ist neutral, 2 doppelt so bunt.",
-               "0 makes the picture grey, 1 is neutral, 2 twice as colourful."));
-
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Farbton", "Hue"), &img.hue, -180.0f, 180.0f, "%+.0f°");
-  ImGui::SameLine();
-  HelpMarker(
-      T("Dreht alle Farben um denselben Winkel. 0 ist neutral. Bei NTSC über "
-        "Composite das, was am Fernseher der Farbton-Regler war.",
-        "Turns every colour by the same angle. 0 is neutral. On NTSC over composite this "
-        "is what the tint knob on a television did."));
-
-  const bool neutral = img.brightness == 0.0f && img.contrast == 1.0f &&
-                       img.saturation == 1.0f && img.hue == 0.0f;
-  ImGui::BeginDisabled(neutral);
-  if (ImGui::Button(T("Zurücksetzen", "Reset"))) {
-    img.brightness = 0.0f;
-    img.contrast = 1.0f;
-    img.saturation = 1.0f;
-    img.hue = 0.0f;
+  if (ComboEnum(T("Seitenverhältnis", "Aspect ratio"), &aspect, 5, AspectName, AspectHelp)) {
+    img.aspect = (AspectMode)aspect;
   }
-  ImGui::EndDisabled();
+  ImGui::SameLine();
+  HelpMarker(AspectHelp(aspect));
 
+  // Bei Strecken und Ganzzahlig gibt es nichts umzurechnen: das eine hat
+  // ueberhaupt keine eigene Form, das andere ist ein Versprechen ueber Pixel,
+  // das genau durch Umrechnen gebrochen wuerde.
+  if (img.aspect != AspectMode::Stretch && img.aspect != AspectMode::Integer) {
+    // Eigene ID: derselbe Satz steht auf dieser Seite ein zweites Mal, weiter
+    // unten bei den Bildreglern. ImGui bildet die ID aus der Beschriftung, also
+    // waeren es sonst zwei Bedienelemente mit einer ID -- und ImGui sagt das
+    // auch, mit einem Fenster mitten im Bild. Umbenennen waere die schlechtere
+    // Antwort: der Satz sagt an beiden Stellen dasselbe und soll auch gleich
+    // lauten.
+    ImGui::PushID("square-pixel-to-output");
+    ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
+                      "Apply to recording, screenshots and camera"),
+                    &img.squarePixelOutput);
+    ImGui::PopID();
+    ImGui::SameLine();
+    HelpMarker(
+        T("Das Fenster kann nicht-quadratische Pixel umsonst zeigen -- es zeichnet "
+          "einfach in ein Rechteck der richtigen Form. Eine Datei kann das nicht, sie "
+          "ist ein Raster. Also wird das Bild beim Hinausgehen mit dem oben gewählten "
+          "Skalierungsfilter auf quadratische Pixel gerechnet, und aus 720x576 wird "
+          "768x576.\n\nÜber HDMI ändert das gar nichts: dort sind die Pixel schon "
+          "quadratisch, die Größen kommen gleich heraus und der Durchgang entfällt.",
+          "The window can show non-square pixels for free -- it simply draws into a "
+          "rectangle of the right shape. A file cannot; it is a grid. So the picture is "
+          "resampled to square pixels on its way out, using the scaling filter chosen "
+          "above, and 720x576 leaves as 768x576.\n\nOver HDMI this changes nothing: "
+          "those pixels are already square, the sizes come out equal and the pass is "
+          "skipped."));
+  }
+
+  int rotation = (int)img.rotation;
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Drehung", "Rotation"), &rotation, kRotationCount, RotationName)) {
+    img.rotation = (Rotation)rotation;
+  }
   ImGui::SameLine();
-  // Eigene ID: derselbe Satz steht auf dieser Seite ein zweites Mal, bei den
-  // quadratischen Pixeln. ImGui bildet die ID aus der Beschriftung, also waeren
-  // es sonst zwei Bedienelemente mit einer ID -- und ImGui sagt das auch, mit
-  // einem Fenster mitten im Bild. Umbenennen waere die schlechtere Antwort: der
-  // Satz sagt an beiden Stellen dasselbe und soll auch gleich lauten.
-  ImGui::PushID("procamp-to-output");
-  ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
-                    "Apply to recording, screenshots and camera"),
-                  &img.procAmpToOutput);
-  ImGui::PopID();
-  ImGui::SameLine();
-  HelpMarker(
-      T("Aus ist Absicht, und die beiden Stellungen sind nicht gleichwertig. Sauber "
-        "aufnehmen und später nachbearbeiten kostet nichts -- dieselbe Korrektur lässt "
-        "sich im Schnittprogramm jederzeit drauflegen. Mit angehobenem Kontrast "
-        "aufnehmen klemmt dagegen die Lichter auf Vollausschlag und drückt die Tiefen "
-        "auf null, und das holt kein Nachbearbeiten zurück.\n\nAn ist richtig, wenn die "
-        "Aufnahme so hochgeladen wird, wie sie herauskommt.\n\nDie Anzeige bekommt die "
-        "Regler in jedem Fall.",
-        "Off on purpose, and the two positions are not equivalent. Recording clean and "
-        "grading later costs nothing -- the same correction goes on in the editor at any "
-        "time. Recording with contrast raised clips the highlights to full scale and "
-        "crushes the shadows to zero, and no amount of editing brings those back.\n\nOn "
-        "is right when the recording gets uploaded exactly as it comes out.\n\nThe "
-        "display gets the controls either way."));
+  HelpMarker(T("Gilt auch für Aufnahme und Screenshots.",
+               "Applies to recordings and screenshots as well."));
+
+  // Nur wenn die Quelle wirklich halb so hoch ankommt.
+  //
+  // Frueher stand hier bloss `analogueSource_`, und damit war das Kaestchen an
+  // jedem Composite-Eingang anklickbar -- auch an einem GameCube mit 576i.
+  // Sichtbar passiert dort nichts, denn das Bild wird ohnehin auf das
+  // eingestellte Seitenverhaeltnis gepasst und nicht auf die Zeilenzahl; die
+  // Aufnahme dagegen kam mit 720x1152 heraus. Eine Einstellung, die dort nichts
+  // tut, wo man hinsieht, und etwas dort, wo man nicht hinsieht, ist die
+  // schlechteste Sorte.
+  if (analogueSource_ && sourceHeight_ > 0 && sourceHeight_ <= kHalfHeightLines) {
+    ImGui::Checkbox(T("Zeilen verdoppeln", "Double lines"), &img.lineDouble);
+    ImGui::SameLine();
+    HelpMarker(T("Für 240p/288p-Quellen, die halb so hoch ankommen wie sie sollen.",
+                 "For 240p/288p sources that arrive half as tall as they should."));
+  }
 
   // Natives Raster. Gehört zur Skalierung, nicht zur Bildröhre: es macht das
   // Bild sauberer, nicht nostalgischer.
@@ -1377,109 +1386,6 @@ void SettingsWindow::DrawImageTab() {
                "integer scaling."));
 
   }  // natives Pixelraster, nur analog
-
-  // Bildröhre. Steht am Ende der Skalierungsgruppe, weil es dorthin gehört --
-  // es sind Anzeigeeffekte und keine Signalbearbeitung, und sie landen weder in
-  // einer Aufnahme noch in einem Screenshot.
-  //
-  // Gezeigt wird das nach der Zeilenzahl der Quelle, nicht danach, ob sie
-  // analog ist. Der Grund ist ein Geraet, das es wirklich gibt: ein RetroTINK
-  // oder ein MiSTer haengt mit 480p an HDMI, ist also digital, und genau dessen
-  // Besitzer will Zeilenluecken. Umgekehrt greifen sie bei 720p und darueber
-  // ohnehin nicht -- der Shader schaltet unterhalb der doppelten Quellhoehe ab,
-  // weil dort keine Luecke mehr hinpasst.
-  if (sourceHeight_ == 0 || sourceHeight_ <= 576) {
-  ImGui::Spacing();
-  ImGui::SeparatorText(T("Bildröhre", "Cathode ray tube"));
-  ImGui::TextDisabled(
-      "%s", T("Setzt zurück, was ein Röhrenmonitor hinzugefügt hat. Nur für die Anzeige.",
-              "Puts back what a CRT added. Display only."));
-
-  ImGui::SetNextItemWidth(-260.0f);
-  ImGui::SliderFloat(T("Zeilenlücken", "Scanlines"), &img.scanlines, 0.0f, 0.5f, "%.2f");
-  ImGui::SameLine();
-  HelpMarker(T("Dunkelt die Lücken zwischen den Zeilen der Quelle ab. Braucht mindestens "
-               "doppelte Höhe im Fenster, darunter bleibt es aus -- sonst gäbe es Moiré "
-               "statt Zeilen. Die Helligkeit wird ausgeglichen.",
-               "Darkens the gaps between the source's own lines. Needs at least twice the "
-               "height in the window and stays off below that, because there is nowhere to "
-               "put a gap otherwise. Brightness is compensated."));
-
-  int mask = Clamp(img.mask, 0, 2);
-  ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Maske", "Mask"), &mask, 3, MaskName, MaskHelp)) img.mask = mask;
-  ImGui::SameLine();
-  HelpMarker(MaskHelp(mask));
-
-  if (img.mask != 0) {
-    ImGui::SetNextItemWidth(-260.0f);
-    ImGui::SliderFloat(T("Maskenstärke", "Mask strength"), &img.maskStrength, 0.0f, 0.5f, "%.2f");
-    ImGui::SameLine();
-    HelpMarker(T("Braucht eine hohe Ausgabeauflösung, um als Maske statt als Farbstich zu "
-                 "wirken.",
-                 "Needs a high output resolution to read as a mask rather than as a tint."));
-  }
-  }  // Bildröhre, nur bei standardaufloesenden Quellen
-  ImGui::Spacing();
-
-  int aspect = (int)img.aspect;
-  ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Seitenverhältnis", "Aspect ratio"), &aspect, 5, AspectName, AspectHelp)) {
-    img.aspect = (AspectMode)aspect;
-  }
-  ImGui::SameLine();
-  HelpMarker(AspectHelp(aspect));
-
-  // Bei Strecken und Ganzzahlig gibt es nichts umzurechnen: das eine hat
-  // ueberhaupt keine eigene Form, das andere ist ein Versprechen ueber Pixel,
-  // das genau durch Umrechnen gebrochen wuerde.
-  if (img.aspect != AspectMode::Stretch && img.aspect != AspectMode::Integer) {
-    // Eigene ID, siehe oben beim gleichlautenden Kaestchen der Bildregler.
-    ImGui::PushID("square-pixel-to-output");
-    ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
-                      "Apply to recording, screenshots and camera"),
-                    &img.squarePixelOutput);
-    ImGui::PopID();
-    ImGui::SameLine();
-    HelpMarker(
-        T("Das Fenster kann nicht-quadratische Pixel umsonst zeigen -- es zeichnet "
-          "einfach in ein Rechteck der richtigen Form. Eine Datei kann das nicht, sie "
-          "ist ein Raster. Also wird das Bild beim Hinausgehen mit dem oben gewählten "
-          "Skalierungsfilter auf quadratische Pixel gerechnet, und aus 720x576 wird "
-          "768x576.\n\nÜber HDMI ändert das gar nichts: dort sind die Pixel schon "
-          "quadratisch, die Größen kommen gleich heraus und der Durchgang entfällt.",
-          "The window can show non-square pixels for free -- it simply draws into a "
-          "rectangle of the right shape. A file cannot; it is a grid. So the picture is "
-          "resampled to square pixels on its way out, using the scaling filter chosen "
-          "above, and 720x576 leaves as 768x576.\n\nOver HDMI this changes nothing: "
-          "those pixels are already square, the sizes come out equal and the pass is "
-          "skipped."));
-  }
-
-  int rotation = (int)img.rotation;
-  ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Drehung", "Rotation"), &rotation, kRotationCount, RotationName)) {
-    img.rotation = (Rotation)rotation;
-  }
-  ImGui::SameLine();
-  HelpMarker(T("Gilt auch für Aufnahme und Screenshots.",
-               "Applies to recordings and screenshots as well."));
-
-  // Nur wenn die Quelle wirklich halb so hoch ankommt.
-  //
-  // Frueher stand hier bloss `analogueSource_`, und damit war das Kaestchen an
-  // jedem Composite-Eingang anklickbar -- auch an einem GameCube mit 576i.
-  // Sichtbar passiert dort nichts, denn das Bild wird ohnehin auf das
-  // eingestellte Seitenverhaeltnis gepasst und nicht auf die Zeilenzahl; die
-  // Aufnahme dagegen kam mit 720x1152 heraus. Eine Einstellung, die dort nichts
-  // tut, wo man hinsieht, und etwas dort, wo man nicht hinsieht, ist die
-  // schlechteste Sorte.
-  if (analogueSource_ && sourceHeight_ > 0 && sourceHeight_ <= kHalfHeightLines) {
-    ImGui::Checkbox(T("Zeilen verdoppeln", "Double lines"), &img.lineDouble);
-    ImGui::SameLine();
-    HelpMarker(T("Für 240p/288p-Quellen, die halb so hoch ankommen wie sie sollen.",
-                 "For 240p/288p sources that arrive half as tall as they should."));
-  }
 
   // Halbbilder. Nicht danach gezeigt, ob die Quelle analog ist, sondern danach,
   // ob sie ueberhaupt Halbbilder hat -- 1080i und 480i gibt es auch ueber HDMI,
@@ -1543,6 +1449,65 @@ void SettingsWindow::DrawImageTab() {
   HelpMarker(T("Springt das Bild auf und ab, die andere Reihenfolge wählen.",
                "If the picture jumps up and down, pick the other order."));
   }  // Halbbilder, nur wenn die Quelle welche hat
+
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Bildrand abschneiden", "Crop"));
+  ImGui::TextDisabled(T("Pixel, die vom Quellbild wegfallen.",
+                        "Pixels removed from the source picture."));
+  const float quarter =
+      (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 3) / 4.0f;
+  ImGui::SetNextItemWidth(quarter);
+  ImGui::DragInt("##cropl", &img.cropLeft, 0.5f, 0, 2048, T("links %d", "left %d"));
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(quarter);
+  ImGui::DragInt("##cropr", &img.cropRight, 0.5f, 0, 2048, T("rechts %d", "right %d"));
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(quarter);
+  ImGui::DragInt("##cropt", &img.cropTop, 0.5f, 0, 2048, T("oben %d", "top %d"));
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(quarter);
+  ImGui::DragInt("##cropb", &img.cropBottom, 0.5f, 0, 2048, T("unten %d", "bottom %d"));
+  // The crop is measured on the source, before the picture is turned. Dragging
+  // an edge on a rotated image would move a different edge than the one under
+  // the cursor, so that combination is simply not offered.
+  const bool rotated = img.rotation != Rotation::None;
+  ImGui::BeginDisabled(rotated);
+  if (ImGui::Button(T("Konfigurieren ...", "Configure ..."))) {
+    cropPickRequested_ = true;
+  }
+  ImGui::EndDisabled();
+  ImGui::SetItemTooltip(
+      rotated ? T("Bei gedrehtem Bild nicht verfügbar.", "Not available on a rotated picture.")
+              : T("Schließt die Einstellungen und lässt die Ränder im Bild ziehen.",
+                  "Closes the settings and lets you drag the edges on the picture."));
+  ImGui::SameLine();
+  ImGui::BeginDisabled(!captureRunning_);
+  if (ImGui::Button(T("Erkennen", "Detect"))) cropDetectRequested_ = true;
+  ImGui::EndDisabled();
+  ImGui::SetItemTooltip(T("Misst den schwarzen Rand aus und schneidet ihn weg.",
+                          "Measures the black border and crops it away."));
+  ImGui::SameLine();
+  if (ImGui::Button(T("Zurücksetzen##crop", "Reset##crop"))) {
+    img.cropLeft = img.cropRight = img.cropTop = img.cropBottom = 0;
+  }
+
+  ImGui::Checkbox(T("Je Bildgröße getrennt merken", "Remember per picture size"),
+                  &img.cropPerFormat);
+  ImGui::SameLine();
+  HelpMarker(T("Dieselbe Quelle kann zwei Bildgrößen liefern — ein PAL-GameCube 576 Zeilen und im "
+               "60-Hz-Modus 480 —, und an beiden hängt ein anderer Rand. Angehakt behält jede "
+               "Größe ihren eigenen Zuschnitt, statt beim Wechsel zurückgesetzt zu werden.",
+               "One source can deliver two picture sizes — a PAL GameCube 576 lines and 480 in "
+               "60 Hz mode — with a different border on each. Ticked, every size keeps its own "
+               "crop instead of being reset on the change."));
+  if (img.cropPerFormat && !img.cropVariants.empty()) {
+    std::string sizes;
+    for (const CropForFormat& v : img.cropVariants) {
+      if (!sizes.empty()) sizes += ", ";
+      sizes += std::to_string(v.width) + "x" + std::to_string(v.height);
+    }
+    ImGui::TextDisabled(T("Gespeichert für: %s", "Stored for: %s"), sizes.c_str());
+  }
 
   if (analogueSource_) {
     ImGui::Spacing();
@@ -1687,65 +1652,6 @@ void SettingsWindow::DrawImageTab() {
   }
 
   ImGui::Spacing();
-  ImGui::SeparatorText(T("Bildrand abschneiden", "Crop"));
-  ImGui::TextDisabled(T("Pixel, die vom Quellbild wegfallen.",
-                        "Pixels removed from the source picture."));
-  const float quarter =
-      (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 3) / 4.0f;
-  ImGui::SetNextItemWidth(quarter);
-  ImGui::DragInt("##cropl", &img.cropLeft, 0.5f, 0, 2048, T("links %d", "left %d"));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(quarter);
-  ImGui::DragInt("##cropr", &img.cropRight, 0.5f, 0, 2048, T("rechts %d", "right %d"));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(quarter);
-  ImGui::DragInt("##cropt", &img.cropTop, 0.5f, 0, 2048, T("oben %d", "top %d"));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(quarter);
-  ImGui::DragInt("##cropb", &img.cropBottom, 0.5f, 0, 2048, T("unten %d", "bottom %d"));
-  // The crop is measured on the source, before the picture is turned. Dragging
-  // an edge on a rotated image would move a different edge than the one under
-  // the cursor, so that combination is simply not offered.
-  const bool rotated = img.rotation != Rotation::None;
-  ImGui::BeginDisabled(rotated);
-  if (ImGui::Button(T("Konfigurieren ...", "Configure ..."))) {
-    cropPickRequested_ = true;
-  }
-  ImGui::EndDisabled();
-  ImGui::SetItemTooltip(
-      rotated ? T("Bei gedrehtem Bild nicht verfügbar.", "Not available on a rotated picture.")
-              : T("Schließt die Einstellungen und lässt die Ränder im Bild ziehen.",
-                  "Closes the settings and lets you drag the edges on the picture."));
-  ImGui::SameLine();
-  ImGui::BeginDisabled(!captureRunning_);
-  if (ImGui::Button(T("Erkennen", "Detect"))) cropDetectRequested_ = true;
-  ImGui::EndDisabled();
-  ImGui::SetItemTooltip(T("Misst den schwarzen Rand aus und schneidet ihn weg.",
-                          "Measures the black border and crops it away."));
-  ImGui::SameLine();
-  if (ImGui::Button(T("Zurücksetzen##crop", "Reset##crop"))) {
-    img.cropLeft = img.cropRight = img.cropTop = img.cropBottom = 0;
-  }
-
-  ImGui::Checkbox(T("Je Bildgröße getrennt merken", "Remember per picture size"),
-                  &img.cropPerFormat);
-  ImGui::SameLine();
-  HelpMarker(T("Dieselbe Quelle kann zwei Bildgrößen liefern — ein PAL-GameCube 576 Zeilen und im "
-               "60-Hz-Modus 480 —, und an beiden hängt ein anderer Rand. Angehakt behält jede "
-               "Größe ihren eigenen Zuschnitt, statt beim Wechsel zurückgesetzt zu werden.",
-               "One source can deliver two picture sizes — a PAL GameCube 576 lines and 480 in "
-               "60 Hz mode — with a different border on each. Ticked, every size keeps its own "
-               "crop instead of being reset on the change."));
-  if (img.cropPerFormat && !img.cropVariants.empty()) {
-    std::string sizes;
-    for (const CropForFormat& v : img.cropVariants) {
-      if (!sizes.empty()) sizes += ", ";
-      sizes += std::to_string(v.width) + "x" + std::to_string(v.height);
-    }
-    ImGui::TextDisabled(T("Gespeichert für: %s", "Stored for: %s"), sizes.c_str());
-  }
-
-  ImGui::Spacing();
   ImGui::SeparatorText(T("Farbe", "Colour"));
   int range = (int)img.range;
   ImGui::SetNextItemWidth(-260.0f);
@@ -1771,6 +1677,120 @@ void SettingsWindow::DrawImageTab() {
   }
   ImGui::TextDisabled(T("Beides auch per Rechtsklick im Bild erreichbar.",
                         "Both are also in the right-click menu over the picture."));
+
+  // Die vier Regler, die sonst jedes Aufnahmeprogramm hat -- hier aber im
+  // Shader statt auf der Karte. Die Regler der Karte werden beim Start
+  // neutralisiert, damit das, was ankommt, das ist, was die Konsole geschickt
+  // hat; siehe NeutraliseProcAmp.
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Bildregler", "Picture controls"));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Helligkeit", "Brightness"), &img.brightness, -1.0f, 1.0f, "%+.2f");
+  ImGui::SameLine();
+  HelpMarker(T("Hebt oder senkt das ganze Bild. 0 ist neutral.",
+               "Lifts or lowers the whole picture. 0 is neutral."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Kontrast", "Contrast"), &img.contrast, 0.0f, 2.0f, "%.2f");
+  ImGui::SameLine();
+  HelpMarker(T("Spreizt um das mittlere Grau. 1 ist neutral.",
+               "Spreads around mid grey. 1 is neutral."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Sättigung", "Saturation"), &img.saturation, 0.0f, 2.0f, "%.2f");
+  ImGui::SameLine();
+  HelpMarker(T("0 macht das Bild grau, 1 ist neutral, 2 doppelt so bunt.",
+               "0 makes the picture grey, 1 is neutral, 2 twice as colourful."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Farbton", "Hue"), &img.hue, -180.0f, 180.0f, "%+.0f°");
+  ImGui::SameLine();
+  HelpMarker(
+      T("Dreht alle Farben um denselben Winkel. 0 ist neutral. Bei NTSC über "
+        "Composite das, was am Fernseher der Farbton-Regler war.",
+        "Turns every colour by the same angle. 0 is neutral. On NTSC over composite this "
+        "is what the tint knob on a television did."));
+
+  const bool neutral = img.brightness == 0.0f && img.contrast == 1.0f &&
+                       img.saturation == 1.0f && img.hue == 0.0f;
+  ImGui::BeginDisabled(neutral);
+  if (ImGui::Button(T("Zurücksetzen", "Reset"))) {
+    img.brightness = 0.0f;
+    img.contrast = 1.0f;
+    img.saturation = 1.0f;
+    img.hue = 0.0f;
+  }
+  ImGui::EndDisabled();
+
+  ImGui::SameLine();
+  // Eigene ID, siehe oben beim gleichlautenden Kaestchen der quadratischen
+  // Pixel.
+  ImGui::PushID("procamp-to-output");
+  ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
+                    "Apply to recording, screenshots and camera"),
+                  &img.procAmpToOutput);
+  ImGui::PopID();
+  ImGui::SameLine();
+  HelpMarker(
+      T("Aus ist Absicht, und die beiden Stellungen sind nicht gleichwertig. Sauber "
+        "aufnehmen und später nachbearbeiten kostet nichts -- dieselbe Korrektur lässt "
+        "sich im Schnittprogramm jederzeit drauflegen. Mit angehobenem Kontrast "
+        "aufnehmen klemmt dagegen die Lichter auf Vollausschlag und drückt die Tiefen "
+        "auf null, und das holt kein Nachbearbeiten zurück.\n\nAn ist richtig, wenn die "
+        "Aufnahme so hochgeladen wird, wie sie herauskommt.\n\nDie Anzeige bekommt die "
+        "Regler in jedem Fall.",
+        "Off on purpose, and the two positions are not equivalent. Recording clean and "
+        "grading later costs nothing -- the same correction goes on in the editor at any "
+        "time. Recording with contrast raised clips the highlights to full scale and "
+        "crushes the shadows to zero, and no amount of editing brings those back.\n\nOn "
+        "is right when the recording gets uploaded exactly as it comes out.\n\nThe "
+        "display gets the controls either way."));
+
+  // Bildröhre. Steht ganz am Ende der Seite, und so weit vom Composite-Filter
+  // entfernt wie diese Seite es hergibt: der räumt auf, was die Übertragung
+  // angerichtet hat, dieser hier legt mit Absicht wieder etwas darüber. Es sind
+  // Anzeigeeffekte und keine Signalbearbeitung, und sie landen weder in einer
+  // Aufnahme noch in einem Screenshot.
+  //
+  // Gezeigt wird das nach der Zeilenzahl der Quelle, nicht danach, ob sie
+  // analog ist. Der Grund ist ein Geraet, das es wirklich gibt: ein RetroTINK
+  // oder ein MiSTer haengt mit 480p an HDMI, ist also digital, und genau dessen
+  // Besitzer will Zeilenluecken. Umgekehrt greifen sie bei 720p und darueber
+  // ohnehin nicht -- der Shader schaltet unterhalb der doppelten Quellhoehe ab,
+  // weil dort keine Luecke mehr hinpasst.
+  if (sourceHeight_ == 0 || sourceHeight_ <= 576) {
+  ImGui::Spacing();
+  ImGui::SeparatorText(T("Bildröhre", "Cathode ray tube"));
+  ImGui::TextDisabled(
+      "%s", T("Setzt zurück, was ein Röhrenmonitor hinzugefügt hat. Nur für die Anzeige.",
+              "Puts back what a CRT added. Display only."));
+
+  ImGui::SetNextItemWidth(-260.0f);
+  ImGui::SliderFloat(T("Zeilenlücken", "Scanlines"), &img.scanlines, 0.0f, 0.5f, "%.2f");
+  ImGui::SameLine();
+  HelpMarker(T("Dunkelt die Lücken zwischen den Zeilen der Quelle ab. Braucht mindestens "
+               "doppelte Höhe im Fenster, darunter bleibt es aus -- sonst gäbe es Moiré "
+               "statt Zeilen. Die Helligkeit wird ausgeglichen.",
+               "Darkens the gaps between the source's own lines. Needs at least twice the "
+               "height in the window and stays off below that, because there is nowhere to "
+               "put a gap otherwise. Brightness is compensated."));
+
+  int mask = Clamp(img.mask, 0, 2);
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ComboEnum(T("Maske", "Mask"), &mask, 3, MaskName, MaskHelp)) img.mask = mask;
+  ImGui::SameLine();
+  HelpMarker(MaskHelp(mask));
+
+  if (img.mask != 0) {
+    ImGui::SetNextItemWidth(-260.0f);
+    ImGui::SliderFloat(T("Maskenstärke", "Mask strength"), &img.maskStrength, 0.0f, 0.5f, "%.2f");
+    ImGui::SameLine();
+    HelpMarker(T("Braucht eine hohe Ausgabeauflösung, um als Maske statt als Farbstich zu "
+                 "wirken.",
+                 "Needs a high output resolution to read as a mask rather than as a tint."));
+  }
+  }  // Bildröhre, nur bei standardaufloesenden Quellen
 }
 
 // ----------------------------------------------------------------- audio tab
