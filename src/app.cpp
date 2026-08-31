@@ -2465,7 +2465,27 @@ void App::VerifyStandardColour(int64_t now) {
   // Normalbetrieb durchsickern kann: colourCandidates_ *ist* der Suchzustand,
   // und wer ihn leert, stellt damit auch den Takt zurueck. Die Bedingung wird
   // je Bild neu gestellt, ausgefuehrt wird nur der Wechsel.
-  renderer_.SetChromaCadence(colourCandidates_.empty() ? 8 : 1);
+  //
+  // Und ebenso, sobald ein Suchlauf von Hand ansteht. Das ist die teuerste
+  // einzelne Wartezeit im ganzen Tastendruck, und sie war unsichtbar, weil sie
+  // vor dem ersten Normwechsel liegt: der Rundgang kann erst beginnen, wenn
+  // die Ausgangsnorm gemessen ist, und diese erste Messung lief noch im duennen
+  // Takt. Zehn Bilder bei jedem achten und 29,97 Bildern je Sekunde sind
+  // 2,67 s, in denen nichts geschieht und nichts zu sehen ist.
+  //
+  // Gemessen am 31.08. um 11:26:52,430 (Taste) bis 11:26:55,093 (Beginn des
+  // Rundgangs): 2,66 s, gefolgt von 3,34 s Rundgang -- die Vorbereitung kostete
+  // vier Zehntel des Ganzen. Drei Laeufe vorher, 11:21 und 11:23, lagen bei
+  // 2,66 / 2,68 / 2,67 s: es ist eine Konstante und keine Schwankung.
+  //
+  // Der dichte Takt macht daraus zehn Bilder in Folge, also gut ein Drittel
+  // Sekunde. Bezahlt wird er mit derselben Rechenarbeit, die der Rundgang
+  // ohnehin gleich verlangt -- nur ein paar Sekunden frueher. Wer von Hand
+  // sucht, bekommt den Rundgang ohnehin: die Abkuerzung ist fuer ihn
+  // abgeschaltet, siehe `forced` weiter unten.
+  const bool denseWanted = !colourCandidates_.empty() ||
+                           (standardForceColourUntilQpc_ != 0 && now < standardForceColourUntilQpc_);
+  renderer_.SetChromaCadence(denseWanted ? 1 : 8);
 
   const long current = capture_.currentStandard();
   if (current == 0) return;
