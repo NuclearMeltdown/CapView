@@ -95,8 +95,16 @@ class Recorder {
   // Set when ffmpeg died on its own; the app should stop and report.
   bool failed() const { return failed_.load(std::memory_order_relaxed); }
 
-  // Called from the render thread with a freshly read back frame.
-  void PushVideo(const uint8_t* pixels, int stride);
+  // Called from the render thread with a freshly read back frame. Its size is
+  // passed along and checked: a frame of a different shape than the one the
+  // running ffmpeg was told about is dropped rather than written.
+  void PushVideo(const uint8_t* pixels, int stride, int width, int height);
+
+  // What was handed to ffmpeg at the start. `-s` and `-r` stand fixed in its
+  // command line -- rawvideo carries no header that could say anything else --
+  // so if the source moves away from these, the file has to be cut.
+  int frameWidth() const { return width_; }
+  int frameHeight() const { return height_; }
 
   RecordStats stats() const;
 

@@ -524,8 +524,21 @@ int Recorder::PickWriteSlotLocked() const {
   return 0;  // unreachable with three slots and two reserved indices
 }
 
-void Recorder::PushVideo(const uint8_t* pixels, int stride) {
+void Recorder::PushVideo(const uint8_t* pixels, int stride, int width, int height) {
   if (!running_.load(std::memory_order_relaxed) || !pixels) return;
+
+  // A frame of a different shape than ffmpeg was told about. This happens for
+  // the fraction of a second between the source changing its video standard and
+  // the app noticing and cutting the file. Dropping it is not a nicety: the
+  // copy below reads `height_` rows of `width_ * 4` bytes, and a source that
+  // just went from 576 to 480 lines reads a fifth of a frame past the end of
+  // the staging buffer.
+  //
+  // Compared with the same rounding that Start applied, because an odd source
+  // is a legitimate one -- a crop can leave 721 columns -- and the file is then
+  // one column narrower on purpose. Rounding down can only ever ask for less
+  // than the frame holds, so it stays safe.
+  if ((width & ~1) != width_ || (height & ~1) != height_) return;
 
   int slot;
   {

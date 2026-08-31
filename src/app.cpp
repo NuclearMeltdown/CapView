@@ -1104,6 +1104,11 @@ void App::StartRecording() {
     const double measured = sink->stats().sourceFps;
     if (measured > 1.0) recordFps = measured;
   }
+  // Vor dem Doppeln festgehalten: `FeedRecorder` vergleicht damit, ob die
+  // Quelle waehrend der Aufnahme eine andere geworden ist, und das soll ein
+  // umgestellter Deinterlacer nicht ausloesen.
+  recordSourceFps_ = recordFps;
+  pendingSince_ = -1.0;
   if (config_.active().image.deinterlace != Deinterlace::Off) recordFps *= 2.0;
 
   const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.outputWidth(),
@@ -3573,11 +3578,78 @@ void App::DrawCropPicker() {
 void App::FeedRecorder() {
   if (!recorder_.recording()) return;
 
+  const double now = ImGui::GetTime();
+
+  // Die Quelle hat mitten in der Aufnahme die Norm gewechselt. Bildgroesse und
+  // Rate stehen in der ffmpeg-Zeile fest -- rawvideo hat keinen Kopf, in dem
+  // etwas anderes stehen koennte --, also passt ab dem Wechsel kein Bild mehr
+  // in die laufende Datei. Der Recorder wirft die falsch geformten weg, sonst
+  // laese er ueber den Puffer hinaus; die Datei bliebe damit aber ab dem
+  // Wechsel einfach stehen und die Aufnahme waere weg. Also: schneiden und mit
+  // der neuen Form weiterschreiben.
+  //
+  // Nicht sofort, sondern erst wenn die neue Form eine Weile steht. Ein
+  // Normsuchlauf geht durch mehrere Zeilenzahlen, und jede davon sofort zu
+  // schneiden gaebe eine Handvoll Dateien von je einer Sekunde. Der Zaehler
+  // faengt deshalb bei jeder *Aenderung* von vorne an und laeuft nur, solange
+  // die Abweichung besteht -- kehrt die Quelle zurueck, wird gar nicht
+  // geschnitten und die Datei laeuft durch.
+  {
+    const int liveWidth = renderer_.outputWidth();
+    const int liveHeight = renderer_.outputHeight();
+    double liveFps = recordSourceFps_;
+    if (const FrameSink* sink = capture_.sink()) {
+      const double measured = sink->stats().sourceFps;
+      if (measured > 1.0) liveFps = measured;
+    }
+
+    // Die Rate wird grosszuegig verglichen, weil sie gemessen ist und gemessene
+    // Werte zittern. Was hier auseinandergehalten werden muss, sind 25 und
+    // 29,97 oder 50 und 59,94 -- ein Fuenftel auseinander, weit jenseits von
+    // allem, was ein Ruckler in der Messung bewegt.
+    //
+    // Das faengt nebenbei einen zweiten Fall, und der ist kein Schaden: die
+    // Messung zaehlt Bilder in Fenstern von einer Sekunde, und wer eine
+    // Aufnahme unmittelbar nach einem Graphenumbau startet, bekommt das
+    // angebrochene Fenster davor als Rate in die Datei geschrieben. Dann steht
+    // die falsche Zahl in `-r`, anderthalb Sekunden spaeter faellt es hier auf,
+    // und die Aufnahme laeuft ab da mit der richtigen weiter.
+    // Gerade gerechnet, weil der Recorder die Kantenlaengen selbst abrundet --
+    // die meisten Encoder koennen keine ungerade Bildgroesse. Ohne das Abrunden
+    // hier waere eine ungerade Quelle dauerhaft "anders" als die eigene Datei
+    // und wuerde alle anderthalb Sekunden geschnitten.
+    const bool shapeDiffers = liveWidth > 0 && liveHeight > 0 &&
+                              ((liveWidth & ~1) != recorder_.frameWidth() ||
+                               (liveHeight & ~1) != recorder_.frameHeight());
+    const bool rateDiffers = recordSourceFps_ > 1.0 && liveFps > 1.0 &&
+                             std::fabs(liveFps - recordSourceFps_) > recordSourceFps_ * 0.08;
+
+    if (!shapeDiffers && !rateDiffers) {
+      pendingSince_ = -1.0;
+    } else if (liveWidth != pendingWidth_ || liveHeight != pendingHeight_ ||
+               std::fabs(liveFps - pendingFps_) > 0.5 || pendingSince_ < 0.0) {
+      pendingWidth_ = liveWidth;
+      pendingHeight_ = liveHeight;
+      pendingFps_ = liveFps;
+      pendingSince_ = now;
+    } else if (now - pendingSince_ > 1.5 && captureState_ == CaptureState::Running &&
+               renderer_.hasFrame()) {
+      // Der Neustart braucht ein Bild, sonst bricht `StartRecording` ab und die
+      // Aufnahme waere nach dem Stop zu Ende statt geteilt. Waehrend ein Graph
+      // neu gebaut wird, gibt es keins -- dann wird eben weiter gewartet.
+      CAP_LOG("Aufnahme: Quelle jetzt %dx%d @ %.2f fps statt %dx%d @ %.2f, neue Datei",
+              liveWidth, liveHeight, liveFps, recorder_.frameWidth(), recorder_.frameHeight(),
+              recordSourceFps_);
+      StopRecording();
+      StartRecording();
+      return;
+    }
+  }
+
   // Splitting is a restart, not a seamless cut: ffmpeg has to close the
   // container it is writing. A fraction of a second is lost at the boundary,
   // which is why this is off unless someone really is on FAT32.
   if (config_.record.splitFiles) {
-    const double now = ImGui::GetTime();
     if (now - lastSplitCheck_ > 1.0) {
       lastSplitCheck_ = now;
       const uint64_t limit = (uint64_t)config_.record.splitSizeMb * 1024ull * 1024ull;
@@ -3620,7 +3692,7 @@ void App::FeedFrameConsumers() {
   if (recordWide || cameraWide) {
     VideoRenderer::ReadbackFrame w;
     if (renderer_.FetchHdrReadback(&w)) {
-      if (recordWide) recorder_.PushVideo(w.data, w.stride);
+      if (recordWide) recorder_.PushVideo(w.data, w.stride, w.width, w.height);
       if (cameraWide) virtualCamera_.PushFrameWide(w.data, w.stride, w.width, w.height);
       renderer_.ReleaseHdrReadback();
     }
@@ -3630,7 +3702,9 @@ void App::FeedFrameConsumers() {
 
   VideoRenderer::ReadbackFrame frame;
   if (!renderer_.FetchReadback(&frame)) return;
-  if (wantRecorder && !recordWide) recorder_.PushVideo(frame.data, frame.stride);
+  if (wantRecorder && !recordWide) {
+    recorder_.PushVideo(frame.data, frame.stride, frame.width, frame.height);
+  }
   if (wantCamera && !cameraWide) {
     virtualCamera_.PushFrame(frame.data, frame.stride, frame.width, frame.height);
   }
