@@ -21,6 +21,7 @@ enum class HotkeyAction {
   ReinitCard,
   Record,
   Screenshot,
+  DetectCrop,
   Mute,
   VolumeUp,
   VolumeDown,
