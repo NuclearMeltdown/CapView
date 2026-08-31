@@ -414,6 +414,31 @@ void DrawSearchIndicator(const std::string& text, const std::string& detail) {
   ImGui::End();
 }
 
+void DrawSearchResult(const std::string& text, const std::string& detail, double age,
+                      double duration) {
+  if (age >= duration) return;
+  const float fade = (float)Clamp((duration - age) / 0.5, 0.0, 1.0);
+
+  // Dieselbe Stelle wie die Suche selbst, und das mit Absicht: die Einblendung
+  // wird nicht ersetzt, sie hoert auf, sich zu bewegen. Wer hinsieht, muss den
+  // Blick nicht umsetzen, um zu erfahren, was aus dem geworden ist, das er
+  // gerade gelesen hat.
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + 24.0f),
+                          ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.78f * fade);
+  ImGui::PushStyleVar(ImGuiStyleVar_Alpha, fade);
+
+  if (ImGui::Begin("##standardresult", nullptr, kOverlayFlags)) {
+    // Und hier keine laufenden Punkte. Sie sind der ganze Unterschied: drei
+    // Punkte heissen "es geht weiter", und genau das tut es nicht mehr.
+    ImGui::TextUnformatted(text.c_str());
+    if (!detail.empty()) ImGui::TextDisabled("%s", detail.c_str());
+  }
+  ImGui::End();
+  ImGui::PopStyleVar();
+}
+
 void DrawRecordIndicator(double seconds, OsdCorner volumeCorner) {
   // Opposite corner to the volume readout: both can appear at once, and a
   // number sliding out from under a dot looks like a bug.

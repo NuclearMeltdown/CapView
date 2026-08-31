@@ -165,6 +165,11 @@ class App {
   // Siehe die Umsetzung: was ein Mensch an einer Norm auszusetzen hat, misst
   // die Automatik nicht unbedingt mit.
   void RescanVideoStandard();
+  // Das Ergebnis eines von Hand ausgeloesten Suchlaufs festhalten, damit es
+  // ein paar Sekunden im Bild stehen kann. Tut nichts, wenn keiner lief.
+  void FinishManualStandardSearch(long standard, const std::string& detail);
+  // Ob gerade so ein Ergebnis angezeigt wird.
+  bool ShowingStandardResult() const;
   // Die zwei Zeilen der Einblendung waehrend der Suche: was gerade laeuft, und
   // warum. Der Grund steht in `colourDoubt_` und den Zaehlern daneben, und
   // beides ist nur hier beisammen.
@@ -439,6 +444,25 @@ class App {
   // stuende dann fuer immer. Zwei Minuten spaeter faengt das Bild ploetzlich an
   // durchzuschalten, und niemand weiss mehr warum.
   int64_t standardForceColourUntilQpc_ = 0;
+  // Ob gerade ein von Hand ausgeloester Suchlauf laeuft, und was er ergeben
+  // hat.
+  //
+  // Eine Suche, die von selbst anspringt, schuldet niemandem eine Antwort --
+  // sie beantwortet eine Frage, die keiner gestellt hat, und wenn sie fertig
+  // ist, steht das Ergebnis im Bild. Ein Tastendruck ist eine Frage, und der
+  // gehoert eine Antwort: die Einblendung sagt, was gesucht wird, und
+  // verschwand bisher wortlos, sobald es gefunden war. Wer die Taste drueckt,
+  // weil ihm die Farben nicht gefallen, erfaehrt so nicht einmal, ob sich
+  // etwas geaendert hat.
+  //
+  // Die Fahne haelt nur bis zur ersten Auskunft. Danach ist die Frage
+  // beantwortet, und was die Automatik spaeter noch entscheidet, gehoert
+  // wieder ihr -- inklusive des Toasts, den die Antwort hier so lange
+  // vertritt.
+  bool standardManualSearch_ = false;
+  int64_t standardResultUntilQpc_ = 0;
+  std::string standardResultHeadline_;
+  std::string standardResultDetail_;
   // Der Rundgang durch die Normen derselben Zeilenzahl. Leer, solange keiner
   // laeuft; sonst die Kandidaten, der Zeiger auf den gerade gemessenen und die
   // beiden Messreihen dazu (-1 = keine Messung zustande gekommen).

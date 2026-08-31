@@ -79,6 +79,7 @@ class SettingsWindow {
     Trying,   // ein Kandidat steht auf der Karte und hat noch nicht eingerastet
     Paused,   // eine Runde ohne Lock; die Karte ist geparkt, es wird gewartet
     Colour,   // eingerastet, aber gerade wird die Farbe gegengeprueft
+    Result,   // fertig -- und weil von Hand gesucht wurde, steht das Ergebnis noch
   };
   void SetStandardSearch(StandardSearch state) { standardSearch_ = state; }
   // Die Norm, die *jetzt* auf der Karte steht, aus derselben Abfrage wie der
