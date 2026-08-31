@@ -481,6 +481,8 @@ class App {
   int colourIndex_ = 0;
   int64_t colourSettleUntilQpc_ = 0;    // bis dahin gehoeren die Bilder noch der alten
   int64_t colourStartedQpc_ = 0;        // seit wann auf eine Messung gewartet wird
+  float colourWindowEnergy_ = -1.0f;    // das vorige Messfenster desselben Kandidaten,
+  float colourWindowDark_ = -1.0f;      // zum Vergleich; -1 heisst "noch keins"
   int64_t colourRetryQpc_ = 0;          // vor diesem Zeitpunkt nicht noch einmal
   int colourAttempts_ = 0;              // unentschiedene Anlaeufe fuer diese Norm
   // Ob gerade auf ein Bild gewartet wird, das hell genug zum Vergleichen ist.

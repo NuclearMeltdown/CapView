@@ -617,6 +617,7 @@ class VideoRenderer {
   int chromaFramesSeen_ = 0;
   int chromaFramesAnalysed_ = 0;
   int chromaSampleEvery_ = 8;  // siehe SetChromaCadence
+  int chromaFramesWanted_ = 10;  // haengt am Takt, siehe SetChromaCadence
   uint64_t chromaSum_ = 0;
   uint64_t chromaCount_ = 0;
   // Dieselbe Summe, aber nur ueber die dunklen Bloecke. Eigene Zaehlung, weil

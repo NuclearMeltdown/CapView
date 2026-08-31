@@ -1284,6 +1284,37 @@ static const uint64_t kChromaDarkBlocksWanted = 200;
 // jedem achten Bild und 30 Bildern je Sekunde sind das knapp drei Sekunden.
 static const int kChromaFramesWanted = 10;
 
+// Im dichten Takt weniger, und das ist keine Nachlaessigkeit, sondern folgt
+// aus demselben Grund.
+//
+// Was die zehn Bilder oben abwehren, ist ein Bild, das gerade nichts sagt:
+// eine graue Blende, ein Titel auf schwarz. Dagegen hilft nicht die Zahl der
+// Bilder, sondern die Spanne, ueber die sie verteilt sind -- zehn Bilder bei
+// jedem achten decken achtzig Bilder Handlung ab. Im dichten Takt decken zehn
+// Bilder ein Drittel einer Sekunde ab, und zehn aufeinanderfolgende Bilder
+// eines Films sind beinahe dasselbe Bild. Das vierte bis zehnte fuegt der
+// Auskunft fast nichts hinzu, was die ersten drei nicht schon gesagt haben;
+// es kostet nur Wartezeit, und zwar bei jedem Kandidaten einzeln.
+//
+// Die eigentliche Stichprobe steckt ohnehin nicht in den Bildern, sondern in
+// den Bloecken: ein 720x480-Bild liefert je Durchgang mehrere hundert davon,
+// und kChromaDarkBlocksWanted bleibt deshalb unveraendert bei 200. Wo ein
+// helles Bild die dunklen Bloecke nun nicht mehr zusammenbekommt, schweigt die
+// Messung -- das ist die richtige Richtung, sie raet nicht.
+//
+// Gemessen am 31.08. gegen den Stand mit zehn: mit drei, fuenf und zehn
+// Bildern kamen dieselben Zahlen heraus -- NTSC M 0,017/0,018, PAL M
+// 0,023/0,024, NTSC 4.43 0,065, PAL 60 0,119, ueber je vier Laeufe --, und die
+// dunklen Bereiche wurden auch mit dreien noch gemessen statt zu schweigen.
+// Ein Bild weniger waere keins mehr: bei zweien ist ein einzelnes Bild die
+// halbe Auskunft, und das Fenster hat nichts mehr, woran es sich mittelt.
+//
+// Der Schutz gegen das eine unpassende Bild sitzt im dichten Takt ohnehin
+// woanders, naemlich in der Regel, dass ein Wert erst zaehlt, wenn er nicht
+// mehr steigt -- siehe VerifyStandardColour. Ein Ausreisser verschiebt dort
+// nicht das Ergebnis, er kostet ein Fenster mehr.
+static const int kChromaFramesWantedDense = 3;
+
 void VideoRenderer::AnalyzeChroma(const FrameView& frame) {
   if (++chromaFramesSeen_ % chromaSampleEvery_ != 0) return;
 
@@ -1401,7 +1432,7 @@ void VideoRenderer::AnalyzeChroma(const FrameView& frame) {
 }
 
 float VideoRenderer::chromaEnergy() const {
-  if (chromaFramesAnalysed_ < kChromaFramesWanted || chromaCount_ == 0) return -1.0f;
+  if (chromaFramesAnalysed_ < chromaFramesWanted_ || chromaCount_ == 0) return -1.0f;
   // Beide Wege liefern einen Wert im Bereich 0..255 je Block, siehe
   // AnalyzeChroma. Die Zahlen sind nicht auf denselben Farbton geeicht -- der
   // RGB-Weg faellt bei gleichem Bild etwas hoeher aus --, aber darum geht es
@@ -1411,7 +1442,7 @@ float VideoRenderer::chromaEnergy() const {
 }
 
 float VideoRenderer::darkChromaEnergy() const {
-  if (chromaFramesAnalysed_ < kChromaFramesWanted) return -1.0f;
+  if (chromaFramesAnalysed_ < chromaFramesWanted_) return -1.0f;
   // Eigene Untergrenze: die Gesamtmessung hat immer Bloecke, diese hier nicht
   // unbedingt. Ein helles Standbild ohne dunkle Stelle darf keine Aussage
   // erfinden, es muss "weiss nicht" sagen duerfen.
@@ -1420,7 +1451,7 @@ float VideoRenderer::darkChromaEnergy() const {
 }
 
 float VideoRenderer::chromaLitFraction() const {
-  if (chromaFramesAnalysed_ < kChromaFramesWanted || chromaCount_ == 0) return -1.0f;
+  if (chromaFramesAnalysed_ < chromaFramesWanted_ || chromaCount_ == 0) return -1.0f;
   // Ohne eigene Untergrenze fuer die hellen Bloecke, anders als oben: dass es
   // keine gibt, ist hier kein fehlender Messwert, sondern das Ergebnis.
   const uint64_t lit = chromaCount_ > chromaDarkCount_ ? chromaCount_ - chromaDarkCount_ : 0;
@@ -1442,6 +1473,9 @@ void VideoRenderer::SetChromaCadence(int everyNth) {
   // Der Takt aendert sich mitten in einer Messung nicht sinnvoll: die schon
   // gezaehlten Bilder stammen aus dem alten. Also von vorn.
   chromaSampleEvery_ = want;
+  // Und die Zahl der Bilder haengt am Takt, siehe kChromaFramesWantedDense:
+  // gefordert ist eine Spanne, nicht eine Anzahl.
+  chromaFramesWanted_ = want == 1 ? kChromaFramesWantedDense : kChromaFramesWanted;
   ResetChroma();
 }
 
