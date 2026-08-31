@@ -440,6 +440,7 @@ FormatSel ReadFormat(const json::Value& v) {
 json::Value WriteProfile(const Profile& p) {
   json::Value o = json::Value::Object();
   o["name"] = p.name;
+  o["autoSelectStandard"] = (int)p.autoSelectStandard;
 
   json::Value cap = json::Value::Object();
   cap["video"] = WriteDevice(p.capture.video);
@@ -519,6 +520,7 @@ json::Value WriteProfile(const Profile& p) {
 Profile ReadProfile(const json::Value& v) {
   Profile p;
   p.name = v["name"].AsString("Standard");
+  p.autoSelectStandard = (long)v["autoSelectStandard"].AsInt(0);
 
   const json::Value& c = v["capture"];
   p.capture.video = ReadDevice(c["video"]);

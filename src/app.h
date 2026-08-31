@@ -213,6 +213,8 @@ class App {
   // Wirft den Zuschnitt weg, wenn die Quelle ihre Groesse gewechselt hat --
   // oder holt den fuer die neue Groesse gemerkten hervor.
   void UpdateCropForFormat();
+  // Waehlt das Profil, das zur erkannten Videonorm passt.
+  void UpdateProfileForStandard();
 
   void BeginCropPick();
   void EndCropPick(bool apply);
@@ -423,6 +425,12 @@ class App {
   // Karte beim Graphenbau, nicht aus dem Profil -- dort kann "automatisch"
   // stehen. Siehe ReleaseStandardBoundFormat.
   int appliedStandardLines_ = 0;
+
+  // Die Norm, auf die die Profilautomatik zuletzt reagiert hat. Sie macht aus
+  // einem Zustand ("es ist PAL 60") ein Ereignis ("es ist gerade PAL 60
+  // geworden") -- ohne das waere jede von Hand getroffene Profilwahl im
+  // naechsten Bild wieder ueberschrieben. Siehe App::UpdateProfileForStandard.
+  long profileMatchedStandard_ = 0;
 
   // Farbpruefung. Siehe App::VerifyStandardColour.
   long colourCheckedStandard_ = 0;  // fuer diese Norm ist die Sache entschieden

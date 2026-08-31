@@ -191,7 +191,7 @@ class SettingsWindow {
  public:
   void setProbeBusy(bool busy) { probeBusy_ = busy; }
  private:
-  void DrawProfilesTab();
+  void DrawProfilesTab(const DeviceProbeResult& caps);
   void EnsureValidFormat(const DeviceProbeResult& caps);
 
   Config& cfg() { return *live_; }
