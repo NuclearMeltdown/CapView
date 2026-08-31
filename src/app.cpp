@@ -2825,8 +2825,31 @@ void App::VerifyStandardColour(int64_t now) {
 
   if (colourCandidates_.size() > 1 && colourCandidates_.back() == colourCandidates_.front()) {
     const size_t last = colourCandidates_.size() - 1;
-    const bool better = colourDarks_[last] >= 0.0f &&
-                        (colourDarks_[0] < 0.0f || colourDarks_[last] < colourDarks_[0]);
+    // Guenstiger heisst: so, wie die Runde unten urteilt -- und dort ist
+    // "keine dunklen Stellen" kein schlechter Tiefenwert, sondern gar keiner.
+    //
+    // Die erste Fassung las guenstig als "sauberere Tiefen" und stellte -1
+    // dabei ganz nach hinten. Das ging am 31.08.2026 zweimal schief, und zwar
+    // in beide Richtungen. Um 15:45:07 mass PAL 60 zuerst 0,084/0,121 und dann
+    // 0,155 ohne eine einzige dunkle Stelle; die zweite wurde verworfen, PAL 60
+    // trat mit 0,084 an und verlor gegen NTSC 4.43 mit 0,099. Um 15:46:12 war
+    // es umgekehrt: zuerst 0,217 ohne dunkle Stellen, dann 0,205/0,295 -- die
+    // zweite zaehlte, 0,295 gilt als eingefaerbt, und damit war die richtige
+    // Norm aus beiden Stufen draussen.
+    //
+    // Also der Reihe nach: nicht eingefaerbt schlaegt eingefaerbt. Sind beide
+    // gleich weit, entscheiden die Tiefen -- aber nur, wenn es welche gibt.
+    // Fehlen sie in einer der beiden Messungen, gibt es nichts zu vergleichen,
+    // und dann zaehlt die Farbmenge. Genau die soll die Wiederholung ja
+    // retten.
+    const bool tinted0 = colourDarks_[0] >= kDarkTinted;
+    const bool tintedLast = colourDarks_[last] >= kDarkTinted;
+    const bool better =
+        tinted0 != tintedLast
+            ? !tintedLast
+            : (colourDarks_[0] < 0.0f || colourDarks_[last] < 0.0f
+                   ? colourEnergies_[last] > colourEnergies_[0]
+                   : colourDarks_[last] < colourDarks_[0]);
 
     // Und hier wird die Zweitmessung das, wofuer sie eigentlich da ist: die
     // Probe darauf, ob die Runde ueberhaupt eine Szene gesehen hat.
