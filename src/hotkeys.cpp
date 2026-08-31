@@ -20,6 +20,11 @@ Hotkeys::Hotkeys() {
   // der hinsieht. F8 liegt frei und in derselben Reihe wie das uebrige, was
   // man im Vorbeigehen ausloest.
   (*this)[HotkeyAction::DetectCrop].vk = VK_F8;
+  // Neben dem Rand, weil es dieselbe Art von Befehl ist: eine Messung am
+  // gerade anliegenden Bild, die man ausloest, weil man etwas sieht, das die
+  // Automatik nicht misst. Und wie dort gilt, dass der Moment zaehlt -- ein
+  // Rundgang auf einem schwarzen Bild entscheidet nichts.
+  (*this)[HotkeyAction::DetectStandard].vk = VK_F7;
   (*this)[HotkeyAction::Mute].vk = 'M';
   (*this)[HotkeyAction::VolumeUp].vk = VK_OEM_PLUS;
   (*this)[HotkeyAction::VolumeDown].vk = VK_OEM_MINUS;
@@ -42,6 +47,7 @@ const char* HotkeyActionName(HotkeyAction action) {
     case HotkeyAction::Record: return T("Aufnahme starten/stoppen", "Start/stop recording");
     case HotkeyAction::Screenshot: return T("Screenshot", "Screenshot");
     case HotkeyAction::DetectCrop: return T("Rand suchen", "Detect border");
+    case HotkeyAction::DetectStandard: return T("Videonorm suchen", "Detect video standard");
     case HotkeyAction::Mute: return T("Stumm", "Mute");
     case HotkeyAction::VolumeUp: return T("Lauter", "Volume up");
     case HotkeyAction::VolumeDown: return T("Leiser", "Volume down");
@@ -59,6 +65,7 @@ const char* HotkeyActionKey(HotkeyAction action) {
     case HotkeyAction::Record: return "record";
     case HotkeyAction::Screenshot: return "screenshot";
     case HotkeyAction::DetectCrop: return "detectCrop";
+    case HotkeyAction::DetectStandard: return "detectStandard";
     case HotkeyAction::Mute: return "mute";
     case HotkeyAction::VolumeUp: return "volumeUp";
     case HotkeyAction::VolumeDown: return "volumeDown";
