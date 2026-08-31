@@ -465,6 +465,44 @@ bool App::StartCapture(std::string* error) {
     config_.active().capture.video.name = resolved.name;
   }
 
+  // Dieselbe Ueberlegung fuer die Aufloesung: stand im Profil keine, hat die
+  // Karte sie gerade ausgesucht, und niemand sonst weiss welche.
+  //
+  // Wird sie nicht aufgeschrieben, schreibt sie spaeter jemand anders auf, und
+  // zwar teuer. Das Profil bleibt leer, der Abgleich in ApplyProfile sieht im
+  // naechsten Bild einen Unterschied zu dem, was gerade gebaut wurde, und baut
+  // den Graphen ein zweites Mal auf; wenn danach irgendwann die Einstellungen
+  // gezeichnet werden, traegt EnsureValidFormat dieselbe Zahl nach, und es wird
+  // ein drittes Mal aufgebaut -- dann mitten im Betrieb, mit schwarzem Bild und
+  // Tonabriss. Beim Wechsel des Wuerfels auf 60 Hz stand genau das im Log:
+  // 01:34:07,795 und 01:34:08,055 direkt hintereinander, 01:34:34,748
+  // sechsundzwanzig Sekunden spaeter.
+  //
+  // Nur wenn nichts dastand. Eine von Hand erzwungene Aufloesung bleibt stehen,
+  // auch wenn die Karte sie gerade nicht hergibt und ersatzweise etwas anderes
+  // verbunden hat: sie ist ein Wunsch fuer jeden Start, kein Messwert, und
+  // wegzuschreiben waere sie fuer immer weg.
+  //
+  // Und nur Pixelformat und Groesse. Die Bildrate bleibt, wie sie gewuenscht
+  // war -- eine 0 heisst "hoechste verfuegbare" und muss eine 0 bleiben. Wuerde
+  // hier die ausgehandelte Zahl hineingeschrieben, waere aus dem Wunsch eine
+  // festgenagelte Rate geworden, und zwar die einer einzigen Norm: unter PAL B
+  // steht dann 59,94 im Profil, die Karte lehnt jeden Kandidaten damit ab, und
+  // im Log stapeln sich "SetFormat mit 59.940 fps abgelehnt".
+  if (!config_.active().capture.format.valid() && capture_.connectedFormat().valid()) {
+    FormatSel& stored = config_.active().capture.format;
+    const double wishedFps = stored.fps;
+    stored = capture_.connectedFormat();
+    stored.fps = wishedFps;
+  }
+
+  // Was hier gebaut wurde, gilt ab jetzt als angewandt -- unabhaengig davon, ob
+  // der Aufrufer gleich noch CaptureAppliedState() ruft. Die meisten Wege
+  // hierher tun das naemlich nicht (UpdateVideoStandard, ReinitialiseCard, der
+  // Wiederverbindungsversuch), und dann steht in applied_ noch das Format von
+  // vorhin, obwohl es das schon nicht mehr gibt.
+  applied_.format = config_.active().capture.format;
+
   std::string rendererError;
   renderer_.SetSourceFormat(capture_.format(), &rendererError);
   if (!rendererError.empty()) CAP_WARN("%s", rendererError.c_str());

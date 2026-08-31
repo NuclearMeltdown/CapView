@@ -87,13 +87,24 @@ std::vector<FormatSel> BuildFormatCandidates(const FormatSel& wanted, const Caps
             });
   out.insert(out.end(), alternatives.begin(), alternatives.end());
 
-  const FormatSel fallback = caps.PickDefault();
-  if (fallback.valid()) {
-    const bool known = std::any_of(out.begin(), out.end(), [&](const FormatSel& f) {
-      return f.SameFormat(fallback);
-    });
-    if (!known) out.push_back(fallback);
-  }
+  // Zum Schluss, was die Karte selbst vorschlaegt -- und zwar zweimal: erst mit
+  // dem gewuenschten Pixelformat, dann ohne.
+  //
+  // Jeder Kandidat oben traegt die *gewuenschte* Groesse und dreht nur am
+  // Pixelformat. Stimmt die Groesse nicht mehr, weil die Karte inzwischen auf
+  // einer anderen Zeilenzahl steht, faellt die ganze Liste durch, und uebrig
+  // bleibt der Vorschlag der Karte -- der vom Wunsch nichts weiss. Damit war es
+  // einer zu wenig: am 31.08.2026 wurde aus einem gewuenschten RGB32 720x480
+  // unter PAL B ein YUY2 720x576, obwohl die Karte RGB32 720x576 anbietet. Zu
+  // berichtigen war die Groesse, nicht das Pixelformat.
+  auto append = [&out](const FormatSel& f) {
+    if (!f.valid()) return;
+    const bool known = std::any_of(out.begin(), out.end(),
+                                   [&](const FormatSel& o) { return o.SameFormat(f); });
+    if (!known) out.push_back(f);
+  };
+  if (!wanted.subtype.empty()) append(caps.PickDefault(wanted.subtype));
+  append(caps.PickDefault());
   return out;
 }
 
@@ -321,6 +332,7 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
         CAP_WARN("Format %s ging nicht, benutze stattdessen %s", wanted.Label().c_str(),
                  candidate.Label().c_str());
       }
+      connectedFormat_ = candidate;
       connected = true;
       break;
     }
@@ -393,6 +405,7 @@ void VideoCapture::Teardown() {
   sink_.Reset();
   builder_.Reset();
   graph_.Reset();
+  connectedFormat_ = FormatSel{};
 }
 
 VideoFormatInfo VideoCapture::format() const {

@@ -61,6 +61,12 @@ class VideoCapture {
   // the config after a match by name.
   const VideoDeviceInfo& resolvedDevice() const { return capabilities_.device; }
 
+  // The format the pins actually connected with -- empty while stopped, and
+  // empty after a failed Start. Same purpose as resolvedDevice above: when the
+  // profile asked for no particular resolution, the card picked one, and the
+  // caller has no other way to learn which.
+  const FormatSel& connectedFormat() const { return connectedFormat_; }
+
   // Opens a device briefly to read its capabilities. Do not call this for the
   // device that is currently running -- use capabilities() instead.
   static DeviceProbeResult Probe(const DeviceRef& device);
@@ -95,6 +101,7 @@ class VideoCapture {
   ComPtr<FrameSink> sink_;
 
   DeviceProbeResult capabilities_;
+  FormatSel connectedFormat_;
 };
 
 }  // namespace cap
