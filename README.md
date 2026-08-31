@@ -151,9 +151,11 @@ noticeably more slowly than the rest.
 
 Most of the time none of that happens: a standard that already shows confident
 colour with black that stays black is simply the answer, and nothing is switched
-at all. From a deliberately wrong standard to a confirmed right one takes 6.3
-seconds on the hardware this was built against, half of it the single
-measurement that confirms the result.
+at all. From a deliberately wrong standard to a confirmed right one takes 1.7 to
+2.4 seconds on the hardware this was built against, where it used to take six:
+the lock costs a third of a second, and each candidate after it is measured only
+until its reading stops climbing rather than for a fixed window sized to the
+slowest of them.
 
 A round is only as good as the picture it ran on, so two cases are refused
 rather than believed. If the scene changes while the round is running the
