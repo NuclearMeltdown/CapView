@@ -478,6 +478,24 @@ json::Value WriteProfile(const Profile& p) {
   img["cropRight"] = p.image.cropRight;
   img["cropTop"] = p.image.cropTop;
   img["cropBottom"] = p.image.cropBottom;
+  img["cropPerFormat"] = p.image.cropPerFormat;
+  // Die abgelegten Zuschnitte nur, wenn es welche gibt: eine leere Liste in
+  // jedem Profil waere Rauschen in einer Datei, die man von Hand lesen koennen
+  // soll.
+  if (!p.image.cropVariants.empty()) {
+    json::Value list = json::Value::Array();
+    for (const CropForFormat& v : p.image.cropVariants) {
+      json::Value e = json::Value::Object();
+      e["width"] = v.width;
+      e["height"] = v.height;
+      e["left"] = v.left;
+      e["right"] = v.right;
+      e["top"] = v.top;
+      e["bottom"] = v.bottom;
+      list.Push(e);
+    }
+    img["cropVariants"] = list;
+  }
   img["range"] = (int)p.image.range;
   img["matrix"] = (int)p.image.matrix;
   o["image"] = img;
@@ -541,6 +559,23 @@ Profile ReadProfile(const json::Value& v) {
   p.image.cropRight = Clamp(i["cropRight"].AsInt(0), 0, 16384);
   p.image.cropTop = Clamp(i["cropTop"].AsInt(0), 0, 16384);
   p.image.cropBottom = Clamp(i["cropBottom"].AsInt(0), 0, 16384);
+  p.image.cropPerFormat = i["cropPerFormat"].AsBool(false);
+  {
+    const json::Value& list = i["cropVariants"];
+    for (size_t n = 0; n < list.Size(); ++n) {
+      const json::Value& e = list.At(n);
+      CropForFormat cv;
+      cv.width = Clamp(e["width"].AsInt(0), 0, 16384);
+      cv.height = Clamp(e["height"].AsInt(0), 0, 16384);
+      // Ein Eintrag ohne Groesse hat keinen Schluessel und passt deshalb nie.
+      if (cv.width <= 0 || cv.height <= 0) continue;
+      cv.left = Clamp(e["left"].AsInt(0), 0, 16384);
+      cv.right = Clamp(e["right"].AsInt(0), 0, 16384);
+      cv.top = Clamp(e["top"].AsInt(0), 0, 16384);
+      cv.bottom = Clamp(e["bottom"].AsInt(0), 0, 16384);
+      p.image.cropVariants.push_back(cv);
+    }
+  }
   p.image.range = ReadEnum<ColorRange>(i, "range", 3, ColorRange::Auto);
   p.image.matrix = ReadEnum<ColorMatrix>(i, "matrix", 3, ColorMatrix::Auto);
 

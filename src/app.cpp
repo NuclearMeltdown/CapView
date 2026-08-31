@@ -3615,6 +3615,54 @@ void App::DetectCrop() {
 // laufen zu lassen. Also: sauber aufraeumen, es sagen, und die Entscheidung
 // dem ueberlassen, der das Bild sieht -- der Knopf dafuer liegt jetzt im
 // Rechtsklickmenue.
+//
+// Wer will, kann es sich stattdessen merken lassen (`cropPerFormat`). Ein
+// Profil ist die Beschreibung einer Quelle, und eine Quelle kann zwei Groessen
+// haben: derselbe GameCube liefert 576 Zeilen im PAL-Modus und 480 im
+// 60-Hz-Modus, und beide Male haengt ein anderer schwarzer Rand daran. Das sind
+// nicht zwei Quellen, also sollen es nicht zwei Profile sein muessen. Gemessen
+// wird weiterhin von Hand -- gespeichert wird nur, was gemessen wurde, und zwar
+// unter der Groesse, bei der es gemessen wurde.
+// Den Zuschnitt, wie er gerade steht, unter einer Bildgroesse ablegen.
+//
+// Ein Zuschnitt aus lauter Nullen ist kein Zuschnitt, sondern seine Abwesenheit
+// -- und die ist auch das, was ohne Eintrag geschieht. Er wird deshalb nicht
+// gespeichert, sondern loescht einen vorhandenen Eintrag: sonst fuellt sich die
+// Liste mit Groessen, unter denen nichts steht, und die Zeile in den
+// Einstellungen, die sie aufzaehlt, zaehlt Nichts auf.
+static void StoreCropVariant(ImageSettings& img, int w, int h) {
+  if (w <= 0 || h <= 0) return;
+  const bool empty = !img.cropLeft && !img.cropRight && !img.cropTop && !img.cropBottom;
+  for (auto it = img.cropVariants.begin(); it != img.cropVariants.end(); ++it) {
+    if (it->width != w || it->height != h) continue;
+    if (empty) {
+      img.cropVariants.erase(it);
+      return;
+    }
+    it->left = img.cropLeft;
+    it->right = img.cropRight;
+    it->top = img.cropTop;
+    it->bottom = img.cropBottom;
+    return;
+  }
+  if (empty) return;
+  CropForFormat v;
+  v.width = w;
+  v.height = h;
+  v.left = img.cropLeft;
+  v.right = img.cropRight;
+  v.top = img.cropTop;
+  v.bottom = img.cropBottom;
+  img.cropVariants.push_back(v);
+}
+
+static const CropForFormat* FindCropVariant(const ImageSettings& img, int w, int h) {
+  for (const CropForFormat& v : img.cropVariants) {
+    if (v.width == w && v.height == h) return &v;
+  }
+  return nullptr;
+}
+
 void App::UpdateCropForFormat() {
   const VideoFormatInfo fmt = renderer_.sourceFormat();
   if (!fmt.valid()) return;
@@ -3622,18 +3670,55 @@ void App::UpdateCropForFormat() {
   // Format zu merken waere verfrueht.
   if (cropPick_.active) return;
 
+  ImageSettings& img = config_.active().image;
   const int w = fmt.width;
   const int h = fmt.height;
-  if (cropFormatWidth_ == w && cropFormatHeight_ == h) return;
+
+  if (cropFormatWidth_ == w && cropFormatHeight_ == h) {
+    // Nichts gewechselt -- aber vielleicht wurde am Zuschnitt geschraubt.
+    //
+    // Jeden Weg dorthin einzeln zu benachrichtigen hiesse, vier Regler, den
+    // Rahmen zum Ziehen, die Messung und den Menuepunkt zum Zuruecksetzen an
+    // dieselbe Buchhaltung zu haengen und beim naechsten Weg daran zu denken.
+    // Hier steht ohnehin jedes Bild ein Vergleich an; er kostet vier Zahlen.
+    if (img.cropPerFormat) StoreCropVariant(img, w, h);
+    return;
+  }
 
   // Das erste Format einer Sitzung hat nichts geaendert; es ist das, wofuer
-  // die gespeicherten Zahlen gelten sollen.
+  // die gespeicherten Zahlen gelten sollen -- es sei denn, fuer genau diese
+  // Groesse steht etwas Eigenes in der Liste. Dann ist das die juengere
+  // Auskunft: die vier Zahlen oben gehoeren zu der Groesse, bei der zuletzt
+  // aufgehoert wurde, und das muss nicht die sein, mit der es weitergeht.
   const bool first = cropFormatWidth_ == 0 && cropFormatHeight_ == 0;
+  const int wasW = cropFormatWidth_;
+  const int wasH = cropFormatHeight_;
   cropFormatWidth_ = w;
   cropFormatHeight_ = h;
-  if (first) return;
 
-  ImageSettings& img = config_.active().image;
+  if (img.cropPerFormat) {
+    if (!first) StoreCropVariant(img, wasW, wasH);
+    const CropForFormat* v = FindCropVariant(img, w, h);
+    if (v) {
+      const bool same = img.cropLeft == v->left && img.cropRight == v->right &&
+                        img.cropTop == v->top && img.cropBottom == v->bottom;
+      img.cropLeft = v->left;
+      img.cropRight = v->right;
+      img.cropTop = v->top;
+      img.cropBottom = v->bottom;
+      if (first || same) return;
+      CAP_LOG("Zuschnitt fuer %dx%d eingesetzt (links %d, rechts %d, oben %d, unten %d)", w, h,
+              v->left, v->right, v->top, v->bottom);
+      Toast(Format(T("Videoformat geändert (%dx%d) — gespeicherter Zuschnitt eingesetzt.",
+                     "Video format changed (%dx%d) — stored crop applied."),
+                   w, h));
+      return;
+    }
+    if (first) return;
+  } else if (first) {
+    return;
+  }
+
   if (!img.cropLeft && !img.cropRight && !img.cropTop && !img.cropBottom) return;
 
   CAP_LOG("Zuschnitt zurueckgesetzt: Quelle jetzt %dx%d (Rand war links %d, rechts %d, oben %d, "

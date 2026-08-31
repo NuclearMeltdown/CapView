@@ -270,6 +270,22 @@ struct CaptureSettings {
 // hat seine Zeilen schon.
 inline constexpr int kHalfHeightLines = 288;
 
+// Ein Zuschnitt, der zu einer bestimmten Quellgroesse gehoert.
+//
+// Die Groesse ist der Schluessel und nicht die Videonorm: gemessen werden
+// Bildpunkte, und was sie beschreiben, haengt an der Groesse des Bildes, in
+// dem sie gezaehlt wurden. Dieselbe Norm kann in verschiedenen Formaten
+// ankommen, und zwei Normen koennen dasselbe Format liefern -- die Groesse ist
+// die Auskunft, die zu den Zahlen passt.
+struct CropForFormat {
+  int width = 0;
+  int height = 0;
+  int left = 0;
+  int right = 0;
+  int top = 0;
+  int bottom = 0;
+};
+
 struct ImageSettings {
   ScaleFilter filter = ScaleFilter::Bilinear;
   float sharpen = 0.0f;  // 0..1, contrast-adaptive sharpening applied after scaling
@@ -362,8 +378,28 @@ struct ImageSettings {
   int cropRight = 0;
   int cropTop = 0;
   int cropBottom = 0;
+  // Ob der Zuschnitt je Quellgroesse gemerkt wird.
+  //
+  // Aus heisst: die vier Zahlen gelten fuer die Groesse, an der sie gemessen
+  // wurden, und werden zurueckgesetzt, sobald eine andere kommt (siehe
+  // App::UpdateCropForFormat -- sie sind Bildpunkte, keine Anteile, und "oben
+  // 17" beschreibt bei 480 Zeilen einen anderen Streifen als bei 576).
+  //
+  // An heisst: sie werden unter der alten Groesse abgelegt und beim naechsten
+  // Mal von dort wieder geholt. Das ist der GameCube, der zwischen 50 und 60
+  // Hz wechselt: dieselbe Konsole, dasselbe Kabel, dieselben Filter -- nur der
+  // schwarze Rand sitzt anders. Dafuer zwei Profile zu fuehren, hiesse jede
+  // andere Einstellung doppelt zu pflegen.
+  //
+  // Aus, weil ein Zuschnitt, der sich beim Formatwechsel von selbst aendert,
+  // erklaert werden muss, bevor er hilft.
+  bool cropPerFormat = false;
   ColorRange range = ColorRange::Auto;
   ColorMatrix matrix = ColorMatrix::Auto;
+  // Die abgelegten Zuschnitte, einer je Quellgroesse. Nur gefuellt, wenn
+  // `cropPerFormat` an ist oder einmal an war; die vier Zahlen oben bleiben
+  // dabei der geltende Stand, dies hier ist das Gedaechtnis dahinter.
+  std::vector<CropForFormat> cropVariants;
 };
 
 struct AudioSettings {

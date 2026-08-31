@@ -210,7 +210,8 @@ class App {
 
   void OpenDeviceConfig();
   void DetectCrop();
-  // Wirft den Zuschnitt weg, wenn die Quelle ihre Groesse gewechselt hat.
+  // Wirft den Zuschnitt weg, wenn die Quelle ihre Groesse gewechselt hat --
+  // oder holt den fuer die neue Groesse gemerkten hervor.
   void UpdateCropForFormat();
 
   void BeginCropPick();
