@@ -286,8 +286,8 @@ applies.
 
 More: [The composite filter](../../wiki/The-composite-filter).
 
-![The Picture tab: scaling and sharpening, the deinterlacer, the composite filter with its two
-controls, and the crop with its Detect button](docs/settings-picture.png)
+![The Picture tab: scaling and sharpening, the deinterlacer, the crop with its Detect button, and
+the composite filter with its two controls](docs/settings-picture.png)
 
 ### High dynamic range
 
