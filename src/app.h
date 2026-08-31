@@ -474,10 +474,15 @@ class App {
   std::string standardResultDetail_;
   // Der Rundgang durch die Normen derselben Zeilenzahl. Leer, solange keiner
   // laeuft; sonst die Kandidaten, der Zeiger auf den gerade gemessenen und die
-  // beiden Messreihen dazu (-1 = keine Messung zustande gekommen).
+  // Messreihen dazu (-1 = keine Messung zustande gekommen).
   std::vector<long> colourCandidates_;
   std::vector<float> colourEnergies_;
   std::vector<float> colourDarks_;
+  // Und wie stark die Farbe von Zeile zu Zeile umklappt, getrennt nach Achse:
+  // das Kennzeichen einer Norm, deren Dekoder die Phasenumkehr des Signals
+  // nicht trifft. Siehe kAltFlipping in App::VerifyStandardColour.
+  std::vector<float> colourAltV_;
+  std::vector<float> colourAltU_;
   int colourIndex_ = 0;
   int64_t colourSettleUntilQpc_ = 0;    // bis dahin gehoeren die Bilder noch der alten
   int64_t colourStartedQpc_ = 0;        // seit wann auf eine Messung gewartet wird

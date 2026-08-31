@@ -2510,6 +2510,40 @@ void App::VerifyStandardColour(int64_t now) {
   // Reihenfolge der Wohnregion.
   static const float kDarkTinted = 0.18f;
 
+  // Woran ein NTSC-Dekoder auf einem PAL-Signal zu erkennen ist.
+  //
+  // Farbmenge und Tiefen trennen PAL 60 und NTSC 4.43 nicht. Beide haben
+  // denselben Traeger bei 4,43 MHz, und was sie unterscheidet -- die
+  // zeilenweise Umkehr der V-Phase --, geht in beiden Zahlen unter: der
+  // NTSC-Dekoder dreht sie nicht zurueck, die Farbe klappt von Zeile zu Zeile
+  // um, und im Mittel ueber einen Block hebt sie sich teilweise auf. Deshalb
+  // misst die falsche Norm *weniger* Farbe und auch weniger davon im
+  // Schwarzen, und deshalb hat sie ueber die Tiefen sogar gewonnen.
+  //
+  // Also wird das Umklappen selbst gemessen, statt seinen Schatten in den
+  // gemittelten Zahlen zu deuten -- siehe VideoRenderer::chromaAltV. Am
+  // 31.08.2026, zwoelf Rundgaenge an einem GameCube in PAL 60:
+  //
+  //   Norm                Zeilenwechsel V     V/U
+  //   NTSC 4.43 (falsch)  0,0070 - 0,0515   7,7 - 14,6
+  //   PAL 60  (richtig)   0,0002 - 0,0026   0,5 - 2,0
+  //   NTSC M              0,0001 - 0,0005   0,4 - 0,8
+  //   PAL M               0,0001 - 0,0008   0,1 - 1,0
+  //
+  // Beide Bedingungen muessen zusammen erfuellt sein, und beide haben Luft.
+  // Der Betrag allein wuerde auf einem Bild mit feinem waagerechtem Muster
+  // ansprechen -- aber ein solches Muster klappt *beide* Achsen um, und genau
+  // das faengt die zweite Bedingung: umgekehrte Phase steht nur auf V.
+  // Umgekehrt wuerde das Verhaeltnis allein auf Rauschen ansprechen, wo beide
+  // Zahlen nahe null sind; dagegen steht der Betrag.
+  //
+  // Wer beides erfuellt, ist damit nicht "schlechter", sondern die falsche
+  // Familie: ein NTSC-Dekoder auf einem zeilenweise wechselnden Traeger. Das
+  // ist ein Ausschlussgrund wie eingefaerbtes Schwarz, kein Nachteil im
+  // Vergleich.
+  static const float kAltFlipping = 0.005f;
+  static const float kAltAxisRatio = 4.0f;
+
   // Wie viel des Bildes beleuchtet sein muss, damit ein Rundgang ueberhaupt
   // etwas entscheiden kann.
   //
@@ -2831,6 +2865,8 @@ void App::VerifyStandardColour(int64_t now) {
     colourCandidates_.push_back(colourCandidates_.front());
     colourEnergies_.assign(colourCandidates_.size(), -1.0f);
     colourDarks_.assign(colourCandidates_.size(), -1.0f);
+    colourAltV_.assign(colourCandidates_.size(), -1.0f);
+    colourAltU_.assign(colourCandidates_.size(), -1.0f);
     colourIndex_ = 0;
     // Der beleuchtete Anteil steht mit in der Zeile, obwohl er die Runde nicht
     // ausloest. Er ist die Grundlage, auf der sie ueberhaupt etwas entscheiden
@@ -2855,10 +2891,13 @@ void App::VerifyStandardColour(int64_t now) {
   // Eintragen, was dieser Kandidat gemessen hat, und zum naechsten.
   colourEnergies_[(size_t)colourIndex_] = energy;
   colourDarks_[(size_t)colourIndex_] = dark;
-  CAP_LOG("Videonorm: %s gemessen -- Farbe %s, dunkle Bereiche %s",
+  colourAltV_[(size_t)colourIndex_] = renderer_.chromaAltV();
+  colourAltU_[(size_t)colourIndex_] = renderer_.chromaAltU();
+  CAP_LOG("Videonorm: %s gemessen -- Farbe %s, dunkle Bereiche %s, Zeilenwechsel V %.4f U %.4f",
           VideoStandardName(VideoStandardIndexOf(current)),
           energy < 0.0f ? "keine Messung" : Format("%.3f", energy).c_str(),
-          darkText(dark).c_str());
+          darkText(dark).c_str(), colourAltV_[(size_t)colourIndex_],
+          colourAltU_[(size_t)colourIndex_]);
 
   ++colourIndex_;
   if (colourIndex_ < (int)colourCandidates_.size()) {
@@ -2953,9 +2992,22 @@ void App::VerifyStandardColour(int64_t now) {
       colourEnergies_[0] = colourEnergies_[last];
       colourDarks_[0] = colourDarks_[last];
     }
+    // Der Zeilenwechsel folgt dieser Wahl *nicht*, sondern nimmt den groesseren
+    // der beiden Werte. Farbmenge und Tiefen haengen an der Szene, und deshalb
+    // ist es dort eine Frage, welche der beiden Messungen die aussagekraeftige
+    // ist. Das Umklappen haengt an der Norm: ein Dekoder, der die Phasenumkehr
+    // richtig aufhebt, kann sie nicht in einer zweiten Messung ploetzlich
+    // zeigen. Rauschen und flaue Szenen druecken den Wert nur nach unten. Wer
+    // ihn also in einer der beiden Messungen hat, hat ihn.
+    if (colourAltV_[last] > colourAltV_[0]) {
+      colourAltV_[0] = colourAltV_[last];
+      colourAltU_[0] = colourAltU_[last];
+    }
     colourCandidates_.pop_back();
     colourEnergies_.pop_back();
     colourDarks_.pop_back();
+    colourAltV_.pop_back();
+    colourAltU_.pop_back();
   }
 
   // Erst aussortieren, dann vergleichen -- und die Reihenfolge ist der ganze
@@ -2982,12 +3034,31 @@ void App::VerifyStandardColour(int64_t now) {
   // sind die Tiefen ein Rauschwert und sagen nichts, und ohne dunkle Stellen
   // im Bild gibt es sie gar nicht. In beiden Faellen gilt der Kandidat als
   // unbeurteilt -- nicht als bestaetigt und nicht als widerlegt.
-  enum class Verdict { Unjudged, Plausible, Tinted };
+  //
+  // Der zweite Ausschlussgrund braucht die Tiefen gar nicht: die Farbe, die
+  // von Zeile zu Zeile umklappt. Er faengt den Fall, den der erste
+  // strukturell nicht sehen kann -- zwei Normen auf demselben Traeger, die
+  // sich nur in der Phasenlage unterscheiden. Der steht bei kAltFlipping.
+  //
+  // Beide sind Ausschlussgruende und keine Nachteile im Vergleich: wer einen
+  // von ihnen erfuellt, ist nicht schlechter dekodiert, sondern falsch.
+  enum class Verdict { Unjudged, Plausible, Tinted, Flipping };
   std::vector<Verdict> verdicts(colourCandidates_.size(), Verdict::Unjudged);
   for (size_t i = 0; i < colourCandidates_.size(); ++i) {
+    if (colourAltV_[i] >= kAltFlipping && colourAltV_[i] > colourAltU_[i] * kAltAxisRatio) {
+      verdicts[i] = Verdict::Flipping;
+      CAP_LOG("Videonorm: %s klappt die Farbe von Zeile zu Zeile um (V %.4f, U %.4f) -- der "
+              "Dekoder hebt die Phasenumkehr des Signals nicht auf, die Norm scheidet aus",
+              VideoStandardName(VideoStandardIndexOf(colourCandidates_[i])), colourAltV_[i],
+              colourAltU_[i]);
+      continue;
+    }
     if (colourEnergies_[i] < kChromaConfident || colourDarks_[i] < 0.0f) continue;
     verdicts[i] = colourDarks_[i] < kDarkTinted ? Verdict::Plausible : Verdict::Tinted;
   }
+  const auto ruledOut = [&](size_t i) {
+    return verdicts[i] == Verdict::Tinted || verdicts[i] == Verdict::Flipping;
+  };
 
   int best = -1, runnerUp = -1;
   bool byDarks = false;
@@ -3027,7 +3098,7 @@ void App::VerifyStandardColour(int64_t now) {
   // nicht die einzige, sie war nur die einzige mit dunklen Stellen im Bild.
   int colour1 = -1;
   for (size_t i = 0; i < colourCandidates_.size(); ++i) {
-    if (verdicts[i] == Verdict::Tinted || colourEnergies_[i] < 0.0f) continue;
+    if (ruledOut(i) || colourEnergies_[i] < 0.0f) continue;
     if (colour1 < 0 || colourEnergies_[i] > colourEnergies_[(size_t)colour1]) colour1 = (int)i;
   }
   const bool darksYield =
@@ -3063,7 +3134,7 @@ void App::VerifyStandardColour(int64_t now) {
   // Ausschlussgrund, kein Nachteil.
   if (best < 0) {
     for (size_t i = 0; i < colourCandidates_.size(); ++i) {
-      if (colourEnergies_[i] < 0.0f || verdicts[i] == Verdict::Tinted) continue;
+      if (colourEnergies_[i] < 0.0f || ruledOut(i)) continue;
       if (best < 0 || colourEnergies_[i] > colourEnergies_[(size_t)best]) {
         runnerUp = best;
         best = (int)i;
@@ -3099,6 +3170,8 @@ void App::VerifyStandardColour(int64_t now) {
   colourCandidates_.clear();
   colourEnergies_.clear();
   colourDarks_.clear();
+  colourAltV_.clear();
+  colourAltU_.clear();
   colourIndex_ = 0;
   colourStartedQpc_ = 0;
 
@@ -3241,6 +3314,8 @@ void App::ResetStandardColourCheck() {
   colourCandidates_.clear();
   colourEnergies_.clear();
   colourDarks_.clear();
+  colourAltV_.clear();
+  colourAltU_.clear();
   colourIndex_ = 0;
   colourSettleUntilQpc_ = 0;
   colourStartedQpc_ = 0;
