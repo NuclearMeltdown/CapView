@@ -43,6 +43,10 @@ class FrameDelayLine {
   void Push(const FrameView& frame, int64_t qpc);
   // Returns the newest frame that is already old enough, dropping older ones.
   bool Pop(FrameView* out, int64_t qpc);
+  // Wann das zuletzt herausgegebene Bild hineingereicht wurde. Die Wartezeit
+  // hier drin ist eingestellte Verzoegerung und keine Panne, sie gehoert aber
+  // in die Durchlaufzeit: das Bild ist wirklich so alt, wenn es hinausgeht.
+  int64_t lastPoppedQpc() const { return current_.qpc; }
 
  private:
   struct Entry {
@@ -302,6 +306,11 @@ class App {
   // Die beiden Zahlen, die sich mit jedem Bild aendern. Jedes Bild gefuettert,
   // gelesen im Anzeigetakt vom Panel und im Fuenfsekundentakt vom Log.
   StatMeter frameAgeMeter_;
+  // Wann das Bild ankam, das gerade gezeichnet wird -- der Anfang der Strecke,
+  // die frameAgeMeter_ misst. Beim Bob-Deinterlacing zeigen zwei Durchgaenge
+  // dasselbe angekommene Bild, und der zweite ist absichtlich ein halbes
+  // Vollbild spaeter dran: genau das soll die Zahl auch sagen.
+  int64_t displayedArrivalQpc_ = 0;
   StatMeter audioBufferMeter_;
   int statsLogCounter_ = 0;
 

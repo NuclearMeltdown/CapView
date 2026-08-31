@@ -50,8 +50,8 @@ const double kStatHoldSeconds = 5.0;
 
 // Ob ein Extremwert eine Erwaehnung wert ist. Er muss beides sein: deutlich vom
 // Mittel entfernt und absolut weit genug weg, um etwas zu bedeuten. Jeder Test
-// allein geht daneben -- ein ruhiges Bildalter von 0,2 ms, das 0,4 streift, ist
-// doppelt so hoch und heisst nichts, und 3 ms auf einem 60-ms-Tonpuffer sind
+// allein geht daneben -- eine Durchlaufzeit, die von 2 auf 4 ms steigt, hat
+// sich verdoppelt und heisst nichts, und 3 ms auf einem 60-ms-Tonpuffer sind
 // normales Atmen.
 bool StandsOut(double value, double average) {
   const double d = value > average ? value - average : average - value;
@@ -185,17 +185,22 @@ void DrawStatsPanel(const OverlayStats& s) {
           Format(T("%llu angezeigt, %llu verworfen", "%llu shown, %llu dropped"),
                  (unsigned long long)s.sink.displayed, (unsigned long long)s.sink.dropped));
     }
-    // Bildalter ist eine Latenz: nach unten ist alles gut, nur der Ausschlag
-    // nach oben ist eine Nachricht. Deshalb hier nur die Spitze und keine
-    // Spanne.
+    // Die Durchlaufzeit ist eine Latenz: nach unten ist alles gut, nur der
+    // Ausschlag nach oben ist eine Nachricht. Deshalb hier nur die Spitze und
+    // keine Spanne.
+    //
+    // Sie heisst nicht mehr Bildalter, weil sie es nie war. Sie misst die
+    // Strecke von der Ankunft eines Bildes bis zu dem Augenblick, in dem es
+    // CapView verlaesst -- und nur die. Was die Karte davor gebraucht hat und
+    // was der Schirm danach noch tut, kann von hier aus niemand messen.
     if (s.frameAge.valid) {
       std::string age = Decimal(s.frameAge.average, 1) + " ms";
       if (StandsOut(s.frameAge.high, s.frameAge.average)) {
         age += T("  (Spitze ", "  (peak ") + Decimal(s.frameAge.high, 1) + ")";
       }
-      Row(T("Bildalter", "Frame age"), age);
+      Row(T("Durchlauf", "Pipeline"), age);
     } else {
-      Row(T("Bildalter", "Frame age"), "—");
+      Row(T("Durchlauf", "Pipeline"), "—");
     }
     if (full && s.videoDelayMs > 0) {
       Row(T("Bildverzögerung", "Video delay"),

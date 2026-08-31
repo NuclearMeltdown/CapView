@@ -17,7 +17,7 @@ namespace cap {
 // Ein Messwert, der jedes Bild anfaellt, aber viermal in der Sekunde angezeigt
 // wird.
 //
-// Bildalter und Tonpuffer aendern sich mit jedem Bild, und eine Zahl, die
+// Durchlaufzeit und Tonpuffer aendern sich mit jedem Bild, und eine Zahl, die
 // sechzig Mal in der Sekunde eine andere ist, kann man nicht lesen -- bis das
 // Auge eine Ziffer aufgeloest hat, steht dort laengst die naechste. Gesammelt
 // wird deshalb weiter jedes Bild, angezeigt aber, was die letzte Viertelsekunde
