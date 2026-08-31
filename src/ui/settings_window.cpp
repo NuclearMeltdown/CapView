@@ -889,6 +889,11 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
         case StandardSearch::Colour:
           ImGui::TextDisabled(T("Farbe wird geprüft: %s", "Checking colour: %s"), name);
           break;
+        // Das Ergebnis eines Suchlaufs von Hand ist hier keine eigene Zeile
+        // wert. Ueber dem Bild vertritt es die Einblendung, die gerade
+        // verschwindet -- hier steht ohnehin dauerhaft, worauf es hinauslief,
+        // und das ist dieselbe Auskunft ohne Verfallsdatum.
+        case StandardSearch::Result:
         case StandardSearch::Off:
           ImGui::TextDisabled(T("Eingestellt: %s", "In use: %s"), name);
           break;

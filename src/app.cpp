@@ -1418,6 +1418,13 @@ static const double kStandardBackoffSeconds = 6.0;
 // nicht sekundenlang ins Leere laeuft.
 static const double kStandardStarvedSeconds = 2.0;
 
+// Wie lange das Ergebnis eines von Hand ausgeloesten Suchlaufs stehen bleibt.
+//
+// Es sind zwei Zeilen, und die zweite ist die, um derentwillen es angezeigt
+// wird -- fuenf Sekunden reichen, sie in Ruhe zu lesen, ohne dass ein Ergebnis
+// laenger im Bild steht als die Suche gedauert hat, die es hervorgebracht hat.
+static const double kStandardResultSeconds = 5.0;
+
 // Bis die Karte nach einem Normwechsel wieder saubere Bilder liefert. Die
 // Zeilenzahl bleibt gleich, es geht nur um den Farb-PLL, deshalb kurz.
 //
@@ -1522,7 +1529,15 @@ SettingsWindow::StandardSearch App::StandardSearchDisplay() const {
     // stimmt. Waehrend des Gegenversuchs steht die *andere* Norm auf der Karte,
     // und ohne diesen Zustand saehe das aus wie ein Ergebnis, das sich von
     // selbst wieder aendert.
-    return !colourCandidates_.empty() ? S::Colour : S::Off;
+    if (!colourCandidates_.empty()) return S::Colour;
+    // Von Hand ausgeloest und noch kein Rundgang: gemessen wird trotzdem
+    // schon. Der Rundgang beginnt erst, wenn eine Messung vorliegt, und auf
+    // einem dunklen Bild kann das dauern -- ohne diese Zeile waere zwischen
+    // Tastendruck und Ergebnis eine halbe Minute, in der nichts zu sehen ist
+    // und der Tastendruck wie verschluckt aussieht.
+    if (standardManualSearch_) return S::Colour;
+    if (ShowingStandardResult()) return S::Result;
+    return S::Off;
   }
   // Kein Lock: gesucht wird -- es sei denn, gerade laeuft die Pause zwischen
   // zwei Runden.
@@ -1567,6 +1582,15 @@ void App::StandardSearchText(std::string* headline, std::string* detail) const {
   const int idx = shown != 0 ? VideoStandardIndexOf(shown) : -1;
   const char* name = idx >= 0 ? VideoStandardName(idx) : "?";
 
+  // Fertig, und jemand wartet auf die Antwort. Sie steht fertig da: geschrieben
+  // wurde sie an der Stelle, an der die Suche geendet hat, weil nur die weiss,
+  // woran sie geendet ist.
+  if (ShowingStandardResult()) {
+    *headline = standardResultHeadline_;
+    *detail = standardResultDetail_;
+    return;
+  }
+
   if (!colourCandidates_.empty()) {
     // Der Rundgang misst einen Schritt mehr, als er Normen hat: die
     // Ausgangsnorm kommt am Ende ein zweites Mal dran, siehe
@@ -1606,6 +1630,19 @@ void App::StandardSearchText(std::string* headline, std::string* detail) const {
             norms, lines);
         break;
     }
+    return;
+  }
+
+  // Von Hand ausgeloest, eingerastet, und der Rundgang hat noch nicht
+  // angefangen. Dazwischen liegt eine Messung, und die braucht ein Bild, an
+  // dem etwas zu messen ist -- auf Schwarz wartet sie, und das Warten ist hier
+  // die ganze Auskunft.
+  if (standardManualSearch_ && signalLocked_.load(std::memory_order_relaxed) == 1) {
+    *headline = Format(T("Videonorm wird geprüft: %s", "Checking video standard: %s"), name);
+    *detail = colourWaitingForPicture_
+                  ? T("Das Bild ist zu dunkel für einen Vergleich — es wird gewartet",
+                      "The picture is too dark to compare — waiting")
+                  : T("Die Farbe wird gemessen", "Measuring the colour");
     return;
   }
 
@@ -1677,7 +1714,46 @@ void App::RescanVideoStandard() {
   // wartet der Rundgang, und dieses Warten soll er noch tun duerfen.
   ResetStandardColourCheck();
   standardForceColourUntilQpc_ = QpcNow() + SecondsToQpc(30.0);
+  // Ab hier schuldet die Suche eine Antwort, und ein Ergebnis von vorhin ist
+  // keine: wer ein zweites Mal drueckt, fragt ein zweites Mal.
+  standardManualSearch_ = true;
+  standardResultUntilQpc_ = 0;
   Toast(T("Videonorm wird gesucht", "Scanning for the video standard"));
+}
+
+// Die Antwort auf den Tastendruck festhalten.
+//
+// Aufgerufen wird das an jedem Ausgang, den ein Suchlauf nehmen kann -- der
+// berichtigten Norm, der bestaetigten, der unentschiedenen Runde, dem zu
+// dunklen Bild, der Quelle ohne Signal. Es sind fuenf, und dass es fuenf sind,
+// ist der Grund fuer die Fahne: welcher Ausgang genommen wird, entscheidet
+// sich weit weg von der Taste, und keiner von ihnen weiss, ob ihn jemand
+// abwartet.
+//
+// Die erste Auskunft gewinnt. Danach ist die Frage beantwortet, und alles
+// Weitere -- ein Wiederholer, der zehn Sekunden spaeter doch noch entscheidet
+// -- gehoert wieder der Automatik samt ihrem Toast.
+void App::FinishManualStandardSearch(long standard, const std::string& detail) {
+  if (!standardManualSearch_) return;
+  standardManualSearch_ = false;
+  const int idx = standard != 0 ? VideoStandardIndexOf(standard) : -1;
+  standardResultHeadline_ = Format(T("Videonorm: %s", "Video standard: %s"),
+                                   idx >= 0 ? VideoStandardName(idx) : "?");
+  standardResultDetail_ = detail;
+  standardResultUntilQpc_ = QpcNow() + SecondsToQpc(kStandardResultSeconds);
+  CAP_LOG("Videonorm: Suche von Hand beendet -- %s (%s)",
+          idx >= 0 ? VideoStandardName(idx) : "?", detail.c_str());
+}
+
+// Ob das Ergebnis gerade im Bild steht.
+//
+// Und nur, solange sonst nichts laeuft. Geht der Lock in diesen fuenf Sekunden
+// verloren, faengt die Automatik von vorn an -- dann ist das Ergebnis nicht
+// mehr wahr, und es tritt hinter die laufende Suche zurueck, statt sie zu
+// verdecken.
+bool App::ShowingStandardResult() const {
+  return standardResultUntilQpc_ != 0 && QpcNow() < standardResultUntilQpc_ &&
+         colourCandidates_.empty() && standardCandidate_ < 0;
 }
 
 // Ob der Wachthread ueberhaupt etwas zu beobachten hat.
@@ -1708,6 +1784,9 @@ void App::UpdateSignalWatch() {
   standardSweeps_ = 0;
   standardNextTryQpc_ = 0;
   standardPatientPass_ = false;
+  // Und die Frage von Hand verfaellt mit der Quelle, an die sie gestellt war.
+  standardManualSearch_ = false;
+  standardResultUntilQpc_ = 0;
   // Auch die Erinnerung. Wer von digital zurueck auf analog wechselt, haengt
   // etwas anderes an -- die alte Norm zu bevorzugen waere dann ein Rat aus
   // einem anderen Leben.
@@ -2050,6 +2129,12 @@ void App::UpdateVideoStandard() {
               kStandardBackoffSeconds,
               VideoStandardName(VideoStandardIndexOf(candidates.front())));
     }
+    // Beide Durchgaenge durch und nichts rastet ein: dann ist auch das die
+    // Antwort auf den Tastendruck. Die Suche laeuft nach der Pause weiter --
+    // was sie dann findet, ist nicht mehr die Antwort auf diese Frage.
+    FinishManualStandardSearch(candidates.front(),
+                               T("Keine Norm rastet ein — es liegt wohl kein Signal an",
+                                 "No standard locks — there is probably no signal"));
     return;
   }
 
@@ -2475,6 +2560,11 @@ void App::VerifyStandardColour(int64_t now) {
       colourStartedQpc_ = 0;
       colourAttempts_ = 0;
       colourWaitingForPicture_ = false;
+      // Hierher kommt ein Suchlauf von Hand nur, wenn seine Frist abgelaufen
+      // ist, bevor ein Bild zum Vergleichen da war -- und dann ist das hier
+      // die Antwort: gemessen wurde, es sprach nichts dagegen.
+      FinishManualStandardSearch(current, T("Die Farbe stimmt — es bleibt dabei",
+                                            "The colour checks out — no change"));
       return;
     }
 
@@ -2512,6 +2602,15 @@ void App::VerifyStandardColour(int64_t now) {
       }
       renderer_.ResetChroma();
       colourStartedQpc_ = 0;
+      // Gewartet wird weiter -- aber nicht mehr im Namen des Tastendrucks.
+      // Dessen Frist ist abgelaufen, und eine Einblendung, die eine halbe
+      // Minute lang "es wird gewartet" sagt und dann verstummt, ist genau die
+      // Antwort, die hier gefehlt hat.
+      if (!forced) {
+        FinishManualStandardSearch(
+            current, T("Das Bild blieb zu dunkel für einen Vergleich — es bleibt dabei",
+                       "The picture stayed too dark to compare — no change"));
+      }
       return;
     }
     colourWaitingForPicture_ = false;
@@ -2526,6 +2625,10 @@ void App::VerifyStandardColour(int64_t now) {
       colourCheckedStandard_ = current;
       colourStartedQpc_ = 0;
       standardForceColourUntilQpc_ = 0;
+      FinishManualStandardSearch(
+          current, Format(T("Keine andere Norm mit %d Zeilen — es bleibt dabei",
+                            "No other standard with %d lines — no change"),
+                          VideoStandardLines(current)));
       return;
     }
     const int count = (int)colourCandidates_.size();
@@ -2800,7 +2903,18 @@ void App::VerifyStandardColour(int64_t now) {
     colourCheckedStandard_ = chosen;
     standardLastGood_ = chosen;
     colourAttempts_ = 0;
-    if (chosen != origin) {
+    // Wer gefragt hat, bekommt die Antwort dort, wo er die Frage gestellt hat.
+    // Der Toast bleibt der Automatik: er ist die Nachricht ueber etwas, das
+    // von selbst geschehen ist, und beides zugleich zu zeigen, hiesse
+    // dieselbe Sache zweimal an zwei Stellen zu sagen.
+    const bool answered = standardManualSearch_;
+    FinishManualStandardSearch(
+        chosen, chosen != origin
+                    ? Format(T("Nach Farbe berichtigt — vorher %s", "Corrected by colour — was %s"),
+                             VideoStandardName(VideoStandardIndexOf(origin)))
+                    : std::string(T("Die Farbe bestätigt sie — es bleibt dabei",
+                                    "The colour confirms it — no change")));
+    if (!answered && chosen != origin) {
       Toast(Format(T("Videonorm nach Farbe berichtigt: %s", "Video standard corrected by colour: %s"),
                    VideoStandardPickerName(chosen).c_str()));
     }
@@ -2836,6 +2950,9 @@ void App::VerifyStandardColour(int64_t now) {
     colourCheckedStandard_ = origin;
     standardLastGood_ = origin;
     colourAttempts_ = 0;
+    FinishManualStandardSearch(
+        origin, T("Der Vergleich war unbrauchbar, die Farbe stimmt für sich — es bleibt dabei",
+                  "The comparison was unusable, but the colour stands on its own — no change"));
     return;
   }
 
@@ -2862,6 +2979,12 @@ void App::VerifyStandardColour(int64_t now) {
               darkText(originDark).c_str());
     }
     colourCheckedStandard_ = origin;
+    FinishManualStandardSearch(
+        origin, sceneChanged
+                    ? T("Das Bild war jedesmal in Bewegung — kein verlässlicher Vergleich",
+                        "The picture moved every time — no reliable comparison")
+                    : T("Nichts entscheidet — die Quelle ist wohl schwarzweiß",
+                        "Nothing decides — the source is probably black and white"));
     return;
   }
   const double wait = sceneChanged ? kColourMotionRetrySeconds
@@ -2871,6 +2994,19 @@ void App::VerifyStandardColour(int64_t now) {
                        : "unentschieden, die Szene ist zu farbarm",
           wait, VideoStandardName(VideoStandardIndexOf(origin)));
   colourRetryQpc_ = now + SecondsToQpc(wait);
+  // Auch das ist eine Antwort, und zwar die letzte, die der Tastendruck noch
+  // bekommt. Der Wiederholer laeuft weiter -- aber er laeuft in wachsenden
+  // Abstaenden bis zu gut einer Minute, und so lange auf eine Einblendung zu
+  // warten, die vielleicht nie kommt, ist keine Auskunft. Was der Wiederholer
+  // spaeter entscheidet, meldet wieder der Toast.
+  FinishManualStandardSearch(
+      origin, Format(sceneChanged
+                         ? T("Das Bild hat sich während des Vergleichs geändert — in %.0f s noch "
+                             "einmal",
+                             "The picture changed during the comparison — trying again in %.0f s")
+                         : T("Die Szene ist zu farbarm — in %.0f s noch einmal",
+                             "The scene has too little colour — trying again in %.0f s"),
+                     wait));
 }
 
 void App::ResetStandardColourCheck() {
@@ -4460,6 +4596,17 @@ void App::DrawUi() {
         std::string headline, detail;
         StandardSearchText(&headline, &detail);
         DrawSearchIndicator(headline, detail);
+        break;
+      }
+      // Und was daraus geworden ist, an derselben Stelle: die Einblendung wird
+      // nicht ersetzt, sie hoert auf zu laufen. Nur nach einem Suchlauf von
+      // Hand -- die Automatik sucht bei jedem Quellenwechsel, und ein Ergebnis
+      // nach jedem waere kein Ergebnis mehr, sondern ein Bildschirmelement.
+      case SettingsWindow::StandardSearch::Result: {
+        std::string headline, detail;
+        StandardSearchText(&headline, &detail);
+        const double left = QpcToSeconds(standardResultUntilQpc_ - QpcNow());
+        DrawSearchResult(headline, detail, kStandardResultSeconds - left, kStandardResultSeconds);
         break;
       }
       // Die Pause ist kein Vorgang, sondern deren Abwesenheit -- dafuer laufende

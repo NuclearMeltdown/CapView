@@ -128,6 +128,15 @@ void DrawToast(const std::string& text, double age, double duration);
 // dorthin, wo der Vorgang zu sehen ist. Leer heisst: nur die Kopfzeile.
 void DrawSearchIndicator(const std::string& text, const std::string& detail = {});
 
+// Und was dabei herauskam, an derselben Stelle und fuer ein paar Sekunden.
+//
+// Nur nach einer Suche, die jemand ausgeloest hat. Ein Tastendruck ist eine
+// Frage; die Einblendung verschwinden zu lassen, sobald die Antwort feststeht,
+// beantwortet sie nicht. Ohne laufende Punkte und mit Ausblenden, damit der
+// Unterschied zwischen "laeuft noch" und "fertig" nicht am Text haengt.
+void DrawSearchResult(const std::string& text, const std::string& detail, double age,
+                      double duration);
+
 // Volume readout with a bar, parked in the chosen corner. Shown for a moment
 // after every change so the level is visible without opening anything.
 void DrawVolumeOsd(float volume, bool muted, OsdCorner corner, double age, double duration);
