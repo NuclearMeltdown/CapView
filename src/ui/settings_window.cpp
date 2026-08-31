@@ -1292,9 +1292,16 @@ void SettingsWindow::DrawImageTab() {
   ImGui::EndDisabled();
 
   ImGui::SameLine();
+  // Eigene ID: derselbe Satz steht auf dieser Seite ein zweites Mal, bei den
+  // quadratischen Pixeln. ImGui bildet die ID aus der Beschriftung, also waeren
+  // es sonst zwei Bedienelemente mit einer ID -- und ImGui sagt das auch, mit
+  // einem Fenster mitten im Bild. Umbenennen waere die schlechtere Antwort: der
+  // Satz sagt an beiden Stellen dasselbe und soll auch gleich lauten.
+  ImGui::PushID("procamp-to-output");
   ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
                     "Apply to recording, screenshots and camera"),
                   &img.procAmpToOutput);
+  ImGui::PopID();
   ImGui::SameLine();
   HelpMarker(
       T("Aus ist Absicht, und die beiden Stellungen sind nicht gleichwertig. Sauber "
@@ -1422,9 +1429,12 @@ void SettingsWindow::DrawImageTab() {
   // ueberhaupt keine eigene Form, das andere ist ein Versprechen ueber Pixel,
   // das genau durch Umrechnen gebrochen wuerde.
   if (img.aspect != AspectMode::Stretch && img.aspect != AspectMode::Integer) {
+    // Eigene ID, siehe oben beim gleichlautenden Kaestchen der Bildregler.
+    ImGui::PushID("square-pixel-to-output");
     ImGui::Checkbox(T("Auch für Aufnahme, Screenshot und Kamera",
                       "Apply to recording, screenshots and camera"),
                     &img.squarePixelOutput);
+    ImGui::PopID();
     ImGui::SameLine();
     HelpMarker(
         T("Das Fenster kann nicht-quadratische Pixel umsonst zeigen -- es zeichnet "
