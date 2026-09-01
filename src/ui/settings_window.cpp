@@ -945,6 +945,61 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
                  "Which physical connector is captured."));
   }
 
+  // ---- welches Kabel ----
+  //
+  // Gefragt statt gemessen, und das ist kein Versaeumnis. Der Crossbar waere
+  // die Auskunft, und genau der fehlt auf der Karte, an der CapView entwickelt
+  // wird: ihr Eingangswaehler steckt allein im Dialog des Treibers, hinter
+  // einem eigenen KS-Property-Set ohne dokumentierte Form. Die Zeile darueber,
+  // "Diese Karte hat keine umschaltbaren Eingänge", ist derselbe Befund.
+  //
+  // Es geht dabei nicht um Kosmetik: an dieser Antwort haengt die halbe
+  // Filterkette im Reiter Bild. Dot Crawl, Rainbow, die Bandbreitenkorrektur --
+  // alle drei behandeln Schaeden, die entstehen, weil Composite Helligkeit und
+  // Farbe durch eine Leitung schickt. Auf S-Video sind es zwei Leitungen, auf
+  // Component drei, und dann behandeln diese Regler einen Schaden, den es nicht
+  // gibt. Siehe App::EffectiveImage.
+  if (analogueSource_) {
+    ImGui::Spacing();
+    int conn = (int)p.capture.connector;
+    ImGui::SetNextItemWidth(-260.0f);
+    if (ComboEnum(T("Angeschlossenes Kabel", "Cable in use"), &conn, kAnalogConnectorCount,
+                  AnalogConnectorName, AnalogConnectorLook)) {
+      p.capture.connector = (AnalogConnector)conn;
+    }
+    ImGui::SameLine();
+    HelpMarker(
+        T("Die Karte verrät nicht, was bei ihr eingesteckt ist — deshalb die Frage. Davon "
+          "hängt ab, welche Bildfilter überhaupt erscheinen: die Composite-Filter räumen "
+          "Fehler weg, die es nur gibt, wenn Helligkeit und Farbe durch dieselbe Leitung "
+          "laufen.\n\nWer es nicht weiß: die Liste beschreibt jeden Stecker, einfach "
+          "darüberfahren.",
+          "The card does not say what is plugged into it, hence the question. It decides "
+          "which picture filters appear at all: the composite filters clean up faults that "
+          "only exist when luma and chroma share one wire.\n\nIf you are not sure, hover the "
+          "entries — each one describes the plug."));
+
+    // Und dieselbe Beschreibung noch einmal fest unter der Auswahl. Der
+    // Tooltip in der Liste hilft dem, der schon sucht; hier steht sie fuer
+    // den, der die Liste gar nicht erst aufklappt, weil er nicht weiss, dass
+    // die Frage ihn betrifft.
+    if (p.capture.connector == AnalogConnector::Auto) {
+      // Aufgeloest heisst hier: aus dem Crossbar gelesen, wo es einen gibt,
+      // sonst Composite. Was dabei herauskommt, ist die einzige Auskunft, die
+      // "Automatisch" geben kann -- und der Blindwert darunter ist der, der
+      // die Regler zeigt statt sie zu verstecken.
+      ImGui::Spacing();
+      TextDisabledWrapped(Format(T("Automatisch heißt hier: %s. %s",
+                                   "Automatic here means: %s. %s"),
+                                 AnalogConnectorName((int)connector_),
+                                 AnalogConnectorLook((int)connector_))
+                              .c_str());
+    } else {
+      ImGui::Spacing();
+      TextDisabledWrapped(AnalogConnectorLook((int)p.capture.connector));
+    }
+  }
+
   // ---- audio source ----
   ImGui::Spacing();
   ImGui::SeparatorText(T("Ton der Quelle", "Source audio"));
@@ -1590,48 +1645,77 @@ void SettingsWindow::DrawImageTab() {
   }  // natives Pixelraster, nur analog
 
   if (analogueSource_) {
+    // Vier der sechs Regler hier gibt es nur, weil Composite Helligkeit und
+    // Farbe durch eine Leitung schickt. Auf getrennten Leitungen haben sie
+    // nichts zu tun -- nicht "wenig", sondern nichts: das Muster, das sie
+    // wegrechnen, entsteht beim Mischen, und es wird nicht gemischt. Sichtbar
+    // blieben sie ein Angebot, Schaerfe gegen nichts zu tauschen.
+    //
+    // Was uebrig bleibt, sind die beiden Entrauscher. Rauschen hat jede analoge
+    // Leitung, unabhaengig davon, wie viele es sind.
+    //
+    // Und dieselbe Trennung noch einmal in App::EffectiveImage, wo die Werte
+    // wirklich abgeschaltet werden -- ausblenden allein genuegt nicht, ein
+    // gespeicherter Wert wirkte sonst weiter, wo es keinen Regler mehr gibt.
+    const bool composite = CompositeSource();
+
     ImGui::Spacing();
-    ImGui::SeparatorText(T("Composite-Filter", "Composite filter"));
-    ImGui::TextDisabled(T("Gegen das, was Composite immer mitbringt: falsche Farbe, "
-                          "Punktkriechen, Rauschen und einen weichen Bildrand.",
-                          "Against what composite always brings with it: false colour, "
-                          "dot crawl, noise, and a soft top end."));
-
-    ImGui::SetNextItemWidth(-260.0f);
-    ImGui::SliderInt(T("Farbschimmern", "Colour shimmer"), &img.chromaSoft, 0, 8,
-                     img.chromaSoft == 0 ? T("aus", "off") : "%d");
-    ImGui::SameLine();
-    HelpMarker(T("Regenbogenmuster über feinen Strukturen. Weichzeichnet die Farbe "
-                 "seitlich; die Schärfe bleibt, weil Composite ohnehin keine feinen "
-                 "Farbdetails überträgt.",
-                 "Rainbow patterns over fine detail. Blurs colour sideways; sharpness "
-                 "stays, because composite carries no fine colour detail anyway."));
-
-    // Kein zweiter Filter, sondern eine Bedingung auf den darüber: derselbe
-    // Weichzeichner, nur nicht mehr überall. Deshalb eingerückt und deshalb
-    // gesperrt, solange der Regler auf null steht -- ohne ihn gibt es nichts
-    // zu bedingen.
-    ImGui::BeginDisabled(img.chromaSoft == 0);
-    ImGui::Indent();
-    bool adaptive = img.adaptiveChroma;
-    if (ImGui::Checkbox(T("Nur wo nötig", "Only where needed"), &adaptive)) {
-      img.adaptiveChroma = adaptive;
+    ImGui::SeparatorText(composite ? T("Composite-Filter", "Composite filter")
+                                   : T("Analogfilter", "Analogue filter"));
+    if (composite) {
+      ImGui::TextDisabled(T("Gegen das, was Composite immer mitbringt: falsche Farbe, "
+                            "Punktkriechen, Rauschen und einen weichen Bildrand.",
+                            "Against what composite always brings with it: false colour, "
+                            "dot crawl, noise, and a soft top end."));
+    } else {
+      TextDisabledWrapped(
+          Format(T("%s führt Helligkeit und Farbe getrennt. Punktkriechen, Regenbogenmuster "
+                   "und der weiche Bildrand entstehen dabei gar nicht erst — die Filter "
+                   "dagegen sind deshalb nicht da. Was bleibt, ist Rauschen.",
+                   "%s keeps brightness and colour apart. Dot crawl, rainbow patterns and "
+                   "the soft top end never arise in the first place, so the filters against "
+                   "them are gone. What remains is noise."),
+                 AnalogConnectorName((int)connector_))
+              .c_str());
     }
-    ImGui::Unindent();
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    HelpMarker(T("Zeichnet die Farbe nur dort weich, wo die Helligkeit genug auf der "
-                 "Trägerfrequenz trägt, dass der Decoder Farbe erfunden haben kann -- "
-                 "über Dithering, feinen Rastern, Ziegelmauern.\n\n"
-                 "Anderswo bleibt die Farbe so scharf, wie Composite sie überhaupt "
-                 "liefert. Ohne den Haken zahlt das ganze Bild für ein Muster, das nur "
-                 "an wenigen Stellen steht.",
-                 "Softens colour only where the brightness carries enough at the carrier "
-                 "frequency for the decoder to have invented some -- over dithering, fine "
-                 "patterns, brickwork.\n\n"
-                 "Elsewhere the colour stays as sharp as composite ever delivers it. "
-                 "Without this the whole picture pays for a pattern that is only in a few "
-                 "places."));
+
+    if (composite) {
+      ImGui::SetNextItemWidth(-260.0f);
+      ImGui::SliderInt(T("Farbschimmern", "Colour shimmer"), &img.chromaSoft, 0, 8,
+                       img.chromaSoft == 0 ? T("aus", "off") : "%d");
+      ImGui::SameLine();
+      HelpMarker(T("Regenbogenmuster über feinen Strukturen. Weichzeichnet die Farbe "
+                   "seitlich; die Schärfe bleibt, weil Composite ohnehin keine feinen "
+                   "Farbdetails überträgt.",
+                   "Rainbow patterns over fine detail. Blurs colour sideways; sharpness "
+                   "stays, because composite carries no fine colour detail anyway."));
+
+      // Kein zweiter Filter, sondern eine Bedingung auf den darüber: derselbe
+      // Weichzeichner, nur nicht mehr überall. Deshalb eingerückt und deshalb
+      // gesperrt, solange der Regler auf null steht -- ohne ihn gibt es nichts
+      // zu bedingen.
+      ImGui::BeginDisabled(img.chromaSoft == 0);
+      ImGui::Indent();
+      bool adaptive = img.adaptiveChroma;
+      if (ImGui::Checkbox(T("Nur wo nötig", "Only where needed"), &adaptive)) {
+        img.adaptiveChroma = adaptive;
+      }
+      ImGui::Unindent();
+      ImGui::EndDisabled();
+      ImGui::SameLine();
+      HelpMarker(T("Zeichnet die Farbe nur dort weich, wo die Helligkeit genug auf der "
+                   "Trägerfrequenz trägt, dass der Decoder Farbe erfunden haben kann -- "
+                   "über Dithering, feinen Rastern, Ziegelmauern.\n\n"
+                   "Anderswo bleibt die Farbe so scharf, wie Composite sie überhaupt "
+                   "liefert. Ohne den Haken zahlt das ganze Bild für ein Muster, das nur "
+                   "an wenigen Stellen steht.",
+                   "Softens colour only where the brightness carries enough at the carrier "
+                   "frequency for the decoder to have invented some -- over dithering, fine "
+                   "patterns, brickwork.\n\n"
+                   "Elsewhere the colour stays as sharp as composite ever delivers it. "
+                   "Without this the whole picture pays for a pattern that is only in a few "
+                   "places."));
+    }
 
     // Two controls, because they are two different bargains and pretending
     // otherwise hid the more useful one.
@@ -1647,7 +1731,12 @@ void SettingsWindow::DrawImageTab() {
     // They are not independent, though, which is why the checkbox locks: with
     // the averaging off, the demodulator runs over still parts of the picture
     // too, paying sharpness for something the averaging does for free.
-    const bool demodOn = img.dotNotch > 0.0f;
+    //
+    // `composite` davor, weil der Regler unten dann gar nicht dasteht: ein
+    // gespeicherter Wert aus einem Composite-Profil wuerde die Mittelung sonst
+    // an einem Component-Eingang festhalten, mit dem Verweis auf einen Regler,
+    // den dort niemand sieht. Abgeschaltet ist er ohnehin, siehe EffectiveImage.
+    const bool demodOn = composite && img.dotNotch > 0.0f;
     if (demodOn) img.temporalDenoise = 1.0f;
 
     bool average = img.temporalDenoise > 0.0f;
@@ -1756,97 +1845,100 @@ void SettingsWindow::DrawImageTab() {
                  "Costs time on the graphics card -- about as much as the slider "
                  "below."));
 
-    // Stufen statt freiem Lauf: die Zwischenwerte sind ohne Wirkung, und ein
-    // Regler, der sich bewegt ohne etwas zu ändern, behauptet etwas Falsches.
-    DotCrawlStep steps[16];
-    const int stepCount = BuildDotCrawlSteps(carrierPeriod_, steps, 16);
-    int stepIndex = 0;  // 0 heißt aus
-    if (img.dotNotch > 0.0f) {
-      const int nowWindow = DotCrawlWindow(img.dotNotch, carrierPeriod_);
-      stepIndex = 1;
-      for (int k = 0; k < stepCount; ++k) {
-        if (steps[k].window == nowWindow) stepIndex = k + 1;
+    if (composite) {
+      // Stufen statt freiem Lauf: die Zwischenwerte sind ohne Wirkung, und ein
+      // Regler, der sich bewegt ohne etwas zu ändern, behauptet etwas Falsches.
+      DotCrawlStep steps[16];
+      const int stepCount = BuildDotCrawlSteps(carrierPeriod_, steps, 16);
+      int stepIndex = 0;  // 0 heißt aus
+      if (img.dotNotch > 0.0f) {
+        const int nowWindow = DotCrawlWindow(img.dotNotch, carrierPeriod_);
+        stepIndex = 1;
+        for (int k = 0; k < stepCount; ++k) {
+          if (steps[k].window == nowWindow) stepIndex = k + 1;
+        }
       }
-    }
 
-    char label[64];
-    if (stepIndex == 0) {
-      snprintf(label, sizeof(label), "%s", T("aus", "off"));
-    } else {
-      snprintf(label, sizeof(label), T("Stufe %d von %d", "step %d of %d"), stepIndex, stepCount);
-    }
+      char label[64];
+      if (stepIndex == 0) {
+        snprintf(label, sizeof(label), "%s", T("aus", "off"));
+      } else {
+        snprintf(label, sizeof(label), T("Stufe %d von %d", "step %d of %d"), stepIndex, stepCount);
+      }
 
-    ImGui::SetNextItemWidth(-260.0f);
-    if (ImGui::SliderInt(T("Bewegtes entstören", "Clean up what moves"), &stepIndex, 0, stepCount,
-                         label)) {
-      img.dotNotch = stepIndex <= 0 ? 0.0f : steps[stepIndex - 1].slider;
-    }
-    ImGui::SameLine();
-    HelpMarker(T("Rechnet den Farbträger aus der Helligkeit heraus -- das Einzige, was gegen "
-                 "Punktkriechen an bewegten Stellen hilft, und es kostet Schärfe. Weiter "
-                 "rechts heißt gründlicher und weicher; die Zeile darunter sagt, wo man "
-                 "gerade steht.\n\n"
-                 "Braucht die richtige Trägerfrequenz, und die kommt aus der Videonorm im "
-                 "Reiter Quelle. Steht die falsch, sinkt die Wirkung von rund 70 auf 34 "
-                 "Prozent.",
-                 "Works the colour subcarrier back out of the brightness -- the only thing "
-                 "that helps against crawl on moving parts, and it costs sharpness. Further "
-                 "right is more thorough and softer; the line below says where you are.\n\n"
-                 "It needs the right carrier frequency, and that comes from the video "
-                 "standard on the Source tab. Set wrong, it drops from about 70 % to 34 %."));
+      ImGui::SetNextItemWidth(-260.0f);
+      if (ImGui::SliderInt(T("Bewegtes entstören", "Clean up what moves"), &stepIndex, 0, stepCount,
+                           label)) {
+        img.dotNotch = stepIndex <= 0 ? 0.0f : steps[stepIndex - 1].slider;
+      }
+      ImGui::SameLine();
+      HelpMarker(T("Rechnet den Farbträger aus der Helligkeit heraus -- das Einzige, was gegen "
+                   "Punktkriechen an bewegten Stellen hilft, und es kostet Schärfe. Weiter "
+                   "rechts heißt gründlicher und weicher; die Zeile darunter sagt, wo man "
+                   "gerade steht.\n\n"
+                   "Braucht die richtige Trägerfrequenz, und die kommt aus der Videonorm im "
+                   "Reiter Quelle. Steht die falsch, sinkt die Wirkung von rund 70 auf 34 "
+                   "Prozent.",
+                   "Works the colour subcarrier back out of the brightness -- the only thing "
+                   "that helps against crawl on moving parts, and it costs sharpness. Further "
+                   "right is more thorough and softer; the line below says where you are.\n\n"
+                   "It needs the right carrier frequency, and that comes from the video "
+                   "standard on the Source tab. Set wrong, it drops from about 70 % to 34 %."));
 
-    // What the number amounts to, because a number on its own says nothing and
-    // this is a trade the user should be able to see rather than infer.
-    if (demodOn) {
-      const int window = DotCrawlWindow(img.dotNotch, carrierPeriod_);
-      float removed = 0.0f, softer = 0.0f;
-      DotCrawlEffect(window, &removed, &softer);
-      ImGui::Indent();
-      ImGui::TextDisabled(T("In Bewegung: %.0f %% weg, dafür %.0f %% weicher (Fenster %d Punkte).",
-                            "Moving: %.0f %% gone, %.0f %% softer for it (window %d samples)."),
-                          removed, softer, window);
-      ImGui::Unindent();
-    }
+      // What the number amounts to, because a number on its own says nothing and
+      // this is a trade the user should be able to see rather than infer.
+      if (demodOn) {
+        const int window = DotCrawlWindow(img.dotNotch, carrierPeriod_);
+        float removed = 0.0f, softer = 0.0f;
+        DotCrawlEffect(window, &removed, &softer);
+        ImGui::Indent();
+        ImGui::TextDisabled(
+            T("In Bewegung: %.0f %% weg, dafür %.0f %% weicher (Fenster %d Punkte).",
+              "Moving: %.0f %% gone, %.0f %% softer for it (window %d samples)."),
+            removed, softer, window);
+        ImGui::Unindent();
+      }
 
-    // Steht unter den drei Entstörern, weil es die Gegenrichtung ist: die
-    // nehmen etwas weg, dieser holt etwas zurück. Und es ist die Reihenfolge,
-    // in der der Shader rechnet -- erst das Muster raus, dann das Band hoch,
-    // denn andersherum würde die Anhebung das Muster mit anheben.
-    ImGui::SetNextItemWidth(-260.0f);
-    ImGui::SliderFloat(T("Bandbreite zurückholen", "Restore bandwidth"), &img.bandwidthRestore,
-                       0.0f, 1.0f, "%.2f");
-    ImGui::SameLine();
-    HelpMarker(T("Composite überträgt Helligkeit nur bis zum Farbträger, und beide Enden "
-                 "der Kette laufen schon davor weich aus. Genau dieses Band hebt der "
-                 "Regler wieder an -- keine Kantenanhebung, sondern das, was die "
-                 "Übertragung nachweislich gedämpft hat.\n\n"
-                 "Nicht dasselbe wie \"Schärfen\" unter Skalierung. Das arbeitet nach der "
-                 "Skalierung an der Fenstergröße und macht Kanten kontrastreicher; dieser "
-                 "hier arbeitet in den Bildpunkten der Quelle mit einem Fenster, das aus "
-                 "der Trägerfrequenz gebaut ist.\n\n"
-                 "Um den Träger herum ist er gesperrt, nicht nur genau darauf: Punktkriechen "
-                 "ist kein einzelner Ton, sondern das ganze Farbband, und ein Fenster, das "
-                 "nur im Punkt Null ist, würde die Ränder dieses Bandes kräftig anheben. "
-                 "Dazu hält er sich überall dort zurück, wo die Zeile tatsächlich Energie "
-                 "auf der Trägerfrequenz führt -- dort ist Detail von Kriechen nicht zu "
-                 "unterscheiden.\n\n"
-                 "Nur waagerecht: senkrecht ist das Bild durch die Zeilenzahl begrenzt, "
-                 "und daran ändert kein Filter etwas.",
-                 "Composite carries brightness only up to the colour subcarrier, and both "
-                 "ends of the chain already roll off before it. That is the band this "
-                 "lifts back up -- not edge enhancement, but what the transmission "
-                 "demonstrably attenuated.\n\n"
-                 "Not the same as \"Sharpen\" under Scaling. That works after scaling at "
-                 "the window's size and gives edges more contrast; this works in the "
-                 "source's own samples with a window built from the carrier "
-                 "frequency.\n\n"
-                 "It is blocked around the carrier, not merely on it: dot crawl is not a "
-                 "single tone but the whole colour band, and a window that is zero only at "
-                 "the point would lift the edges of that band hard. On top of that it "
-                 "holds back wherever the line really does carry energy at the carrier "
-                 "frequency -- there, detail and crawl cannot be told apart.\n\n"
-                 "Horizontal only: vertically the picture is limited by the line count, "
-                 "and no filter changes that."));
+      // Steht unter den drei Entstörern, weil es die Gegenrichtung ist: die
+      // nehmen etwas weg, dieser holt etwas zurück. Und es ist die Reihenfolge,
+      // in der der Shader rechnet -- erst das Muster raus, dann das Band hoch,
+      // denn andersherum würde die Anhebung das Muster mit anheben.
+      ImGui::SetNextItemWidth(-260.0f);
+      ImGui::SliderFloat(T("Bandbreite zurückholen", "Restore bandwidth"), &img.bandwidthRestore,
+                         0.0f, 1.0f, "%.2f");
+      ImGui::SameLine();
+      HelpMarker(T("Composite überträgt Helligkeit nur bis zum Farbträger, und beide Enden "
+                   "der Kette laufen schon davor weich aus. Genau dieses Band hebt der "
+                   "Regler wieder an -- keine Kantenanhebung, sondern das, was die "
+                   "Übertragung nachweislich gedämpft hat.\n\n"
+                   "Nicht dasselbe wie \"Schärfen\" unter Skalierung. Das arbeitet nach der "
+                   "Skalierung an der Fenstergröße und macht Kanten kontrastreicher; dieser "
+                   "hier arbeitet in den Bildpunkten der Quelle mit einem Fenster, das aus "
+                   "der Trägerfrequenz gebaut ist.\n\n"
+                   "Um den Träger herum ist er gesperrt, nicht nur genau darauf: Punktkriechen "
+                   "ist kein einzelner Ton, sondern das ganze Farbband, und ein Fenster, das "
+                   "nur im Punkt Null ist, würde die Ränder dieses Bandes kräftig anheben. "
+                   "Dazu hält er sich überall dort zurück, wo die Zeile tatsächlich Energie "
+                   "auf der Trägerfrequenz führt -- dort ist Detail von Kriechen nicht zu "
+                   "unterscheiden.\n\n"
+                   "Nur waagerecht: senkrecht ist das Bild durch die Zeilenzahl begrenzt, "
+                   "und daran ändert kein Filter etwas.",
+                   "Composite carries brightness only up to the colour subcarrier, and both "
+                   "ends of the chain already roll off before it. That is the band this "
+                   "lifts back up -- not edge enhancement, but what the transmission "
+                   "demonstrably attenuated.\n\n"
+                   "Not the same as \"Sharpen\" under Scaling. That works after scaling at "
+                   "the window's size and gives edges more contrast; this works in the "
+                   "source's own samples with a window built from the carrier "
+                   "frequency.\n\n"
+                   "It is blocked around the carrier, not merely on it: dot crawl is not a "
+                   "single tone but the whole colour band, and a window that is zero only at "
+                   "the point would lift the edges of that band hard. On top of that it "
+                   "holds back wherever the line really does carry energy at the carrier "
+                   "frequency -- there, detail and crawl cannot be told apart.\n\n"
+                   "Horizontal only: vertically the picture is limited by the line count, "
+                   "and no filter changes that."));
+    }  // Composite-only
   }
 
   // Bildröhre. Anzeigeeffekte und keine Signalbearbeitung: sie landen weder in

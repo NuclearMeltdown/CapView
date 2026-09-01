@@ -94,6 +94,17 @@ class App {
   // sie fuer diese Quelle gelten. Was in den Einstellungen ausgeblendet ist,
   // darf auch nicht mehr wirken -- siehe die Umsetzung.
   bool SourceIsAnalogue() const;
+  // Welcher analoge Anschluss es ist, ohne Auto: die Einstellung, wo eine
+  // steht, sonst der Crossbar, sonst Composite. Siehe die Umsetzung.
+  AnalogConnector ResolvedConnector() const;
+  // Ob Helligkeit und Farbe sich eine Leitung teilen. Das ist die Frage hinter
+  // Punktkriechen und Regenbogen -- beide sind Uebersprechen zwischen den
+  // beiden, und ohne gemeinsame Leitung gibt es keines. Nur Composite.
+  bool ConnectorMixesLumaAndChroma() const;
+  // Ob die Farbe ueberhaupt auf einem Traeger sitzt. Bei S-Video tut sie das,
+  // nur eben auf einer eigenen Leitung; bei Component gibt es keinen Traeger.
+  // Daran haengt, ob die Farbrunde der Normsuche etwas messen kann.
+  bool ConnectorHasColourCarrier() const;
   ImageSettings EffectiveImage(const Profile& profile) const;
   // Wie RestartAll, verwirft aber vorher, was fuer den vorherigen Eingang
   // gemessen wurde -- Videonorm und Format. Siehe die Umsetzung.
