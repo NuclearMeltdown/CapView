@@ -58,6 +58,14 @@ struct ConvertCB {
   float motionSlack;
   float motionSlope;
 
+  // The three restoration steps added in 3.3. Each one is described where it is
+  // implemented; the motion compensator's comment also says what it refuses to
+  // do and why, which is the part that is easy to get wrong.
+  int32_t motionComp;   // 1 = follow the movement when averaging noise away
+  int32_t adaptChroma;  // 1 = soften colour only where the brightness invites it
+  float bandwidth;      // 0..1, how much of the rolled off luma band to restore
+  float pad0;
+
   float coef[4];
 };
 static_assert(sizeof(ConvertCB) % 16 == 0, "constant buffer must be 16 byte aligned");
@@ -2684,8 +2692,11 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
       source_.interlaced || interlaceVerdict_ == InterlaceVerdict::Interlaced;
   Deinterlace deint = image.deinterlace;
   if (image.deinterlaceAuto && !interlaced) deint = Deinterlace::Off;
-  // YADIF is not the only thing that needs yesterday's picture any more.
-  historyWanted_ = DeinterlaceNeedsHistory(deint) || image.temporalDenoise > 0.0f;
+  // YADIF is not the only thing that needs yesterday's picture any more. The
+  // motion compensator reads the same three frames, and reads them even when
+  // the averaging above is switched off -- it works on what that one lets go.
+  historyWanted_ = DeinterlaceNeedsHistory(deint) || image.temporalDenoise > 0.0f ||
+                   image.motionCompensate;
 
   const bool isYuv = kind_ != FormatKind::Rgb;
   const bool hd = croppedHeight_ >= 720;
@@ -2745,6 +2756,15 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   // The subcarrier's period in samples scales with how many samples the card
   // puts on a line: the same cycle spread over more pixels is more pixels long.
   cb.carrierPeriod = (float)(carrierSamples_ * (double)srcW / 720.0);
+  // All three of these are built out of that period rather than out of a table
+  // of standards, which is what makes them work on NTSC, PAL, PAL M, PAL N and
+  // SECAM without knowing which one is in front of them.
+  cb.motionComp = image.motionCompensate ? 1 : 0;
+  cb.bandwidth = image.bandwidthRestore < 0.0f   ? 0.0f
+                 : image.bandwidthRestore > 1.0f ? 1.0f
+                                                 : image.bandwidthRestore;
+  cb.adaptChroma = image.adaptiveChroma ? 1 : 0;
+  cb.pad0 = 0.0f;
   cb.coSitedPhase = coSitedFields_ ? coSitedPhase_ : -1;
   if (range == ColorRange::Limited) {
     cb.yOffset = 16.0f / 255.0f;

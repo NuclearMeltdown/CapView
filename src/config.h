@@ -361,6 +361,27 @@ struct ImageSettings {
   // running game is most of the screen. Costs a little horizontal sharpness,
   // which is why it is a knob of its own rather than part of the one above.
   float dotNotch = 0.0f;  // 0..1
+  // Averaging along the movement instead of across it, for the noise the gate
+  // above leaves behind everywhere something is moving -- which in a game is
+  // most of the screen. It does not touch the dot crawl and cannot be made to:
+  // the pattern is fixed to the raster rather than to the picture, so shifting
+  // a frame shifts its phase, and the four frame cancellation only survives at
+  // speeds that are a multiple of a quarter of the carrier period. See the
+  // shader, which does the algebra. So this is band limited away from the
+  // carrier and removes noise, which is the same defect in every colour system.
+  bool motionCompensate = false;
+  // The top of the brightness band, put back. Composite rolls off towards the
+  // subcarrier at both ends of the chain, and that rolloff is what a composite
+  // picture is soft with -- known rather than guessed, because its shape
+  // follows the carrier. Not the same thing as the sharpening on the scaling
+  // section: that one raises contrast at edges after scaling, this one lifts a
+  // band the transmission attenuated, in the source's own samples.
+  float bandwidthRestore = 0.0f;  // 0..1
+  // Whether the colour softening picks its spots. Off it blurs colour sideways
+  // over the whole picture; on it does so only where the brightness carries
+  // enough at the carrier frequency for the decoder to have invented colour out
+  // of it, and leaves genuine colour detail alone everywhere else.
+  bool adaptiveChroma = false;
   AspectMode aspect = AspectMode::Source;
   // Whether the aspect above reaches past the window. The display gets it for
   // free -- it simply draws into a rectangle of the right shape -- but a
