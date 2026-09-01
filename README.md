@@ -86,13 +86,17 @@ either no picture or one with the wrong number of lines. Leaving it on
 the analogue decoder, so it is dropped whenever the input it described goes
 away, and a source declared Digital never gets one.
 
-On an analogue source CapView also asks **which cable is in use** — composite,
-S-Video, or component. It asks rather than measures because on many cards there
-is nothing to measure: the documented way to read the input selector is
-`IAMCrossbar`, plenty of cards do not implement it, and their selector then
-lives only in the vendor's own dialog behind a private property set. Where a
-crossbar does exist, the selection is prefilled from it and the question can be
-left on automatic.
+**Which cable is in use** is asked in the same breath. One list — *Input* —
+runs Automatic, Composite, S-Video, Component / RGB, Digital, because saying
+composite already says analogue and nobody ever answered those as two
+questions. Each entry describes the plug rather than the standard, for the
+people who need this answered and do not know which cable they are holding.
+
+It asks rather than measures because on many cards there is nothing to measure:
+the documented way to read the input selector is `IAMCrossbar`, plenty of cards
+do not implement it, and their selector then lives only in the vendor's own
+dialog behind a private property set. Where a crossbar does exist, the entry is
+prefilled from it and the list can be left on automatic.
 
 The answer decides which of the picture filters exist at all. Dot crawl,
 rainbow shimmer and the soft top end are faults of sharing one wire between

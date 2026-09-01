@@ -74,6 +74,20 @@ const int kSignalKindCount = 3;
 enum class AnalogConnector { Auto, Composite, SVideo, Component };
 const int kAnalogConnectorCount = 4;
 
+// Beides zusammen ist eine einzige Frage, und sie wird auch als eine gestellt.
+//
+// Getrennt waren es zwei Auswahllisten uebereinander, die zweite nur manchmal
+// da, und die erste beantwortete der Nutzer schon mit dem Kabel in der Hand:
+// wer "Composite" sagt, hat damit auch "analog" gesagt. Die Kette ist
+// Automatisch - Composite - S-Video - Component - Digital, und das ist die
+// ganze Liste dessen, was hinten am Rechner steckt.
+//
+// Gespeichert bleiben trotzdem zwei Schluessel. Sie tragen zwei verschiedene
+// Aussagen -- "welche Haelfte der Karte" und "welches Kabel daran" --, und ein
+// dritter Schluessel, der beide zugleich meint, waere eine dritte Wahrheit, die
+// mit den anderen auseinanderlaufen kann.
+const int kSignalInputCount = 5;
+
 // Wo der Nutzer wohnt -- und damit, welche Videonormen ueberhaupt in Frage
 // kommen.
 //
@@ -205,6 +219,16 @@ const char* AnalogConnectorName(int index);
 // Was in der Auswahlliste unter dem Namen steht: woran man den Stecker in der
 // Hand erkennt. Leer fuer Auto, das ist kein Anschluss.
 const char* AnalogConnectorLook(int index);
+// Die zusammengelegte Liste: Automatisch, Composite, S-Video, Component,
+// Digital. `SignalInputLook` beschreibt wieder den Stecker, fuer Automatisch
+// stattdessen, was Automatisch heisst.
+const char* SignalInputName(int index);
+const char* SignalInputLook(int index);
+// Und die Umrechnung in beide Richtungen. Kombinationen, die die Liste nicht
+// hergibt, faellt `SignalInputIndex` auf den naechstliegenden Eintrag zurueck --
+// gespeicherte Profile von vor der Zusammenlegung sind genau das.
+int SignalInputIndex(SignalKind kind, AnalogConnector connector);
+void SignalInputApply(int index, SignalKind* kind, AnalogConnector* connector);
 const char* VideoRegionName(int index);
 // Was `VideoRegion::Auto` bedeutet: die Region aus der Laendereinstellung von
 // Windows, oder PalEurope, wenn sich daraus nichts machen laesst. Gibt nie
