@@ -86,6 +86,24 @@ either no picture or one with the wrong number of lines. Leaving it on
 the analogue decoder, so it is dropped whenever the input it described goes
 away, and a source declared Digital never gets one.
 
+On an analogue source CapView also asks **which cable is in use** — composite,
+S-Video, or component. It asks rather than measures because on many cards there
+is nothing to measure: the documented way to read the input selector is
+`IAMCrossbar`, plenty of cards do not implement it, and their selector then
+lives only in the vendor's own dialog behind a private property set. Where a
+crossbar does exist, the selection is prefilled from it and the question can be
+left on automatic.
+
+The answer decides which of the picture filters exist at all. Dot crawl,
+rainbow shimmer and the soft top end are faults of sharing one wire between
+brightness and colour; S-Video splits them onto two, component onto three, and
+on those inputs the filters against them are hidden and switched off rather than
+offered as a trade of sharpness for nothing. The colour round of the standard
+search is skipped for the same reason — it decides between subcarriers, and
+component has none. What stays is the noise reduction, because every analogue
+line has noise, and the line standard itself, because 50 against 60 Hz is still
+a real question on component.
+
 **Configure card** opens the driver's own property pages while the picture keeps
 running. **Reinitialise card** releases the card, finds it again and returns the
 standard and format to automatic, leaving the device and input alone — enough,
@@ -595,6 +613,12 @@ More: [ffmpeg](../../wiki/ffmpeg).
   lives in the session namespace, which an app container cannot see -- so the
   Windows Camera app and Store builds of Teams do not find it. Everything that
   loads DirectShow normally does: OBS, Discord, browsers, vMix, XSplit.
+- **S-Video and component have not been run.** Every measurement behind the
+  analogue path was taken on composite, from a PAL SNES and a GameCube. Picking
+  either of the other two removes filters and skips the colour round, which is
+  the safe direction to be wrong in — nothing is applied that was not asked for
+  — but the claim that the picture is then correct rests on how the signals are
+  defined and not on anything measured here.
 - **The HDR display path is untested on real HDR hardware.** The maths is
   checked against the standards and the tone mapped path is verified; the scRGB
   output has never been run against an HDR monitor.

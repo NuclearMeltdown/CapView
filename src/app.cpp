@@ -2624,6 +2624,38 @@ void App::VerifyStandardColour(int64_t now) {
 
   const long current = capture_.currentStandard();
   if (current == 0) return;
+
+  // Component und RGB haben keinen Farbtraeger, also auch nichts zu vergleichen.
+  //
+  // Die ganze Runde hier fragt eine einzige Frage: welcher Farbtraeger passt zu
+  // dem, was anliegt. Sie stellt vier Normen ein und schaut, unter welcher das
+  // Bild Farbe bekommt. Auf getrennten Leitungen kommt die Farbe aber gar nicht
+  // aus einem Traeger, sondern liegt schon fertig da -- jede der vier Normen
+  // zeigt dieselbe Farbe, und aus vier gleichen Zahlen laesst sich nichts
+  // waehlen. Der Rundgang schaltete also sichtbar durch drei falsche Normen und
+  // kaeme mit nichts zurueck. Derselbe Ausgang wie bei kChromaLitWanted weiter
+  // oben, nur folgt er hier aus der Bauart und nicht aus dem Bildinhalt.
+  //
+  // Was bleibt, ist Stufe eins: 50 oder 60 Hz, 576 oder 480 Zeilen. Das
+  // entscheidet der Lock, und der arbeitet auf Component genauso.
+  //
+  // Die anliegende Norm gilt damit als geprueft, sonst fragt jede Kurve von
+  // vorn. Und der Tastendruck bekommt seine Antwort hier, weil er sie sonst
+  // nirgends mehr bekaeme: die vier Ausgaenge unten sind alle hinter diesem
+  // Ruecksprung.
+  if (colourCandidates_.empty() && !ConnectorHasColourCarrier()) {
+    if (colourCheckedStandard_ != current) {
+      CAP_LOG("Videonorm: Farbrunde entfällt -- %s führt keinen Farbträger",
+              AnalogConnectorName((int)ResolvedConnector()));
+    }
+    colourCheckedStandard_ = current;
+    standardForceColourUntilQpc_ = 0;
+    FinishManualStandardSearch(
+        current, T("Dieser Eingang führt keinen Farbträger — der Lock entscheidet allein",
+                   "This input carries no colour subcarrier — the lock decides on its own"));
+    return;
+  }
+
   const bool walking = !colourCandidates_.empty();
   if (!walking && current == colourCheckedStandard_) return;
   // Ein unentschiedener Versuch wartet, bevor er sich wiederholt.
@@ -4134,6 +4166,51 @@ bool App::SourceIsAnalogue() const {
   return hasDecoder && (!fmt.valid() || fmt.height <= 576);
 }
 
+// Welcher Anschluss, wenn die Einstellung auf Automatisch steht.
+//
+// Der Crossbar weiss es, wo es einen gibt: `EnumerateCrossbarInputs` liest den
+// physischen Typ jedes Eingangs mit aus, und der geroutete ist der, an dem das
+// Bild haengt. Karten ohne Crossbar -- die SA7160 ist eine -- melden gar
+// nichts, und dann bleibt nur die Annahme.
+//
+// Die Annahme ist Composite, und zwar in die sichere Richtung. Ein zu viel
+// angebotener Filter steht auf null und tut nichts, bis jemand ihn anfasst;
+// ein zu wenig angebotener fehlt dort, wo er gebraucht wird, und der Nutzer
+// sieht das Kriechen und findet den Regler nicht mehr.
+AnalogConnector App::ResolvedConnector() const {
+  const AnalogConnector chosen = config_.active().capture.connector;
+  if (chosen != AnalogConnector::Auto) return chosen;
+
+  const std::vector<CrossbarInput>& inputs = capture_.capabilities().crossbarInputs;
+  const int index = config_.active().capture.crossbarInput;
+  if (index >= 0 && index < (int)inputs.size()) {
+    switch (inputs[(size_t)index].physicalType) {
+      case PhysConn_Video_SVideo:
+        return AnalogConnector::SVideo;
+      case PhysConn_Video_YRYBY:
+      case PhysConn_Video_RGB:
+        // RGB kommt wie Component ohne Farbtraeger an -- drei Leitungen, jede
+        // ihr eigenes Signal. Fuer alles, was hier davon abhaengt, ist das
+        // derselbe Fall.
+        return AnalogConnector::Component;
+      // SCART absichtlich nicht: derselbe Stecker fuehrt je nach Kabel
+      // Composite oder RGB, und welches davon steckt, sagt der Typ nicht. Also
+      // die sichere Annahme, und wer es besser weiss, stellt es ein.
+      default:
+        break;
+    }
+  }
+  return AnalogConnector::Composite;
+}
+
+bool App::ConnectorMixesLumaAndChroma() const {
+  return SourceIsAnalogue() && ResolvedConnector() == AnalogConnector::Composite;
+}
+
+bool App::ConnectorHasColourCarrier() const {
+  return SourceIsAnalogue() && ResolvedConnector() != AnalogConnector::Component;
+}
+
 // Die Einstellungen, wie sie fuer *diese* Quelle gelten.
 //
 // Ausgeblendet muss auch abgeschaltet heissen. Wer am SNES die Kriechfilter und
@@ -4156,8 +4233,41 @@ ImageSettings App::EffectiveImage(const Profile& profile) const {
     img.chromaSoft = 0;
     img.temporalDenoise = 0.0f;
     img.dotNotch = 0.0f;
+    // Und die Bandanhebung ebenso: ihre Fensterbreite kommt aus der
+    // Traegerfrequenz, und ohne Traeger hebt sie ein Band an, das niemand
+    // gedaempft hat. Stand vorher nicht hier -- ausgeblendet war sie schon,
+    // abgeschaltet nicht, und das ist genau der Fall, den der Kommentar
+    // ueber dieser Funktion verbietet.
+    img.bandwidthRestore = 0.0f;
     // Das native Raster rechnet das Abtasten einer analogen Zeile zurueck.
     img.nativeWidth = 0;
+  } else if (!ConnectorMixesLumaAndChroma()) {
+    // Analog, aber Helligkeit und Farbe kommen getrennt an -- S-Video auf zwei
+    // Leitungen, Component auf drei. Damit faellt alles weg, was Uebersprechen
+    // zwischen den beiden behandelt, und das ist kein Feintuning: diese Filter
+    // suchen ein Muster auf der Traegerfrequenz und finden dort bei einer
+    // sauberen Quelle Bilddetail. Sie wuerden es wegrechnen.
+    //
+    //   chromaSoft       gegen Regenbogen, also gegen Helligkeitsdetail, das
+    //                    der Dekoder als Farbe gelesen hat. Ohne gemeinsame
+    //                    Leitung liest er nichts falsch. Bei Component ist die
+    //                    Farbbandbreite ausserdem breit genug, dass seitliches
+    //                    Weichzeichnen echtes Detail kostet.
+    //   adaptiveChroma   ist die Bedingung auf chromaSoft und faellt mit ihm.
+    //   dotNotch         rechnet den Farbtraeger aus der Helligkeit heraus. Da
+    //                    ist keiner drin.
+    //   bandwidthRestore hebt die Daempfung zum Traeger hin wieder an. Ohne
+    //                    Traeger gibt es diese Daempfung nicht.
+    //
+    // Was bleibt, bleibt mit Absicht: temporalDenoise mittelt Rauschen weg --
+    // die Traegerausloeschung ist nur die zweite Haelfte seiner Arbeit --, und
+    // motionCompensate ist ohnehin um den Traeger herum gesperrt und entfernt
+    // Rauschen, "the same defect in every colour system", wie es im Shader
+    // steht. Rauschen bringt jede analoge Leitung mit.
+    img.chromaSoft = 0;
+    img.adaptiveChroma = false;
+    img.dotNotch = 0.0f;
+    img.bandwidthRestore = 0.0f;
   }
 
   // Verdoppeln nur, wo wirklich die halbe Bildhoehe ankommt.
@@ -5279,6 +5389,10 @@ void App::DrawUi() {
   // gezeichnet wird. Liefen die beiden auseinander, wirkte etwas, das nirgends
   // mehr einstellbar ist.
   settings_.SetAnalogueSource(SourceIsAnalogue());
+  // Und derselbe Weg fuer den Anschluss, aufgeloest statt roh: was der Dialog
+  // im Reiter Bild noch zeigen darf, haengt an dem, was "Automatisch" ergibt,
+  // und nicht an dem, was dort ausgewaehlt ist.
+  settings_.SetConnector(ResolvedConnector());
   // Und dieselbe Wahrheit noch einmal an den Renderer, der daran entscheidet,
   // ob die kachelweise Interlacing-Erkennung mitreden darf.
   renderer_.SetAnalogueSource(SourceIsAnalogue());

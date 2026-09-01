@@ -55,6 +55,25 @@ enum class ColorMatrix { Auto, BT601, BT709 };
 enum class SignalKind { Auto, Analog, Digital };
 const int kSignalKindCount = 3;
 
+// Which analogue connector the picture arrives on -- and with it, whether the
+// colour rides on a subcarrier inside the brightness or comes in on wires of
+// its own. Half the composite section depends on the answer: dot crawl and
+// rainbow shimmer are not noise, they are the subcarrier itself, and where
+// there is none the filters work on something that is not there.
+//
+// This is asked rather than measured, because it frequently cannot be
+// measured. IAMCrossbar is the documented way and plenty of cards do offer it,
+// but the SA7160 this program was built against does not: its input selector
+// lives in the vendor's own property page, visible on screen and unreadable
+// from outside. So the crossbar answers where there is one, and the person who
+// plugged the cable in answers where there is not.
+//
+// Auto therefore means composite wherever the card stays quiet. That is the
+// connector the filters exist for, and guessing it wrong on a cleaner input
+// costs nothing worse than a few sliders too many.
+enum class AnalogConnector { Auto, Composite, SVideo, Component };
+const int kAnalogConnectorCount = 4;
+
 // Wo der Nutzer wohnt -- und damit, welche Videonormen ueberhaupt in Frage
 // kommen.
 //
@@ -182,6 +201,10 @@ const char* DeinterlaceName(int index);
 const char* FieldOrderName(int index);
 const char* RotationName(int index);
 const char* SignalKindName(int index);
+const char* AnalogConnectorName(int index);
+// Was in der Auswahlliste unter dem Namen steht: woran man den Stecker in der
+// Hand erkennt. Leer fuer Auto, das ist kein Anschluss.
+const char* AnalogConnectorLook(int index);
 const char* VideoRegionName(int index);
 // Was `VideoRegion::Auto` bedeutet: die Region aus der Laendereinstellung von
 // Windows, oder PalEurope, wenn sich daraus nichts machen laesst. Gibt nie
@@ -262,6 +285,8 @@ struct CaptureSettings {
   // whether the decoder locks; anything else is an AnalogVideo_* bitmask.
   long videoStandard = 0;
   SignalKind signalKind = SignalKind::Auto;
+  // Only asked once the source counts as analogue. See AnalogConnector.
+  AnalogConnector connector = AnalogConnector::Auto;
   FormatSel format;
 };
 

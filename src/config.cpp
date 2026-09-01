@@ -70,6 +70,44 @@ const char* SignalKindName(int i) {
   return T(de[i], en[i]);
 }
 
+const char* AnalogConnectorName(int i) {
+  // Der landlaeufige Name zuerst, die Abkuerzung dahinter: wer "FBAS" auf einem
+  // alten Geraet gelesen hat, findet sich sonst nicht wieder, und wer nur "der
+  // gelbe Stecker" kennt, braucht die Beschreibung darunter ohnehin.
+  static const char* de[kAnalogConnectorCount] = {"Automatisch", "Composite (FBAS)", "S-Video",
+                                                  "Component / RGB"};
+  static const char* en[kAnalogConnectorCount] = {"Automatic", "Composite", "S-Video",
+                                                  "Component / RGB"};
+  i = Pick(i, kAnalogConnectorCount);
+  return T(de[i], en[i]);
+}
+
+// Woran der Stecker zu erkennen ist, in einem Satz.
+//
+// Das steht hier und nicht im Hilfetext, weil es die Auswahl selbst ist, die
+// die Frage aufwirft: wer nicht weiss, was er angesteckt hat, kann den Namen
+// nicht waehlen, und ein Hilfezeichen daneben liest er erst, wenn er schon
+// geraten hat. Beschrieben wird deshalb der Stecker in der Hand, nicht das
+// Signal darin.
+const char* AnalogConnectorLook(int i) {
+  static const char* de[kAnalogConnectorCount] = {
+      "",
+      "Ein einzelner gelber Cinch-Stecker, meist neben Rot und Weiß für den Ton.",
+      "Runder schwarzer Stecker mit vier Stiften, etwa fingerdick — wie ein alter "
+      "PS/2-Mausstecker.",
+      "Drei Cinch-Stecker in Grün, Blau und Rot, oft mit Y, Pb, Pr beschriftet — dazu Rot "
+      "und Weiß für den Ton, also fünf. Der blaue VGA-Stecker gehört auch hierher."};
+  static const char* en[kAnalogConnectorCount] = {
+      "",
+      "A single yellow RCA plug, usually beside a red and a white one for audio.",
+      "A round black plug with four pins, about as thick as a finger — like an old PS/2 "
+      "mouse plug.",
+      "Three RCA plugs in green, blue and red, often labelled Y, Pb, Pr — plus red and "
+      "white for audio, so five in all. The blue VGA plug belongs here too."};
+  i = Pick(i, kAnalogConnectorCount);
+  return T(de[i], en[i]);
+}
+
 const char* VideoRegionName(int i) {
   // Die Norm steht in Klammern dahinter, weil das die Angabe ist, die der Code
   // verwendet -- wer weiss, was er hat, findet sich daran wieder; wer es nicht
@@ -449,6 +487,7 @@ json::Value WriteProfile(const Profile& p) {
   cap["crossbarInput"] = p.capture.crossbarInput;
   cap["videoStandard"] = (int)p.capture.videoStandard;
   cap["signalKind"] = (int)p.capture.signalKind;
+  cap["connector"] = (int)p.capture.connector;
   cap["format"] = WriteFormat(p.capture.format);
   o["capture"] = cap;
 
@@ -532,6 +571,12 @@ Profile ReadProfile(const json::Value& v) {
   p.capture.crossbarInput = c["crossbarInput"].AsInt(-1);
   p.capture.videoStandard = (long)c["videoStandard"].AsInt(0);
   p.capture.signalKind = ReadEnum<SignalKind>(c, "signalKind", kSignalKindCount, SignalKind::Auto);
+  // Neu in 3.5. Ein Profil ohne den Schluessel bekommt Auto und verhaelt sich
+  // damit wie vorher -- ein eigener Schluessel statt zusaetzlicher Werte in
+  // signalKind ist genau deshalb gewaehlt: dort haetten sie die gespeicherten
+  // Zahlen verschoben und aus "Digital" stillschweigend "S-Video" gemacht.
+  p.capture.connector =
+      ReadEnum<AnalogConnector>(c, "connector", kAnalogConnectorCount, AnalogConnector::Auto);
   p.capture.format = ReadFormat(c["format"]);
 
   const json::Value& i = v["image"];

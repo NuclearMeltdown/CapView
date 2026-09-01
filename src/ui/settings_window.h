@@ -93,6 +93,11 @@ class SettingsWindow {
   // Whether the running source is being treated as analogue. Decides which of
   // the picture settings are worth showing at all.
   void SetAnalogueSource(bool on) { analogueSource_ = on; }
+  // Welcher Anschluss dabei wirklich gilt -- also mit "Automatisch" schon
+  // aufgeloest. Die Auswahl steht im Reiter Quelle, aber gebraucht wird sie im
+  // Reiter Bild: die halbe Filterkette dort gibt es nur, weil Composite Luma
+  // und Chroma auf einer Leitung fuehrt. Siehe App::ResolvedConnector.
+  void SetConnector(AnalogConnector c) { connector_ = c; }
 
   // Frame rate the card is currently delivering; caps the recording rate.
   void SetSourceFps(double fps) { sourceFps_ = fps; }
@@ -255,6 +260,12 @@ class SettingsWindow {
   StandardSearch standardSearch_ = StandardSearch::Off;
   long liveStandard_ = 0;
   bool analogueSource_ = true;
+  AnalogConnector connector_ = AnalogConnector::Composite;
+  // Kurz fuer "analog *und* auf einer Leitung": nur dann sind die
+  // Composite-Filter ueberhaupt eine Frage.
+  bool CompositeSource() const {
+    return analogueSource_ && connector_ == AnalogConnector::Composite;
+  }
   bool captureRunning_ = false;
   bool deviceConfigRequested_ = false;
   bool cropDetectRequested_ = false;
