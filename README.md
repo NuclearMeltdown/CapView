@@ -21,7 +21,9 @@ It is meant for using a capture card to play. Recording, screenshots, a
 microphone track and a virtual camera are included; scenes, overlays,
 compositing and streaming are not. For those, use OBS. It covers the same ground
 as AmaRecTV, whose last release with a bundled recording codec was version 3.10
-in 2014.
+in 2014 — if you are arriving from it, [Coming from
+AmaRecTV](../../wiki/Coming-from-AmaRecTV) maps each habit onto where it lives
+here.
 
 > **The [wiki](../../wiki) is the detailed documentation** — one page per
 > feature, covering what the code does, why it works that way, and what was
