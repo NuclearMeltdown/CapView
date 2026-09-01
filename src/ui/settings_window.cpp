@@ -949,6 +949,12 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
     if (p.capture.crossbarInput >= 0 &&
         p.capture.crossbarInput < (int)caps.crossbarInputs.size()) {
       current = caps.crossbarInputs[(size_t)p.capture.crossbarInput].name;
+    } else if (caps.currentInput >= 0 && caps.currentInput < (int)caps.crossbarInputs.size()) {
+      // "Nicht ändern" heisst nicht "unbekannt". Wo die Karte sagt, worauf sie
+      // steht, gehoert das dazu -- sonst liest sich die Zeile so, als waere der
+      // Eingang offen, und der Nutzer sucht ihn woanders.
+      current += Format(T(" (Karte steht auf %s)", " (card is on %s)"),
+                        caps.crossbarInputs[(size_t)caps.currentInput].name.c_str());
     }
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##crossbar", current.c_str())) {
@@ -971,7 +977,8 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
 
   // Und was "Automatisch" oben dabei herausbekommen hat. Die Liste oben kann
   // das nicht sagen: sie steht vor der Geraetewahl, und aufgeloest wird erst an
-  // der laufenden Karte -- aus dem Crossbar, wo es einen gibt, sonst Composite.
+  // der laufenden Karte -- aus dem gewaehlten Eingang, sonst aus dem, auf dem
+  // die Karte steht, sonst Composite.
   if (analogueSource_ && p.capture.connector == AnalogConnector::Auto) {
     ImGui::Spacing();
     TextDisabledWrapped(Format(T("Automatisch bedeutet hier: %s.", "Automatic here means: %s."),

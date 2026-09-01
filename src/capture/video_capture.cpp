@@ -165,6 +165,7 @@ DeviceProbeResult VideoCapture::Probe(const DeviceRef& device) {
     graph->ConnectDirect(pin.Get(), static_cast<IPin*>(sink->pin()), nullptr);
   }
   out.crossbarInputs = EnumerateCrossbarInputs(builder.Get(), filter.Get());
+  out.currentInput = CurrentCrossbarInput(builder.Get(), filter.Get());
 
   ComPtr<IAMStreamConfig> config;
   if (SUCCEEDED(pin->QueryInterface(IID_PPV_ARGS(&config)))) {
@@ -358,6 +359,10 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
   if (settings.crossbarInput >= 0 && !capabilities_.crossbarInputs.empty()) {
     RouteCrossbarInput(builder_.Get(), captureFilter_.Get(), settings.crossbarInput);
   }
+  // Read back afterwards, so this says where the card ended up rather than
+  // where it was asked to go -- and says it just as well when it was not asked
+  // at all, which is the case that "Automatisch" needs answered.
+  capabilities_.currentInput = CurrentCrossbarInput(builder_.Get(), captureFilter_.Get());
 
   // No reference clock: with a clock the graph would hold each sample until its
   // presentation time, which is pure added latency for a live preview.
@@ -455,7 +460,9 @@ bool VideoCapture::PumpEvents(std::string* message) {
 
 bool VideoCapture::SetCrossbarInput(int index) {
   if (!builder_ || !captureFilter_) return false;
-  return RouteCrossbarInput(builder_.Get(), captureFilter_.Get(), index);
+  const bool ok = RouteCrossbarInput(builder_.Get(), captureFilter_.Get(), index);
+  capabilities_.currentInput = CurrentCrossbarInput(builder_.Get(), captureFilter_.Get());
+  return ok;
 }
 
 }  // namespace cap
