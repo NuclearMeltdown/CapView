@@ -766,6 +766,13 @@ void CollectGuidsFromTree(const std::string& path, std::set<GUID, GuidLess>& out
   ::FindClose(h);
 }
 
+// How far up the property ids are walked. The vendor's numbering is sparse: the
+// SA7160 answers for a block below 16 and then again at 201 and 255, with more
+// than a hundred and eighty unanswered ids in between. A scan that stops at 64 --
+// as this one first did -- finds the block, misses the two, and reports a card
+// with a switchable input as having none.
+constexpr DWORD kPropertyIdLimit = 1024;
+
 void FindPrivatePropertySets(const std::string& path, const std::string& deviceMatch) {
   std::printf("================ Kandidaten aus den Treiberdateien ================\n");
   std::set<GUID, GuidLess> candidates;
@@ -807,7 +814,7 @@ void FindPrivatePropertySets(const std::string& path, const std::string& deviceM
     // Der Rest des Sets. Ein Set mit vielen Properties ist eher ein echtes als
     // eine GUID, die zufällig durchrutscht.
     std::printf("   Properties:");
-    for (DWORD id = 0; id < 64; ++id) {
+    for (DWORD id = 0; id < kPropertyIdLimit; ++id) {
       DWORD s = 0;
       if (SUCCEEDED(ks->QuerySupported(g, id, &s))) std::printf(" %lu(0x%lX)", id, (unsigned long)s);
     }
@@ -829,7 +836,7 @@ struct PropValue {
 // time until one is accepted.
 std::vector<PropValue> ReadWholeSet(IKsPropertySet* ks, const GUID& setId) {
   std::vector<PropValue> values;
-  for (DWORD id = 0; id < 64; ++id) {
+  for (DWORD id = 0; id < kPropertyIdLimit; ++id) {
     DWORD support = 0;
     if (FAILED(ks->QuerySupported(setId, id, &support))) continue;
     PropValue v;
@@ -942,6 +949,72 @@ void WatchPropertySet(const std::string& guidText, const std::string& deviceMatc
   std::printf("\n");
 }
 
+// The only mode in this file that writes. Read-only was the right default while
+// the shape of a private property was a guess. On the SA7160 it is no longer
+// one: property 201 of the vendor set reads back exactly the value the card's
+// own dialog just wrote, the driver keeps that value under the name
+// AnalogCrossbarVideoInputProperty, and AmaRecTV sets the same id on the same
+// set. What a read cannot answer is whether the driver accepts the write from
+// anyone other than its own property page, and CapView cannot offer an input
+// list until it does. Reads the property, writes, reads it back.
+void SetOneProperty(const std::string& guidText, DWORD id, DWORD value,
+                    const std::string& deviceMatch) {
+  GUID setId{};
+  if (FAILED(::CLSIDFromString(ToWide(guidText).c_str(), &setId))) {
+    std::printf("\"%s\" ist keine GUID.\n", guidText.c_str());
+    return;
+  }
+
+  ComPtr<IBaseFilter> filter;
+  std::string chosen;
+  for (const VideoDeviceInfo& d : EnumerateVideoDevices()) {
+    if (d.name.find(deviceMatch) == std::string::npos) continue;
+    filter = CreateFilterFromMoniker(d);
+    if (filter) {
+      chosen = d.name;
+      break;
+    }
+  }
+  ComPtr<IKsPropertySet> ks;
+  if (!filter || FAILED(filter->QueryInterface(IID_PPV_ARGS(&ks)))) {
+    std::printf("Kein Gerät mit \"%s\" und IKsPropertySet.\n", deviceMatch.c_str());
+    return;
+  }
+
+  std::printf("================ %s [%lu] an %s ================\n", guidText.c_str(),
+              (unsigned long)id, chosen.c_str());
+  DWORD support = 0;
+  const HRESULT hrSupport = ks->QuerySupported(setId, id, &support);
+  if (FAILED(hrSupport)) {
+    std::printf("QuerySupported: 0x%08lX -- die Karte kennt diese Property nicht.\n",
+                (unsigned long)hrSupport);
+    return;
+  }
+  if (!(support & KSPROPERTY_SUPPORT_SET)) {
+    std::printf("Die Property ist nicht schreibbar (support 0x%lX).\n", (unsigned long)support);
+    return;
+  }
+
+  DWORD before = 0;
+  DWORD returned = 0;
+  const bool readable = (support & KSPROPERTY_SUPPORT_GET) &&
+                        SUCCEEDED(ks->Get(setId, id, nullptr, 0, &before, sizeof(before), &returned));
+  if (readable) std::printf("vorher : %lu\n", (unsigned long)before);
+
+  DWORD payload = value;
+  const HRESULT hr = ks->Set(setId, id, nullptr, 0, &payload, sizeof(payload));
+  std::printf("Set(%lu): 0x%08lX%s\n", (unsigned long)value, (unsigned long)hr,
+              SUCCEEDED(hr) ? " (S_OK)" : "");
+
+  if (readable) {
+    DWORD after = 0;
+    returned = 0;
+    if (SUCCEEDED(ks->Get(setId, id, nullptr, 0, &after, sizeof(after), &returned)))
+      std::printf("nachher: %lu\n", (unsigned long)after);
+  }
+  std::printf("\n");
+}
+
 // Reads every property of one set and prints the bytes. Read-only on purpose:
 // the shape of a private property is a guess until something confirms it, and
 // the safe way to confirm it is to read the same property twice with the card
@@ -972,7 +1045,7 @@ void DumpPropertySet(const std::string& guidText, const std::string& deviceMatch
   }
 
   std::printf("================ %s an %s ================\n", guidText.c_str(), chosen.c_str());
-  for (DWORD id = 0; id < 64; ++id) {
+  for (DWORD id = 0; id < kPropertyIdLimit; ++id) {
     DWORD support = 0;
     if (FAILED(ks->QuerySupported(setId, id, &support))) continue;
 
@@ -1076,6 +1149,16 @@ int main(int argc, char** argv) {
       return 1;
     }
     WatchPropertySet(argv[2], argc > 3 ? argv[3] : "SA7160");
+    return 0;
+  }
+
+  if (argc > 1 && std::string(argv[1]) == "propset") {
+    if (argc < 5) {
+      std::printf("Aufruf: capview_probe propset {GUID} <id> <wert> [Gerätename]\n");
+      return 1;
+    }
+    SetOneProperty(argv[2], (DWORD)std::strtoul(argv[3], nullptr, 0),
+                   (DWORD)std::strtoul(argv[4], nullptr, 0), argc > 5 ? argv[5] : "SA7160");
     return 0;
   }
 
