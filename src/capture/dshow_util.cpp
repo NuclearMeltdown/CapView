@@ -416,6 +416,14 @@ std::vector<VideoDeviceInfo> EnumerateAudioCaptureDShowDevices() {
   return EnumerateDShowCategory(CLSID_AudioInputDeviceCategory);
 }
 
+std::vector<VideoDeviceInfo> EnumerateCrossbarDevices() {
+  return EnumerateDShowCategory(AM_KSCATEGORY_CROSSBAR);
+}
+
+std::vector<VideoDeviceInfo> EnumerateDeviceCategory(const GUID& category) {
+  return EnumerateDShowCategory(category);
+}
+
 ComPtr<IBaseFilter> CreateVideoFilter(const DeviceRef& ref, VideoDeviceInfo* resolved) {
   ComPtr<ICreateDevEnum> devEnum;
   if (FAILED(::CoCreateInstance(CLSID_SystemDeviceEnum, nullptr, CLSCTX_INPROC_SERVER,

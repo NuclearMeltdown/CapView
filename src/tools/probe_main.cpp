@@ -411,6 +411,63 @@ void TestInputSelection() {
       }
     }
   }
+
+  // Und dieselbe Frage von der anderen Seite. Bisher wurde nur der Capture-
+  // Filter gefragt und der Graph nach oben abgesucht; ein WDM-Crossbar ist aber
+  // ein eigener Filter in einer eigenen Kategorie, und ob der Graph-Builder ihn
+  // von einem bestimmten Capture-Filter aus findet, ist eine andere Frage als
+  // ob er ueberhaupt existiert. Ein Programm, das die Eingaenge einer Karte
+  // anzeigt, an der CapView "keine umschaltbaren Eingaenge" meldet, muss ihn
+  // irgendwo herhaben.
+  std::printf("\n================ Crossbar-Kategorie ================\n");
+  const std::vector<VideoDeviceInfo> crossbars = EnumerateCrossbarDevices();
+  if (crossbars.empty()) {
+    std::printf("  (kein Crossbar registriert)\n");
+  }
+  for (const VideoDeviceInfo& d : crossbars) {
+    std::printf("\n%s\n    %s\n", d.name.c_str(), d.id.c_str());
+    ComPtr<IBaseFilter> filter = CreateFilterFromMoniker(d);
+    if (!filter) {
+      std::printf("    ! Filter liess sich nicht erzeugen\n");
+      continue;
+    }
+    ComPtr<IAMCrossbar> xbar;
+    if (FAILED(filter->QueryInterface(IID_PPV_ARGS(&xbar)))) {
+      std::printf("    ! kein IAMCrossbar am Filter dieser Kategorie\n");
+      continue;
+    }
+    long outPins = 0, inPins = 0;
+    xbar->get_PinCounts(&outPins, &inPins);
+    std::printf("    IAMCrossbar: %ld Eingaenge, %ld Ausgaenge\n", inPins, outPins);
+    for (long i = 0; i < inPins; ++i) {
+      long related = 0, physType = 0;
+      if (FAILED(xbar->get_CrossbarPinInfo(TRUE, i, &related, &physType))) continue;
+      std::printf("      [%ld] %-22s Typ %ld, verwandter Pin %ld\n", i,
+                  PhysicalConnectorName(physType).c_str(), physType, related);
+    }
+  }
+
+  // Und noch eine Ebene tiefer. EnumerateVideoDevices fragt nach
+  // CLSID_VideoInputDeviceCategory -- das ist die Liste, die jedes
+  // Aufnahmeprogramm zeigt. Ein Treiber registriert seine KS-Filter aber unter
+  // KSCATEGORY_VIDEO und KSCATEGORY_CAPTURE, und die Videoliste ist nur der
+  // Schnitt daraus, den der KS-Proxy nach oben reicht. Weichen die Listen
+  // voneinander ab, gibt es Geraete, die ein Programm sehen kann und ein
+  // anderes nicht -- ohne dass eines von beiden etwas falsch macht.
+  const struct {
+    const char* label;
+    const GUID& id;
+  } kCategories[] = {
+      {"CLSID_VideoInputDeviceCategory", CLSID_VideoInputDeviceCategory},
+      {"KSCATEGORY_VIDEO", AM_KSCATEGORY_VIDEO},
+      {"KSCATEGORY_CAPTURE", AM_KSCATEGORY_CAPTURE},
+  };
+  std::printf("\n================ Geräte je Kategorie ================\n");
+  for (const auto& cat : kCategories) {
+    const std::vector<VideoDeviceInfo> found = EnumerateDeviceCategory(cat.id);
+    std::printf("\n%s -- %zu Gerät(e)\n", cat.label, found.size());
+    for (const VideoDeviceInfo& d : found) std::printf("    %s\n", d.name.c_str());
+  }
   std::printf("\n");
 }
 

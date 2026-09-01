@@ -202,6 +202,19 @@ std::vector<CrossbarInput> EnumerateCrossbarInputs(ICaptureGraphBuilder2* builde
 // Also routes the matching audio input when the crossbar has one.
 bool RouteCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilter, int index);
 
+// Every crossbar the system registers, as its own device rather than as
+// something hanging off a capture filter. A WDM crossbar is a filter in its own
+// right, in its own category, and a driver is free to register one without the
+// graph builder ever finding it from the capture filter. Diagnostic only --
+// nothing in CapView routes through this yet.
+std::vector<VideoDeviceInfo> EnumerateCrossbarDevices();
+
+// Everything registered in one device category, by its GUID. EnumerateVideoDevices
+// asks for CLSID_VideoInputDeviceCategory, which is what every capture program
+// shows; a driver may register KS filters that the category does not surface.
+// Diagnostic only -- the device list still comes from EnumerateVideoDevices.
+std::vector<VideoDeviceInfo> EnumerateDeviceCategory(const GUID& category);
+
 std::string PhysicalConnectorName(long physicalType);
 
 // ---------------------------------------------------------------------------
