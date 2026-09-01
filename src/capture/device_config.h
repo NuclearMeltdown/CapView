@@ -1,8 +1,8 @@
 #pragma once
 
-// The capture driver's own settings dialog -- what AmaRecTV calls "device
-// setting". None of it is ours: the pages come out of the driver and differ
-// from card to card. All we do is find them and put a frame around them.
+// The capture driver's own settings dialog. None of it is ours: the pages come
+// out of the driver and differ from card to card. All we do is find them and
+// put a frame around them.
 
 #include <dshow.h>
 
