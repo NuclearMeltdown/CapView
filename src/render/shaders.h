@@ -89,6 +89,11 @@ cbuffer ConvertCB : register(b0) {
   float gMotionSlack;     // how much movement the temporal gate ignores
   float gMotionSlope;     // and how fast it lets go above that
 
+  int   gMotionComp;      // 1 = follow the movement when averaging noise away
+  int   gAdaptChroma;     // 1 = soften colour only where brightness invites it
+  float gBandwidth;       // 0..1, how much of the rolled off luma band to restore
+  float gPad0;
+
   float4 gCoef;           // Cr->R, Cb->G, Cr->G, Cb->B
 };
 
@@ -518,6 +523,348 @@ float DotDemodDelta(int x, int row) {
   // leaves colour alone, which is the half of the picture this belongs to.
   return -pattern;
 }
+)HLSL"
+R"HLSL(// Brightness averaged over a window exactly one cycle of the subcarrier wide.
+//
+// The width is not a round number and must not be rounded to one. A box of N
+// samples has its first null at 1/N, so a box of exactly gCarrierPeriod samples
+// puts a null precisely on the carrier -- for every standard, without a table.
+// Rounded to three samples it would land on 1/3 of the sampling rate, which is
+// the carrier on PAL and nowhere near it on NTSC, where the period is 3.77.
+//
+// So the two samples at the edge of the window count by however much of them
+// the window actually covers. Everything that uses this wants the same thing
+// from it: the picture with the crawl taken out, and nothing else changed.
+//
+// The loop is bounded by the carrier rather than by a number, and that is not
+// cosmetic either. Written with a constant limit the compiler unrolls it, and
+// every copy carries a pixel format branch and a four way choice of frame with
+// it; with the search below calling this a hundred times over, that took the
+// startup compile from a third of a second to three and a half. Bounded by
+// something out of the constant buffer it has to emit a real loop, which costs
+// nothing at runtime and compiles in a fraction of the time -- the same trade
+// SoftenChroma above is written for.
+float BoxLuma(int x, int row, int frame, float width) {
+  float half = max(width, 2.0) * 0.5;
+  int whole = (int)floor(half - 0.5 + 1e-4);
+  float frac = half - 0.5 - float(whole);
+  float s = LumaFrameAt(int2(x, row), frame);
+  float n = 1.0;
+  for (int k = 1; k <= whole + 1; ++k) {
+    float w = (k <= whole) ? 1.0 : frac;
+    s += (LumaFrameAt(int2(x - k, row), frame) + LumaFrameAt(int2(x + k, row), frame)) * w;
+    n += 2.0 * w;
+  }
+  return s / n;
+}
+
+// ---------------------------------------------------------------------------
+// Following the movement, for the noise the gate above cannot reach.
+//
+// The four frame average only runs where the picture stands still, so in a
+// running game most of the screen gets no temporal filtering at all and keeps
+// every bit of the noise the analogue chain put on it. Averaging along the
+// movement instead of across it fixes that.
+//
+// What it cannot fix is the dot crawl, and that is worth writing down because
+// it looks like it should. The crawl is fixed to the raster, not to the
+// picture: at sample x it carries the phase w*x + phi_f, where phi_f walks the
+// four frame sequence and the four terms sum to zero. Fetch frame f from
+// x - d_f instead and the phase becomes w*x - w*d_f + phi_f, so the sum turns
+// into
+//
+//     sum over f of exp(i*(phi_f - w*d_f))
+//
+// and with a constant velocity d_f = f*v that is a geometric series in
+// exp(i*(pi/2 - w*v)). A geometric series of four terms vanishes only when its
+// ratio is a fourth root of unity other than one, which here means v has to be
+// a multiple of a quarter of the carrier period -- about 0.76 samples a frame
+// on PAL, 0.94 on NTSC. At every other speed motion compensation destroys the
+// very cancellation the average exists for, and at exactly a quarter period it
+// lines all four frames up in phase and removes nothing at all.
+//
+// So the two jobs are separated rather than merged. The co-located average
+// keeps the crawl, exactly as before; this one is band limited to stay out of
+// its way, and what it removes is noise. Noise is the same defect in every
+// colour system, which is why this one knob helps NTSC, PAL, PAL M, PAL N and
+// SECAM alike -- and why the crawl work below it still has to be told which
+// carrier it is looking for.
+//
+// It pays a second time, indirectly: the demodulator estimates how much pattern
+// is present from the pixels in front of it, and noise is what makes that
+// estimate wrong. A cleaner line means a better estimate means less of the
+// picture taken away with the pattern.
+
+// Three points of the line, far enough apart to describe a shape rather than a
+// sample. Taken from the current frame once and handed to every candidate,
+// because recomputing them per candidate was the whole cost.
+float3 MatchPatch(int x, int row, float width) {
+  return float3(BoxLuma(x - 4, row, 0, width), BoxLuma(x, row, 0, width),
+                BoxLuma(x + 4, row, 0, width));
+}
+
+// The mean of the three, so the number means the same thing whatever is asked
+// of it and one threshold can be written down for all of them.
+float MatchCost(float3 cur, int x, int row, int d, int frame, float width) {
+  return (abs(cur.x - BoxLuma(x - 4 - d, row, frame, width))
+        + abs(cur.y - BoxLuma(x - d, row, frame, width))
+        + abs(cur.z - BoxLuma(x + 4 - d, row, frame, width))) * 0.3333333;
+}
+
+// Horizontal only, and by a logarithmic search: start at standing still, then
+// halve the step three times. Seven candidates cover plus or minus seven
+// samples, which at fifty or sixty frames a second is a faster scroll than
+// anything a console produces.
+//
+// Only the nearest frame is searched, and the two behind it are then asked
+// separately whether the answer fits them too. That is one search instead of
+// three, and it is the checking below rather than the search that decides what
+// survives.
+//
+// Both candidates of a pass are measured against the same starting point, not
+// against each other: taking the first improvement and stepping off it turns
+// the search into a greedy walk that can wander away from the minimum it was
+// closing in on.
+int SearchShift(float3 cur, int x, int row, float width, out float cost) {
+  int best = 0;
+  cost = MatchCost(cur, x, row, 0, 1, width);
+  for (int step = 4; step >= 1; step = step >> 1) {
+    int base = best;
+    for (int s = -1; s <= 1; s += 2) {
+      int d = base + s * step;
+      float c = MatchCost(cur, x, row, d, 1, width);
+      if (c < cost) { cost = c; best = d; }
+    }
+  }
+  return best;
+}
+
+// Where a match stops being believable. A mean absolute difference of a
+// smoothed line, so a well matched patch on a noisy signal lands a good deal
+// under a hundredth; by three hundredths there is something in the way that
+// moving the window did not explain, and averaging across it would smear
+// rather than clean.
+static const float kMatchGiveUp = 0.03;
+
+// How much better than standing still a shift has to be before it is believed.
+// The search always returns something, and on a picture that only shivers with
+// noise the something is noise: taking the smallest of seven noisy numbers
+// finds one about a third of the noise below the honest one, every time, and
+// following that lines the noise up and averages it into the picture instead of
+// out of it. The margin is set above that much luck.
+static const float kMatchMargin = 0.005;
+
+// The largest correction this filter may make, per channel. It is here to take
+// noise off a moving picture, and noise is small; a correction bigger than this
+// is not noise but a mismatch, and a mismatch held small is invisible where a
+// mismatch let through whole is a ghost. Every test above can still be fooled
+// by the right piece of picture -- this is the line that decides what being
+// fooled costs.
+static const float kMotionClamp = 0.06;
+
+float3 MotionCompDelta(int x, int row) {
+  float width = max(gCarrierPeriod, 2.0);
+  float3 cur = MatchPatch(x, row, width);
+
+  float still = MatchCost(cur, x, row, 0, 1, width);
+  float cost;
+  int d = SearchShift(cur, x, row, width, cost);
+  if (cost > still - kMatchMargin) return float3(0.0, 0.0, 0.0);
+
+  // Each frame is then asked on its own whether that shift explains it, rather
+  // than the nearest one answering for all three. This is the part that decides
+  // whether the filter cleans a moving picture or damages one.
+  //
+  // The shift is measured between this frame and the last, and carried on as
+  // f*d for the two behind it -- a constant velocity, which is what a scroll is
+  // and what very little else is. On an interlaced source the third frame back
+  // is a tenth of a second old. An object that turns, stops, speeds up, or is
+  // passed in front of by another one is not where f*d says it is, and taken on
+  // trust it arrives as half the output pixel fetched from somewhere else
+  // entirely. That is a trailing ghost, and it lands exactly where the picture
+  // moves, which is the only place this filter runs at all.
+  //
+  // Measuring each frame costs two more cost functions and settles all of it at
+  // once. Acceleration drops the far frames and keeps the near one. Vertical or
+  // diagonal movement has no horizontal shift that fits any frame, so all three
+  // drop -- which is the honest answer, since a horizontal search cannot follow
+  // it. An edge that uncovers background drops whichever frames were still
+  // covered, because there no shift can be right: the pixel was not in them.
+  float3 w;
+  w.x = saturate(1.0 - cost / kMatchGiveUp);
+  w.y = saturate(1.0 - MatchCost(cur, x, row, 2 * d, 2, width) / kMatchGiveUp);
+  w.z = saturate(1.0 - MatchCost(cur, x, row, 3 * d, 3, width) / kMatchGiveUp);
+  float wsum = w.x + w.y + w.z;
+  if (wsum <= 0.0) return float3(0.0, 0.0, 0.0);
+
+  // The correction, smoothed over that same one period window. This is what
+  // keeps the two halves apart: the window's null sits on the carrier, so
+  // nothing this returns can add to or take from the crawl, and neither the
+  // average above nor the demodulator below can be undone by it.
+  float half = width * 0.5;
+  int whole = (int)floor(half - 0.5 + 1e-4);
+  float frac = half - 0.5 - float(whole);
+
+  float3 sum = float3(0.0, 0.0, 0.0);
+  float n = 0.0;
+  for (int k = -(whole + 1); k <= whole + 1; ++k) {
+    float wk = (abs(k) <= whole) ? 1.0 : frac;
+    float3 f0 = FetchRgbAt(int2(x + k, row));
+    float3 acc = f0 + FetchRgbFrame(int2(x + k - d, row), 1) * w.x
+                    + FetchRgbFrame(int2(x + k - 2 * d, row), 2) * w.y
+                    + FetchRgbFrame(int2(x + k - 3 * d, row), 3) * w.z;
+    sum += (acc / (1.0 + wsum) - f0) * wk;
+    n += wk;
+  }
+
+  // And the last word regardless of everything above it: see kMotionClamp.
+  return clamp(sum / max(n, 1e-4), -kMotionClamp, kMotionClamp);
+}
+)HLSL"
+R"HLSL(// ---------------------------------------------------------------------------
+// Putting back the top of the brightness band, which the transmission rolled
+// off and which is therefore known rather than guessed.
+//
+// Composite carries brightness up to where the colour subcarrier sits, and no
+// encoder or decoder has a brick wall there -- both roll off gently towards it,
+// and the decoder's chroma trap takes the rest. That rolloff is the softness a
+// composite picture has and a component one does not, and because its shape
+// follows the carrier it can be undone with a filter built from the carrier.
+//
+// This is not the sharpening on the Scaling section. That one runs after
+// scaling, on whatever size the window happens to be, and raises contrast at
+// edges that are already there -- it makes the picture look sharper. This one
+// runs in the source's own samples with a kernel derived from the standard, and
+// lifts a band of frequencies that the chain actually attenuated.
+//
+// The band is picked out by the difference of two triangular windows: one a
+// carrier period wide, one two. A triangle is a box convolved with itself, so
+// its response is a squared sinc -- it has the same null on the carrier a box
+// of that width has, but a null of second order, and no sidelobe anywhere near
+// it. That is the property this whole pass stands on.
+//
+// It was written with plain boxes first, and that was wrong, in a way worth
+// leaving on the record because the reasoning sounded complete. A box does have
+// a null on the carrier. But dot crawl is not a line at the carrier, it is the
+// chroma band leaking into brightness, and that band is a good megahertz wide
+// on either side of it. A box is only zero at the point: on PAL the lower
+// chroma edge sits at seven tenths of the carrier, and there the difference of
+// two boxes measures 1.13 -- it was more than doubling exactly the thing two
+// filters upstream had just spent their effort removing. With triangles the
+// same point measures 0.24, and everything from eight tenths of the carrier
+// upward is under 0.02. The stopband is a region now instead of a point.
+//
+// An ordinary unsharp mask has neither, rising with frequency all the way to
+// Nyquist, which is the one shape this pass must never have.
+//
+// Horizontal only, and that is not a shortcut. The band limit is a limit along
+// the line. Vertically the picture is limited by how many lines the standard
+// has, which no filter can undo, and reaching vertically would sharpen the line
+// structure and fight the deinterlacer in the pass after this one.
+// `carrier` is what CarrierEnergy below reads at this pixel, computed once in
+// main and handed to whoever needs it.
+float3 BandwidthRestore(float3 rgb, int x, int row, float carrier) {
+  float width = max(gCarrierPeriod, 2.0);
+  float slopeA = 1.0 / width;              // a triangle one carrier period wide
+  float slopeB = 0.5 / width;              // and one of two
+  int r = (int)ceil(2.0 * width);          // where the wider of them dies out
+
+  float y = Luma(rgb);
+  float sa = 0.0, na = 0.0, sb = 0.0, nb = 0.0;
+  float lo = y, hi = y;
+  for (int k = -r; k <= r; ++k) {
+    float l = Luma(FetchRgbAt(int2(x + k, row)));
+    float t = abs(float(k));
+    float wa = max(0.0, 1.0 - t * slopeA);
+    float wb = max(0.0, 1.0 - t * slopeB);
+    // The excursion the limiter goes by is measured over the narrow window
+    // only. Over the wide one it would find the contrast of half a picture
+    // element away and stop limiting anything.
+    if (wa > 0.0) { lo = min(lo, l); hi = max(hi, l); }
+    sa += l * wa;
+    na += wa;
+    sb += l * wb;
+    nb += wb;
+  }
+  float narrow = sa / max(na, 1e-4);
+  float wide = sb / max(nb, 1e-4);
+
+  // At the peak of that band the difference of the two triangles comes to about
+  // 0.52 of the signal, so this puts the top of the slider a little past double
+  // -- past that the limiter below is doing all the work anyway and the slider
+  // would only be lying about its range.
+  float add = (narrow - wide) * gBandwidth * 2.4;
+
+  // And the part the shape of the filter cannot do. The band that composite
+  // rolled off and the band its colour crosstalk lives in are the same band --
+  // that is not a flaw in any particular filter, it is what putting colour on a
+  // brightness carrier means, and no fixed kernel gets round it. So ask what is
+  // actually here: where the line carries energy at the carrier's own frequency
+  // there is no telling detail from crawl, and lifting is a coin toss played
+  // against two filters upstream, so do not lift. Where it does not, the
+  // softness is genuinely rolloff and gets its full lift back.
+  //
+  // This costs nothing in the case it is for. A soft edge is soft precisely
+  // because it has little at the carrier -- that is the same statement twice.
+  add *= 1.0 - carrier;
+
+  // Bounded by how far the picture actually moves around here. An unsharp of
+  // any kind rings at a hard edge, and a game picture is mostly hard edges; a
+  // quarter of the local excursion is the usual ceiling for overshoot and it is
+  // where it stops being visible as a light line beside a dark one.
+  float lim = (hi - lo) * 0.25;
+  add = clamp(add, -lim, lim);
+  return rgb + add;
+}
+
+// ---------------------------------------------------------------------------
+// How much of the brightness right here is sitting at the subcarrier's own
+// frequency -- which is the thing that turns into false colour.
+//
+// The decoder cannot tell dense brightness detail at the carrier from an actual
+// colour. It demodulates whatever is there and paints it, and that is the
+// rainbow over a pinstripe, a dither pattern, a brick wall. So where this reads
+// high the colour is suspect and wants softening; where it reads low the colour
+// is real and softening it only throws detail away.
+//
+// Same detection as the demodulator below, over a shorter window, and it costs
+// one pass rather than two: the local mean is subtracted afterwards instead of
+// beforehand, using the fact that the sum of (l - mean)*cos is the sum of l*cos
+// minus mean times the sum of cos.
+float CarrierEnergy(int x, int row) {
+  const float kTwoPi = 6.28318531;
+  float w = kTwoPi / max(gCarrierPeriod, 1.5);
+  int r = (int)floor(gCarrierPeriod + 0.5);   // two cycles, near enough
+  r = clamp(r, 2, 8);
+
+  float sl = 0.0, nrm = 0.0;
+  float ac = 0.0, aq = 0.0, wc = 0.0, wq = 0.0;
+  for (int k = -8; k <= 8; ++k) {
+    if (abs(k) > r) continue;
+    float hann = 0.5 + 0.5 * cos(3.14159265 * float(k) / float(r + 1));
+    float l = Luma(FetchRgbAt(int2(x + k, row)));
+    float ph = w * float(x + k);
+    float c = cos(ph), s = sin(ph);
+    sl += hann * l;
+    nrm += hann;
+    ac += hann * l * c;
+    aq += hann * l * s;
+    wc += hann * c;
+    wq += hann * s;
+  }
+  if (nrm <= 0.0) return 0.0;
+  float mean = sl / nrm;
+  float re = (ac - mean * wc) / nrm;
+  float im = (aq - mean * wq) / nrm;
+  float mag = 2.0 * sqrt(re * re + im * im);
+
+  // Where that amount of carrier band detail is enough to be worth suspecting
+  // the colour over. A flat area reads near zero; a dithered gradient or a
+  // pinstripe -- the patterns that produce the rainbow in the first place --
+  // reach several hundredths, so a twelvefold scale saturates on exactly the
+  // material this is for and leaves plain pictures alone.
+  return saturate(mag * 12.0);
+}
 
 float4 main(VSOut i) : SV_Target {
   // Source coordinates, already the right way up: FetchRgbAt resolves a bottom
@@ -546,8 +893,42 @@ float4 main(VSOut i) : SV_Target {
     handled = TemporalGate(p.x, p.y) * gTemporal;
     rgb += TemporalDelta(p.x, p.y) * handled;
   }
+
+  // Following the movement, over exactly the part of the picture the average
+  // above has just let go of. The two are complements by construction: this
+  // gets (1 - handled), which is what is moving, and it is band limited away
+  // from the carrier, so the part it does take cannot disturb the crawl work on
+  // either side of it. Where the picture stands still `handled` is one and this
+  // does nothing, which is right -- there the free filter has already won.
+  if (gMotionComp != 0 && gHistCount >= 3) {
+    rgb += MotionCompDelta(p.x, p.y) * (1.0 - handled);
+  }
+
   if (gDotNotch > 0.0) rgb += DotDemodDelta(p.x, p.y) * (1.0 - handled);
-  if (gChromaSoft > 0) rgb = SoftenChroma(rgb, p.x, p.y);
+
+  // One reading of how much of this pixel sits at the carrier's own frequency,
+  // for the two filters below that both want to know. Seventeen taps with a
+  // sine and a cosine in each, so asking twice would be paying twice for the
+  // same answer.
+  float carrier = 0.0;
+  if (gBandwidth > 0.0 || (gChromaSoft > 0 && gAdaptChroma != 0)) {
+    carrier = CarrierEnergy(p.x, p.y);
+  }
+
+  // After all three of those, and not before any of them: the band this lifts
+  // runs up towards the carrier, and the pattern the filters above remove sits
+  // in the top of it. Lifting a picture that still had the pattern in it would
+  // hand them a harder job than they started with.
+  if (gBandwidth > 0.0) rgb = BandwidthRestore(rgb, p.x, p.y, carrier);
+
+  if (gChromaSoft > 0) {
+    float3 soft = SoftenChroma(rgb, p.x, p.y);
+    // Softening the colour only where the brightness carries enough at the
+    // carrier to have invented some of it. Everywhere else the colour is as
+    // real as composite ever gets it, and blurring that sideways is pure loss
+    // -- which is what the slider did at every setting before this.
+    rgb = gAdaptChroma != 0 ? lerp(rgb, soft, carrier) : soft;
+  }
 
   // Out of its curve and into linear light, once per pixel rather than once per
   // fetch -- which is why it sits here and not in FetchRgbIn, where the

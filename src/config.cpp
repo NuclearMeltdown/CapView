@@ -473,6 +473,9 @@ json::Value WriteProfile(const Profile& p) {
   img["temporalDenoise"] = p.image.temporalDenoise;
   img["avoidGhosting"] = p.image.avoidGhosting;
   img["dotNotch"] = p.image.dotNotch;
+  img["motionCompensate"] = p.image.motionCompensate;
+  img["bandwidthRestore"] = p.image.bandwidthRestore;
+  img["adaptiveChroma"] = p.image.adaptiveChroma;
   img["aspect"] = (int)p.image.aspect;
   img["squarePixelOutput"] = p.image.squarePixelOutput;
   img["cropLeft"] = p.image.cropLeft;
@@ -555,6 +558,9 @@ Profile ReadProfile(const json::Value& v) {
   p.image.temporalDenoise = (float)i["temporalDenoise"].AsNumber(0.0);
   p.image.avoidGhosting = i["avoidGhosting"].AsBool(false);
   p.image.dotNotch = (float)i["dotNotch"].AsNumber(0.0);
+  p.image.motionCompensate = i["motionCompensate"].AsBool(false);
+  p.image.bandwidthRestore = (float)Clamp(i["bandwidthRestore"].AsNumber(0.0), 0.0, 1.0);
+  p.image.adaptiveChroma = i["adaptiveChroma"].AsBool(false);
   p.image.aspect = ReadEnum<AspectMode>(i, "aspect", 5, AspectMode::Source);
   p.image.squarePixelOutput = i["squarePixelOutput"].AsBool(true);
   p.image.cropLeft = Clamp(i["cropLeft"].AsInt(0), 0, 16384);

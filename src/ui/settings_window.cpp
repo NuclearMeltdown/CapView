@@ -1592,8 +1592,10 @@ void SettingsWindow::DrawImageTab() {
   if (analogueSource_) {
     ImGui::Spacing();
     ImGui::SeparatorText(T("Composite-Filter", "Composite filter"));
-    ImGui::TextDisabled(T("Gegen die zwei Störungen, die Composite immer mitbringt.",
-                          "Against the two defects composite always brings with it."));
+    ImGui::TextDisabled(T("Gegen das, was Composite immer mitbringt: falsche Farbe, "
+                          "Punktkriechen, Rauschen und einen weichen Bildrand.",
+                          "Against what composite always brings with it: false colour, "
+                          "dot crawl, noise, and a soft top end."));
 
     ImGui::SetNextItemWidth(-260.0f);
     ImGui::SliderInt(T("Farbschimmern", "Colour shimmer"), &img.chromaSoft, 0, 8,
@@ -1604,6 +1606,32 @@ void SettingsWindow::DrawImageTab() {
                  "Farbdetails überträgt.",
                  "Rainbow patterns over fine detail. Blurs colour sideways; sharpness "
                  "stays, because composite carries no fine colour detail anyway."));
+
+    // Kein zweiter Filter, sondern eine Bedingung auf den darüber: derselbe
+    // Weichzeichner, nur nicht mehr überall. Deshalb eingerückt und deshalb
+    // gesperrt, solange der Regler auf null steht -- ohne ihn gibt es nichts
+    // zu bedingen.
+    ImGui::BeginDisabled(img.chromaSoft == 0);
+    ImGui::Indent();
+    bool adaptive = img.adaptiveChroma;
+    if (ImGui::Checkbox(T("Nur wo nötig", "Only where needed"), &adaptive)) {
+      img.adaptiveChroma = adaptive;
+    }
+    ImGui::Unindent();
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    HelpMarker(T("Zeichnet die Farbe nur dort weich, wo die Helligkeit genug auf der "
+                 "Trägerfrequenz trägt, dass der Decoder Farbe erfunden haben kann -- "
+                 "über Dithering, feinen Rastern, Ziegelmauern.\n\n"
+                 "Anderswo bleibt die Farbe so scharf, wie Composite sie überhaupt "
+                 "liefert. Ohne den Haken zahlt das ganze Bild für ein Muster, das nur "
+                 "an wenigen Stellen steht.",
+                 "Softens colour only where the brightness carries enough at the carrier "
+                 "frequency for the decoder to have invented some -- over dithering, fine "
+                 "patterns, brickwork.\n\n"
+                 "Elsewhere the colour stays as sharp as composite ever delivers it. "
+                 "Without this the whole picture pays for a pattern that is only in a few "
+                 "places."));
 
     // Two controls, because they are two different bargains and pretending
     // otherwise hid the more useful one.
@@ -1678,6 +1706,56 @@ void SettingsWindow::DrawImageTab() {
                  "clean, slow parts keep some crawl -- and there the slider below picks "
                  "the work back up."));
 
+    // Die andere Hälfte des Bildes. Der Haken darüber entscheidet, *wo* die
+    // Mittelung loslässt; dieser hier nimmt auf, was sie fallen lässt.
+    //
+    // Bewusst kein Unterpunkt der Mittelung, obwohl er dieselben drei Bilder
+    // liest: er läuft auch ohne sie, weil er etwas anderes tut. Sie löscht das
+    // Kriechen und kann nur stillstehen; er entfernt Rauschen und kann nur
+    // laufen.
+    bool follow = img.motionCompensate;
+    if (ImGui::Checkbox(T("Bewegung folgen", "Follow the movement"), &follow)) {
+      img.motionCompensate = follow;
+    }
+    ImGui::SameLine();
+    HelpMarker(T("Sucht für jeden Punkt, wohin er sich seit den letzten drei Bildern "
+                 "bewegt hat, und mittelt entlang dieser Spur statt quer dazu. Damit "
+                 "verschwindet das analoge Rauschen auch dort, wo sich etwas bewegt -- "
+                 "bisher blieb es dort vollständig stehen.\n\n"
+                 "Gegen Punktkriechen hilft es nicht, und das ist kein Versäumnis: das "
+                 "Muster hängt am Raster, nicht am Bild. Ein verschobenes Bild bringt "
+                 "eine verschobene Trägerphase mit, und die Auslöschung über vier Bilder "
+                 "überlebt nur bei Geschwindigkeiten, die ein Vielfaches einer "
+                 "Viertel-Trägerperiode sind. Deshalb ist dieser Filter auf den Träger "
+                 "gesperrt und rührt das Kriechen weder an noch auf.\n\n"
+                 "Hilft dem Regler darunter indirekt: der schätzt aus den Bildpunkten, "
+                 "wie viel Muster da ist, und Rauschen ist genau das, was diese Schätzung "
+                 "verdirbt.\n\n"
+                 "Jedes der drei Bilder wird einzeln gefragt, ob die gefundene Bewegung "
+                 "auch zu ihm passt; eines, das widerspricht, bleibt draußen. Das ist der "
+                 "Grund, warum ein Objekt, das dreht oder stehenbleibt, keine Spur "
+                 "hinterlässt.\n\n"
+                 "Kostet Rechenzeit auf der Grafikkarte -- etwa so viel wie der Regler "
+                 "darunter.",
+                 "Searches, for every point, where it has moved to over the last three "
+                 "frames, and averages along that trail instead of across it. Analogue "
+                 "noise then goes away where something is moving as well -- until now it "
+                 "stayed there completely.\n\n"
+                 "It does not help against dot crawl, and that is not an omission: the "
+                 "pattern is fixed to the raster, not to the picture. A shifted frame "
+                 "brings a shifted carrier phase with it, and the four frame cancellation "
+                 "only survives at speeds that are a multiple of a quarter of the carrier "
+                 "period. So this filter is notched out at the carrier and neither "
+                 "removes the crawl nor stirs it up.\n\n"
+                 "It helps the slider below indirectly: that one works out how much "
+                 "pattern is present from the pixels in front of it, and noise is exactly "
+                 "what makes that estimate wrong.\n\n"
+                 "Each of the three frames is asked separately whether the movement found "
+                 "fits it too, and one that disagrees is left out. That is why an object "
+                 "that turns or stops leaves no trail behind it.\n\n"
+                 "Costs time on the graphics card -- about as much as the slider "
+                 "below."));
+
     // Stufen statt freiem Lauf: die Zwischenwerte sind ohne Wirkung, und ein
     // Regler, der sich bewegt ohne etwas zu ändern, behauptet etwas Falsches.
     DotCrawlStep steps[16];
@@ -1729,6 +1807,46 @@ void SettingsWindow::DrawImageTab() {
                           removed, softer, window);
       ImGui::Unindent();
     }
+
+    // Steht unter den drei Entstörern, weil es die Gegenrichtung ist: die
+    // nehmen etwas weg, dieser holt etwas zurück. Und es ist die Reihenfolge,
+    // in der der Shader rechnet -- erst das Muster raus, dann das Band hoch,
+    // denn andersherum würde die Anhebung das Muster mit anheben.
+    ImGui::SetNextItemWidth(-260.0f);
+    ImGui::SliderFloat(T("Bandbreite zurückholen", "Restore bandwidth"), &img.bandwidthRestore,
+                       0.0f, 1.0f, "%.2f");
+    ImGui::SameLine();
+    HelpMarker(T("Composite überträgt Helligkeit nur bis zum Farbträger, und beide Enden "
+                 "der Kette laufen schon davor weich aus. Genau dieses Band hebt der "
+                 "Regler wieder an -- keine Kantenanhebung, sondern das, was die "
+                 "Übertragung nachweislich gedämpft hat.\n\n"
+                 "Nicht dasselbe wie \"Schärfen\" unter Skalierung. Das arbeitet nach der "
+                 "Skalierung an der Fenstergröße und macht Kanten kontrastreicher; dieser "
+                 "hier arbeitet in den Bildpunkten der Quelle mit einem Fenster, das aus "
+                 "der Trägerfrequenz gebaut ist.\n\n"
+                 "Um den Träger herum ist er gesperrt, nicht nur genau darauf: Punktkriechen "
+                 "ist kein einzelner Ton, sondern das ganze Farbband, und ein Fenster, das "
+                 "nur im Punkt Null ist, würde die Ränder dieses Bandes kräftig anheben. "
+                 "Dazu hält er sich überall dort zurück, wo die Zeile tatsächlich Energie "
+                 "auf der Trägerfrequenz führt -- dort ist Detail von Kriechen nicht zu "
+                 "unterscheiden.\n\n"
+                 "Nur waagerecht: senkrecht ist das Bild durch die Zeilenzahl begrenzt, "
+                 "und daran ändert kein Filter etwas.",
+                 "Composite carries brightness only up to the colour subcarrier, and both "
+                 "ends of the chain already roll off before it. That is the band this "
+                 "lifts back up -- not edge enhancement, but what the transmission "
+                 "demonstrably attenuated.\n\n"
+                 "Not the same as \"Sharpen\" under Scaling. That works after scaling at "
+                 "the window's size and gives edges more contrast; this works in the "
+                 "source's own samples with a window built from the carrier "
+                 "frequency.\n\n"
+                 "It is blocked around the carrier, not merely on it: dot crawl is not a "
+                 "single tone but the whole colour band, and a window that is zero only at "
+                 "the point would lift the edges of that band hard. On top of that it "
+                 "holds back wherever the line really does carry energy at the carrier "
+                 "frequency -- there, detail and crawl cannot be told apart.\n\n"
+                 "Horizontal only: vertically the picture is limited by the line count, "
+                 "and no filter changes that."));
   }
 
   // Bildröhre. Anzeigeeffekte und keine Signalbearbeitung: sie landen weder in
