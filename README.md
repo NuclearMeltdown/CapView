@@ -258,6 +258,9 @@ More: [Deinterlacing](../../wiki/Deinterlacing).
 
 A composite signal carries colour and brightness on one wire, and the two leak
 into each other: dot crawl along colour edges, rainbow shimmer over fine detail.
+The same wire adds noise to everything and rolls the top of the brightness band
+away towards the subcarrier, which is the softness a composite picture has and a
+component one does not.
 
 Two controls address the dot crawl and hand over to each other. A **four-frame
 average** removes it wherever the picture stands still, at no cost in sharpness;
@@ -273,16 +276,51 @@ across movement is smearing, so this moves the trade rather than removing it:
 held on late, slow low-contrast movement drags a trail; released early, moving
 edges stay clean and slow areas keep some crawl for the demodulator.
 
+**Follow the movement** covers what the average has just let go of. It searches
+the previous frames for where this piece of line went and averages along that
+path instead of across it, so a moving picture gets noise taken off it where
+before it got nothing. It cannot help the dot crawl, and that is a result rather
+than a shortcoming: the crawl is fixed to the raster, not to the picture, so
+following the picture pulls the four frames out of the phase relationship the
+cancellation depends on. It helps the demodulator indirectly instead, since a
+cleaner line is one whose subcarrier content can be measured more accurately.
+Each of the three previous frames is asked separately whether the movement found
+in the nearest one explains it too, and any that disagrees is left out — which is
+what stops an object that turns, stops or is passed in front of from leaving a
+trail behind it.
+
 ![Left: a GameCube over composite with the filter off, dot crawl speckling the gold laurel and the chequered flag. Right: the same frame with the filter on](docs/composite-before-after.png)
 
 Colour shimmer is handled separately, by averaging the colour sideways — which
 composite carries at a quarter of the bandwidth anyway. Each neighbour is
 weighted by how close its colour is to the centre's; an unweighted average
-across a colour edge turns complementary neighbours into grey.
+across a colour edge turns complementary neighbours into grey. **Only where
+needed** narrows that to the places the decoder can actually have invented the
+colour — where the brightness carries energy at the subcarrier's own frequency,
+which is what a pinstripe, a dither pattern or a brick wall does and what a plain
+picture does not. Everywhere else the colour is as real as composite gets it, and
+blurring it sideways is pure loss.
 
-The subcarrier frequency follows from the video standard, so the Source tab
-matters here too. SECAM is not handled by the demodulator; the averaging still
-applies.
+**Restore bandwidth** puts back the band the transmission rolled off. This is not
+the sharpening on the Scaling tab: that one runs after scaling and raises the
+contrast of edges that are already there, while this one runs in the source's own
+samples with a filter built from the subcarrier frequency, and lifts frequencies
+the chain genuinely attenuated. The filter is the difference of two triangular
+windows, one reaching a subcarrier period to each side and one reaching two. A
+triangle is a box convolved with itself, so it places a second-order null on the
+subcarrier with no sidelobe near it — where a plain unsharp mask rises all the way
+to Nyquist and would lift the dot crawl harder than the picture. Because the band
+composite rolled off is also the band its colour crosstalk sits in, which no fixed
+filter can separate, the lift is additionally held back wherever the line does
+carry energy at the subcarrier.
+
+All of it follows from a single number, the subcarrier period measured in samples
+of the line. There is no filter per standard and no table of kernels: every
+window above is derived from that number while the shader runs, which makes them
+right for PAL, PAL 60, NTSC, NTSC 4.43, PAL M and PAL N alike, and right again at
+any source width. The number comes from whichever standard the card is locked to,
+so the Source tab matters here too. SECAM carries its colour differently and is
+approximated; the demodulator does not handle it, the rest does.
 
 More: [The composite filter](../../wiki/The-composite-filter).
 
@@ -558,8 +596,14 @@ More: [ffmpeg](../../wiki/ffmpeg).
 - **The HDR display path is untested on real HDR hardware.** The maths is
   checked against the standards and the tone mapped path is verified; the scRGB
   output has never been run against an HDR monitor.
-- **SECAM dot crawl** is only handled by the temporal half of the composite
-  filter.
+- **SECAM** carries colour as frequency modulation on two subcarriers that
+  alternate line by line, at 4.250 and 4.40625 MHz, and CapView works from a
+  single figure of 4.43362 MHz. The demodulator does not handle SECAM at all;
+  the four-frame average, the noise filter and the bandwidth restore do, the
+  last two with their null landing within 0.6 % of the one carrier and 4.3 % of
+  the other. A second-order null is flat enough around its centre that even the
+  worse of those leaks under a fifth of a percent, so the cost is small — but it
+  is an approximation, and it has not been measured against a SECAM source.
 
 ## Why DirectShow
 
