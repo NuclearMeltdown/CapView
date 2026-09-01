@@ -10,7 +10,10 @@
 #include <ksmedia.h>
 #include <olectl.h>
 
+#include <cctype>
 #include <cstdio>
+#include <cstring>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -672,6 +675,348 @@ void PrintFfmpeg() {
 
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// Finding a driver's private property set.
+//
+// A card whose inputs cannot be switched through IAMCrossbar can still have a
+// selector -- it just lives in a property set the vendor never documented. KS
+// has no call that lists the sets a filter answers to, but it has one that
+// answers for a single set at a time and changes nothing: QuerySupported. The
+// discriminator is the error. A set the filter does not know returns
+// ERROR_SET_NOT_FOUND; a set it does know returns S_OK, or an error about the
+// property rather than about the set.
+//
+// So the candidates come from the driver's own binaries. A property set GUID
+// is a 16-byte constant in whatever module uses it, and a GUID is recognisable
+// on sight: the version nibble is 1..5 and the top variant bits are 10. That
+// leaves a lot of false positives in a few megabytes, which costs nothing --
+// each one is a single fast ioctl, and only what answers gets printed.
+
+struct GuidLess {
+  bool operator()(const GUID& a, const GUID& b) const {
+    return std::memcmp(&a, &b, sizeof(GUID)) < 0;
+  }
+};
+
+std::string GuidText(const GUID& g) {
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+                (unsigned long)g.Data1, g.Data2, g.Data3, g.Data4[0], g.Data4[1], g.Data4[2],
+                g.Data4[3], g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+  return buf;
+}
+
+void CollectGuidsFromFile(const std::string& path, std::set<GUID, GuidLess>& out) {
+  std::FILE* f = nullptr;
+  if (::fopen_s(&f, path.c_str(), "rb") != 0 || !f) return;
+  std::fseek(f, 0, SEEK_END);
+  const long size = std::ftell(f);
+  std::fseek(f, 0, SEEK_SET);
+  if (size <= (long)sizeof(GUID)) {
+    std::fclose(f);
+    return;
+  }
+  std::vector<unsigned char> blob((size_t)size);
+  const size_t read = std::fread(blob.data(), 1, blob.size(), f);
+  std::fclose(f);
+  blob.resize(read);
+
+  size_t before = out.size();
+  for (size_t off = 0; off + sizeof(GUID) <= blob.size(); off += 4) {
+    GUID g;
+    std::memcpy(&g, blob.data() + off, sizeof(GUID));
+    if (g.Data1 == 0 && g.Data2 == 0 && g.Data3 == 0) continue;
+    const unsigned version = (g.Data3 >> 12) & 0xFu;
+    if (version < 1 || version > 5) continue;
+    if ((g.Data4[0] & 0xC0) != 0x80) continue;
+    out.insert(g);
+  }
+  std::printf("  %-52s %6zu neue Kandidaten\n", path.c_str(), out.size() - before);
+}
+
+void CollectGuidsFromTree(const std::string& path, std::set<GUID, GuidLess>& out) {
+  const DWORD attr = ::GetFileAttributesA(path.c_str());
+  if (attr == INVALID_FILE_ATTRIBUTES) {
+    std::printf("  ! %s gibt es nicht\n", path.c_str());
+    return;
+  }
+  if (!(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+    CollectGuidsFromFile(path, out);
+    return;
+  }
+  WIN32_FIND_DATAA fd{};
+  HANDLE h = ::FindFirstFileA((path + "\\*").c_str(), &fd);
+  if (h == INVALID_HANDLE_VALUE) return;
+  do {
+    const std::string name = fd.cFileName;
+    if (name == "." || name == "..") continue;
+    const std::string child = path + "\\" + name;
+    if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+      CollectGuidsFromTree(child, out);
+      continue;
+    }
+    // Only the parts that talk to the hardware. The installer and the PDFs
+    // would just add noise.
+    const size_t dot = name.find_last_of('.');
+    if (dot == std::string::npos) continue;
+    std::string ext = name.substr(dot);
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    if (ext == ".ax" || ext == ".sys" || ext == ".dll") CollectGuidsFromFile(child, out);
+  } while (::FindNextFileA(h, &fd));
+  ::FindClose(h);
+}
+
+void FindPrivatePropertySets(const std::string& path, const std::string& deviceMatch) {
+  std::printf("================ Kandidaten aus den Treiberdateien ================\n");
+  std::set<GUID, GuidLess> candidates;
+  CollectGuidsFromTree(path, candidates);
+  std::printf("  ---\n  %zu verschiedene GUID-Kandidaten\n\n", candidates.size());
+  if (candidates.empty()) return;
+
+  ComPtr<IBaseFilter> filter;
+  std::string chosen;
+  for (const VideoDeviceInfo& d : EnumerateVideoDevices()) {
+    if (d.name.find(deviceMatch) == std::string::npos) continue;
+    filter = CreateFilterFromMoniker(d);
+    if (filter) {
+      chosen = d.name;
+      break;
+    }
+  }
+  if (!filter) {
+    std::printf("Kein Videogerät gefunden, dessen Name \"%s\" enthält.\n", deviceMatch.c_str());
+    return;
+  }
+
+  ComPtr<IKsPropertySet> ks;
+  if (FAILED(filter->QueryInterface(IID_PPV_ARGS(&ks)))) {
+    std::printf("%s hat kein IKsPropertySet.\n", chosen.c_str());
+    return;
+  }
+
+  std::printf("================ Was %s beantwortet ================\n", chosen.c_str());
+  const HRESULT kNoSuchSet = HRESULT_FROM_WIN32(ERROR_SET_NOT_FOUND);
+  size_t hits = 0;
+  for (const GUID& g : candidates) {
+    DWORD support = 0;
+    const HRESULT hr = ks->QuerySupported(g, 0, &support);
+    if (hr == kNoSuchSet) continue;  // Das ist die überwältigende Mehrheit.
+    ++hits;
+    std::printf("\n%s  Property 0: 0x%08lX (support 0x%lX)\n", GuidText(g).c_str(),
+                (unsigned long)hr, (unsigned long)support);
+    // Der Rest des Sets. Ein Set mit vielen Properties ist eher ein echtes als
+    // eine GUID, die zufällig durchrutscht.
+    std::printf("   Properties:");
+    for (DWORD id = 0; id < 64; ++id) {
+      DWORD s = 0;
+      if (SUCCEEDED(ks->QuerySupported(g, id, &s))) std::printf(" %lu(0x%lX)", id, (unsigned long)s);
+    }
+    std::printf("\n");
+  }
+  if (hits == 0) std::printf("  (keiner der Kandidaten wird beantwortet)\n");
+  std::printf("\n");
+}
+
+struct PropValue {
+  DWORD id = 0;
+  DWORD support = 0;
+  bool readable = false;
+  std::vector<unsigned char> bytes;
+};
+
+// Every readable property of one set, with the size the driver reports. The
+// size is unknown up front, so it is found by asking with a bigger buffer each
+// time until one is accepted.
+std::vector<PropValue> ReadWholeSet(IKsPropertySet* ks, const GUID& setId) {
+  std::vector<PropValue> values;
+  for (DWORD id = 0; id < 64; ++id) {
+    DWORD support = 0;
+    if (FAILED(ks->QuerySupported(setId, id, &support))) continue;
+    PropValue v;
+    v.id = id;
+    v.support = support;
+    if (support & KSPROPERTY_SUPPORT_GET) {
+      unsigned char buf[512];
+      for (size_t size : {(size_t)4, (size_t)8, (size_t)16, (size_t)32, (size_t)64, (size_t)128,
+                          (size_t)256, sizeof(buf)}) {
+        std::memset(buf, 0, sizeof(buf));
+        DWORD returned = 0;
+        if (SUCCEEDED(ks->Get(setId, id, nullptr, 0, buf, (ULONG)size, &returned))) {
+          const size_t take = returned ? (size_t)returned : size;
+          v.bytes.assign(buf, buf + (take < sizeof(buf) ? take : sizeof(buf)));
+          v.readable = true;
+          break;
+        }
+      }
+    }
+    values.push_back(std::move(v));
+  }
+  return values;
+}
+
+std::string BytesText(const std::vector<unsigned char>& b) {
+  std::string out;
+  char cell[8];
+  for (size_t i = 0; i < b.size() && i < 32; ++i) {
+    std::snprintf(cell, sizeof(cell), "%02X ", b[i]);
+    out += cell;
+  }
+  if (b.size() >= 4) {
+    DWORD d = 0;
+    std::memcpy(&d, b.data(), sizeof(d));
+    std::snprintf(cell, sizeof(cell), "%lu", (unsigned long)d);
+    out += "(= ";
+    out += cell;
+    out += ")";
+  }
+  return out;
+}
+
+// Reads a set, hands the card's own dialog to the user, and reads it again.
+// Which property carries the input selector is a guess until something moves
+// it; the driver's own property page moves it without anyone having to know
+// its shape, and the diff says which one it was. Nothing here writes.
+void WatchPropertySet(const std::string& guidText, const std::string& deviceMatch) {
+  GUID setId{};
+  if (FAILED(::CLSIDFromString(ToWide(guidText).c_str(), &setId))) {
+    std::printf("\"%s\" ist keine GUID.\n", guidText.c_str());
+    return;
+  }
+
+  ComPtr<IBaseFilter> filter;
+  std::string chosen;
+  for (const VideoDeviceInfo& d : EnumerateVideoDevices()) {
+    if (d.name.find(deviceMatch) == std::string::npos) continue;
+    filter = CreateFilterFromMoniker(d);
+    if (filter) {
+      chosen = d.name;
+      break;
+    }
+  }
+  ComPtr<IKsPropertySet> ks;
+  if (!filter || FAILED(filter->QueryInterface(IID_PPV_ARGS(&ks)))) {
+    std::printf("Kein Gerät mit \"%s\" und IKsPropertySet.\n", deviceMatch.c_str());
+    return;
+  }
+
+  std::vector<GUID> pages;
+  ComPtr<ISpecifyPropertyPages> spec;
+  CAUUID ca = {};
+  if (FAILED(filter->QueryInterface(IID_PPV_ARGS(&spec))) || FAILED(spec->GetPages(&ca))) {
+    std::printf("%s bietet keine Konfigurationsseiten an.\n", chosen.c_str());
+    return;
+  }
+  for (ULONG i = 0; i < ca.cElems; ++i) pages.push_back(ca.pElems[i]);
+  if (ca.pElems) ::CoTaskMemFree(ca.pElems);
+
+  const std::vector<PropValue> before = ReadWholeSet(ks.Get(), setId);
+  std::printf("================ %s an %s ================\n", guidText.c_str(), chosen.c_str());
+  std::printf("Vorher gelesen: %zu Properties.\n\n", before.size());
+  std::printf("Der Kartendialog geht jetzt auf. Stell den Eingang um und mach ihn zu.\n");
+  std::fflush(stdout);
+
+  IUnknown* object = filter.Get();
+  std::thread worker([&]() {
+    ::OleInitialize(nullptr);
+    ::OleCreatePropertyFrame(nullptr, 0, 0, L"Karte", 1, &object, (ULONG)pages.size(), pages.data(),
+                             0, 0, nullptr);
+    ::OleUninitialize();
+  });
+  worker.join();
+
+  const std::vector<PropValue> after = ReadWholeSet(ks.Get(), setId);
+  std::printf("\n================ Was sich geändert hat ================\n");
+  size_t moved = 0;
+  for (const PropValue& a : after) {
+    for (const PropValue& b : before) {
+      if (b.id != a.id) continue;
+      if (b.bytes == a.bytes) break;
+      ++moved;
+      std::printf("\n[%2lu] %s\n     vorher : %s\n     nachher: %s\n", (unsigned long)a.id,
+                  (a.support & KSPROPERTY_SUPPORT_SET) ? "lesen schreiben" : "nur lesen",
+                  BytesText(b.bytes).c_str(), BytesText(a.bytes).c_str());
+      break;
+    }
+  }
+  if (moved == 0) std::printf("  (nichts)\n");
+  std::printf("\n");
+}
+
+// Reads every property of one set and prints the bytes. Read-only on purpose:
+// the shape of a private property is a guess until something confirms it, and
+// the safe way to confirm it is to read the same property twice with the card
+// on two different inputs and see which byte moved.
+void DumpPropertySet(const std::string& guidText, const std::string& deviceMatch) {
+  GUID setId{};
+  const std::wstring wide = ToWide(guidText);
+  if (FAILED(::CLSIDFromString(wide.c_str(), &setId))) {
+    std::printf("\"%s\" ist keine GUID. Erwartet wird {........-....-....-....-............}\n",
+                guidText.c_str());
+    return;
+  }
+
+  ComPtr<IBaseFilter> filter;
+  std::string chosen;
+  for (const VideoDeviceInfo& d : EnumerateVideoDevices()) {
+    if (d.name.find(deviceMatch) == std::string::npos) continue;
+    filter = CreateFilterFromMoniker(d);
+    if (filter) {
+      chosen = d.name;
+      break;
+    }
+  }
+  ComPtr<IKsPropertySet> ks;
+  if (!filter || FAILED(filter->QueryInterface(IID_PPV_ARGS(&ks)))) {
+    std::printf("Kein Gerät mit \"%s\" und IKsPropertySet.\n", deviceMatch.c_str());
+    return;
+  }
+
+  std::printf("================ %s an %s ================\n", guidText.c_str(), chosen.c_str());
+  for (DWORD id = 0; id < 64; ++id) {
+    DWORD support = 0;
+    if (FAILED(ks->QuerySupported(setId, id, &support))) continue;
+
+    std::printf("\n[%2lu] %s%s", (unsigned long)id, (support & KSPROPERTY_SUPPORT_GET) ? "lesen " : "",
+                (support & KSPROPERTY_SUPPORT_SET) ? "schreiben" : "");
+    if (!(support & KSPROPERTY_SUPPORT_GET)) {
+      std::printf("\n     (nicht lesbar)\n");
+      continue;
+    }
+
+    // Die Groesse ist unbekannt, also wird sie ausprobiert. Der erste Aufruf,
+    // der nicht ueber zu wenig Platz klagt, hat sie.
+    unsigned char buf[512];
+    DWORD returned = 0;
+    HRESULT hr = E_FAIL;
+    size_t used = 0;
+    for (size_t size : {(size_t)4, (size_t)8, (size_t)16, (size_t)32, (size_t)64, (size_t)128,
+                        (size_t)256, sizeof(buf)}) {
+      std::memset(buf, 0, sizeof(buf));
+      returned = 0;
+      hr = ks->Get(setId, id, nullptr, 0, buf, (ULONG)size, &returned);
+      if (SUCCEEDED(hr)) {
+        used = size;
+        break;
+      }
+    }
+    if (FAILED(hr)) {
+      std::printf("\n     Get: 0x%08lX\n", (unsigned long)hr);
+      continue;
+    }
+
+    const DWORD show = returned ? returned : (DWORD)used;
+    std::printf(", %lu Byte\n     ", (unsigned long)show);
+    for (DWORD i = 0; i < show && i < 64; ++i) std::printf("%02X ", buf[i]);
+    if (show >= 4) {
+      DWORD asDword = 0;
+      std::memcpy(&asDword, buf, sizeof(asDword));
+      std::printf("\n     als DWORD: %lu", (unsigned long)asDword);
+    }
+    std::printf("\n");
+  }
+  std::printf("\n");
+}
+
 int main(int argc, char** argv) {
   ::SetConsoleOutputCP(CP_UTF8);
   ComScope com(COINIT_MULTITHREADED);
@@ -704,6 +1049,33 @@ int main(int argc, char** argv) {
 
   if (argc > 1 && std::string(argv[1]) == "pages") {
     TestPropertyPages();
+    return 0;
+  }
+
+  if (argc > 1 && std::string(argv[1]) == "propsets") {
+    if (argc < 3) {
+      std::printf("Aufruf: capview_probe propsets <Treiberdatei oder -ordner> [Gerätename]\n");
+      return 1;
+    }
+    FindPrivatePropertySets(argv[2], argc > 3 ? argv[3] : "SA7160");
+    return 0;
+  }
+
+  if (argc > 1 && std::string(argv[1]) == "propget") {
+    if (argc < 3) {
+      std::printf("Aufruf: capview_probe propget {GUID} [Gerätename]\n");
+      return 1;
+    }
+    DumpPropertySet(argv[2], argc > 3 ? argv[3] : "SA7160");
+    return 0;
+  }
+
+  if (argc > 1 && std::string(argv[1]) == "propwatch") {
+    if (argc < 3) {
+      std::printf("Aufruf: capview_probe propwatch {GUID} [Gerätename]\n");
+      return 1;
+    }
+    WatchPropertySet(argv[2], argc > 3 ? argv[3] : "SA7160");
     return 0;
   }
 
