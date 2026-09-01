@@ -672,13 +672,3 @@ may consider it more useful to permit linking proprietary applications with
 the library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.  But first, please read
 <https://www.gnu.org/licenses/why-not-lgpl.html>.
-
-
-
---------------------------------------------------------------------------
-Third-party components
---------------------------------------------------------------------------
-
-Dear ImGui (third_party/imgui) — Copyright (c) 2014-2025 Omar Cornut,
-MIT License. Its own LICENSE.txt ships alongside the sources and its copyright
-notice must be preserved.

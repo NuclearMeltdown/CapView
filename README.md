@@ -615,7 +615,8 @@ Foundation enumerates three.
 
 ## Licence
 
-CapView is [GPLv3](LICENSE) licensed. Dear ImGui is MIT licensed.
+CapView is [GPLv3](LICENSE) licensed. Dear ImGui is MIT licensed; the
+components and their terms are listed in [THIRD-PARTY.md](THIRD-PARTY.md).
 
 ffmpeg is a separate program, downloaded from upstream and executed as a child
 process. The usual Windows builds contain x264 and x265 and are therefore GPL
