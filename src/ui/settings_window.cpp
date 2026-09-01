@@ -684,17 +684,41 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
   // there is nothing to read. Saying so is left to the person who plugged the
   // cable in, and everything that only makes sense for one of the two follows
   // from it.
+  //
+  // Eine Liste und nicht zwei. Analog-oder-digital und welches Kabel sind
+  // technisch zwei Fragen, aber niemand hat sie je getrennt beantwortet: wer
+  // "Composite" sagt, hat "analog" schon gesagt. Zwei Auswahllisten
+  // uebereinander, von denen die zweite nur manchmal erscheint, waren dieselbe
+  // Auskunft in zwei Zuegen. Die Umrechnung auf die zwei gespeicherten
+  // Schluessel steht in SignalInputIndex / SignalInputApply.
   {
-    int kind = (int)p.capture.signalKind;
+    int input = SignalInputIndex(p.capture.signalKind, p.capture.connector);
     ImGui::SetNextItemWidth(-260.0f);
-    if (ComboEnum(T("Signalart", "Signal type"), &kind, kSignalKindCount, SignalKindName)) {
-      p.capture.signalKind = (SignalKind)kind;
+    if (ComboEnum(T("Eingang", "Input"), &input, kSignalInputCount, SignalInputName,
+                  SignalInputLook)) {
+      SignalInputApply(input, &p.capture.signalKind, &p.capture.connector);
     }
     ImGui::SameLine();
-    HelpMarker(T("Blendet aus, was für die andere Art keinen Sinn ergibt. Automatisch "
-                 "heißt: analog, wenn die Karte einen Analogdecoder hat.",
-                 "Hides what makes no sense for the other kind. Automatic means analogue "
-                 "when the card has an analogue decoder."));
+    HelpMarker(
+        T("Was hinten an der Karte steckt. Die Karte verrät es nicht — der Eingangswähler "
+          "vieler Karten ist von außen nicht lesbar, sondern nur in ihrem eigenen Dialog "
+          "zu sehen.\n\n"
+          "Davon hängt ab, was überhaupt erscheint: eine Videonorm gibt es nur analog, und "
+          "die Composite-Filter räumen Fehler weg, die es nur gibt, wenn Helligkeit und "
+          "Farbe durch dieselbe Leitung laufen.\n\n"
+          "Wer nicht weiß, welches Kabel er hat: die Liste beschreibt jeden Stecker, einfach "
+          "darüberfahren.",
+          "What is plugged into the card. The card does not say — on many cards the input "
+          "selector cannot be read from outside at all, only seen in their own dialog.\n\n"
+          "It decides what appears at all: a video standard exists only on analogue inputs, "
+          "and the composite filters clean up faults that only exist when brightness and "
+          "colour share one wire.\n\n"
+          "If you do not know which cable you have, hover the entries — each one describes "
+          "the plug."));
+    // Und dieselbe Beschreibung noch einmal fest darunter. Der Tooltip hilft
+    // dem, der schon sucht; hier steht sie fuer den, der die Liste gar nicht
+    // erst aufklappt, weil er nicht weiss, dass die Frage ihn betrifft.
+    TextDisabledWrapped(SignalInputLook(input));
   }
 
   const char* preview = p.capture.video.name.empty()
@@ -945,59 +969,14 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
                  "Which physical connector is captured."));
   }
 
-  // ---- welches Kabel ----
-  //
-  // Gefragt statt gemessen, und das ist kein Versaeumnis. Der Crossbar waere
-  // die Auskunft, und genau der fehlt auf der Karte, an der CapView entwickelt
-  // wird: ihr Eingangswaehler steckt allein im Dialog des Treibers, hinter
-  // einem eigenen KS-Property-Set ohne dokumentierte Form. Die Zeile darueber,
-  // "Diese Karte hat keine umschaltbaren Eingänge", ist derselbe Befund.
-  //
-  // Es geht dabei nicht um Kosmetik: an dieser Antwort haengt die halbe
-  // Filterkette im Reiter Bild. Dot Crawl, Rainbow, die Bandbreitenkorrektur --
-  // alle drei behandeln Schaeden, die entstehen, weil Composite Helligkeit und
-  // Farbe durch eine Leitung schickt. Auf S-Video sind es zwei Leitungen, auf
-  // Component drei, und dann behandeln diese Regler einen Schaden, den es nicht
-  // gibt. Siehe App::EffectiveImage.
-  if (analogueSource_) {
+  // Und was "Automatisch" oben dabei herausbekommen hat. Die Liste oben kann
+  // das nicht sagen: sie steht vor der Geraetewahl, und aufgeloest wird erst an
+  // der laufenden Karte -- aus dem Crossbar, wo es einen gibt, sonst Composite.
+  if (analogueSource_ && p.capture.connector == AnalogConnector::Auto) {
     ImGui::Spacing();
-    int conn = (int)p.capture.connector;
-    ImGui::SetNextItemWidth(-260.0f);
-    if (ComboEnum(T("Angeschlossenes Kabel", "Cable in use"), &conn, kAnalogConnectorCount,
-                  AnalogConnectorName, AnalogConnectorLook)) {
-      p.capture.connector = (AnalogConnector)conn;
-    }
-    ImGui::SameLine();
-    HelpMarker(
-        T("Die Karte verrät nicht, was bei ihr eingesteckt ist — deshalb die Frage. Davon "
-          "hängt ab, welche Bildfilter überhaupt erscheinen: die Composite-Filter räumen "
-          "Fehler weg, die es nur gibt, wenn Helligkeit und Farbe durch dieselbe Leitung "
-          "laufen.\n\nWer es nicht weiß: die Liste beschreibt jeden Stecker, einfach "
-          "darüberfahren.",
-          "The card does not say what is plugged into it, hence the question. It decides "
-          "which picture filters appear at all: the composite filters clean up faults that "
-          "only exist when luma and chroma share one wire.\n\nIf you are not sure, hover the "
-          "entries — each one describes the plug."));
-
-    // Und dieselbe Beschreibung noch einmal fest unter der Auswahl. Der
-    // Tooltip in der Liste hilft dem, der schon sucht; hier steht sie fuer
-    // den, der die Liste gar nicht erst aufklappt, weil er nicht weiss, dass
-    // die Frage ihn betrifft.
-    if (p.capture.connector == AnalogConnector::Auto) {
-      // Aufgeloest heisst hier: aus dem Crossbar gelesen, wo es einen gibt,
-      // sonst Composite. Was dabei herauskommt, ist die einzige Auskunft, die
-      // "Automatisch" geben kann -- und der Blindwert darunter ist der, der
-      // die Regler zeigt statt sie zu verstecken.
-      ImGui::Spacing();
-      TextDisabledWrapped(Format(T("Automatisch heißt hier: %s. %s",
-                                   "Automatic here means: %s. %s"),
-                                 AnalogConnectorName((int)connector_),
-                                 AnalogConnectorLook((int)connector_))
-                              .c_str());
-    } else {
-      ImGui::Spacing();
-      TextDisabledWrapped(AnalogConnectorLook((int)p.capture.connector));
-    }
+    TextDisabledWrapped(Format(T("Automatisch bedeutet hier: %s.", "Automatic here means: %s."),
+                               AnalogConnectorName((int)connector_))
+                            .c_str());
   }
 
   // ---- audio source ----

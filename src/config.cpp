@@ -108,6 +108,79 @@ const char* AnalogConnectorLook(int i) {
   return T(de[i], en[i]);
 }
 
+// Die zusammengelegte Liste. Vier analoge Eintraege plus Digital, in der
+// Reihenfolge, in der jemand sie sucht: erst "entscheide du", dann das Kabel.
+const char* SignalInputName(int i) {
+  static const char* de[kSignalInputCount] = {"Automatisch", "Composite (FBAS)", "S-Video",
+                                              "Component / RGB", "Digital (HDMI, DVI, SDI)"};
+  static const char* en[kSignalInputCount] = {"Automatic", "Composite", "S-Video",
+                                              "Component / RGB", "Digital (HDMI, DVI, SDI)"};
+  i = Pick(i, kSignalInputCount);
+  return T(de[i], en[i]);
+}
+
+const char* SignalInputLook(int i) {
+  // Automatisch beschreibt keinen Stecker, sondern was ohne Antwort geschieht;
+  // Digital beschreibt einen, der keine Wahl mehr laesst.
+  static const char* de[kSignalInputCount] = {
+      "Analog, sobald die Karte einen Analogdecoder hat. Welches Kabel, kommt aus dem "
+      "Eingangswähler der Karte — und wo es den nicht gibt, wird Composite angenommen.",
+      "Ein einzelner gelber Cinch-Stecker, meist neben Rot und Weiß für den Ton.",
+      "Runder schwarzer Stecker mit vier Stiften, etwa fingerdick — wie ein alter "
+      "PS/2-Mausstecker.",
+      "Drei Cinch-Stecker in Grün, Blau und Rot, oft mit Y, Pb, Pr beschriftet — dazu Rot "
+      "und Weiß für den Ton, also fünf. Der blaue VGA-Stecker gehört auch hierher.",
+      "Ein einzelner digitaler Stecker: HDMI, DVI oder SDI. Kein Farbträger, keine "
+      "Videonorm, keine Analogfilter."};
+  static const char* en[kSignalInputCount] = {
+      "Analogue as soon as the card has an analogue decoder. Which cable comes from the "
+      "card's input selector — and where there is none, composite is assumed.",
+      "A single yellow RCA plug, usually beside a red and a white one for audio.",
+      "A round black plug with four pins, about as thick as a finger — like an old PS/2 "
+      "mouse plug.",
+      "Three RCA plugs in green, blue and red, often labelled Y, Pb, Pr — plus red and "
+      "white for audio, so five in all. The blue VGA plug belongs here too.",
+      "A single digital plug: HDMI, DVI or SDI. No colour subcarrier, no video standard, no "
+      "analogue filters."};
+  i = Pick(i, kSignalInputCount);
+  return T(de[i], en[i]);
+}
+
+int SignalInputIndex(SignalKind kind, AnalogConnector connector) {
+  if (kind == SignalKind::Digital) return 4;
+  switch (connector) {
+    case AnalogConnector::Composite:
+      return 1;
+    case AnalogConnector::SVideo:
+      return 2;
+    case AnalogConnector::Component:
+      return 3;
+    default:
+      break;
+  }
+  // Bleibt: kein Kabel genannt. Das ist Automatisch -- auch dann, wenn daneben
+  // ausdruecklich "Analog" steht, wie in jedem Profil von vor der
+  // Zusammenlegung. Die beiden sind dort dasselbe: Automatisch heisst analog,
+  // sobald die Karte einen Decoder hat, und ohne Decoder gibt es nichts zu
+  // erzwingen. Der Eintrag verschwindet damit, ohne dass eine Einstellung
+  // umkippt.
+  return 0;
+}
+
+void SignalInputApply(int index, SignalKind* kind, AnalogConnector* connector) {
+  index = Pick(index, kSignalInputCount);
+  if (index == 4) {
+    *kind = SignalKind::Digital;
+    // Das Kabel bleibt stehen, statt zurueckgesetzt zu werden: wer kurz auf
+    // Digital schaut und zurueckgeht, findet seine Antwort wieder.
+    return;
+  }
+  *kind = index == 0 ? SignalKind::Auto : SignalKind::Analog;
+  static const AnalogConnector map[4] = {AnalogConnector::Auto, AnalogConnector::Composite,
+                                         AnalogConnector::SVideo, AnalogConnector::Component};
+  *connector = map[index];
+}
+
 const char* VideoRegionName(int i) {
   // Die Norm steht in Klammern dahinter, weil das die Angabe ist, die der Code
   // verwendet -- wer weiss, was er hat, findet sich daran wieder; wer es nicht
