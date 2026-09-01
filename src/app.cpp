@@ -1928,6 +1928,13 @@ void App::UpdateVideoStandard() {
     // gemerkt, wenn gar nicht gesucht wurde: eine Norm, die von selbst
     // eingerastet ist, ist genauso ein guter Hinweis wie eine gefundene.
     standardLastGood_ = capture_.currentStandard();
+    // Und der Farbtraeger dazu, weil er allein an der Norm haengt und die genau
+    // hier neu ist. Der Neubau darunter setzt ihn auch, laeuft aber nur, wenn
+    // eine Suche lief; rastet die Karte von sich aus auf etwas anderes ein,
+    // rechneten die Composite-Filter sonst weiter mit dem Traeger der Norm
+    // davor -- zwischen den beiden Gruppen sind das 24 % daneben, und der
+    // Demodulator sucht dann eine Frequenz, die gar nicht da ist.
+    renderer_.SetCarrierSamples(VideoStandardSubcarrierSamples(standardLastGood_));
     if (standardCandidate_ >= 0) {
       // A candidate just proved itself. The line count may have changed with
       // it, so the graph has to be rebuilt around the new format.
