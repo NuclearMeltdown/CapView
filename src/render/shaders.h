@@ -613,7 +613,15 @@ cbuffer ConvertCB : register(b0) {
   float gDotNotch;        // 0..1: width of the demodulation window, 0 = off
   float gCarrierPeriod;   // samples per cycle of the colour subcarrier
 
-  float4 gCoef;           // Cr->R, Cb->G, Cr->G, Cb->B
+  // Stops here on purpose, and anything added to ConvertCB from here down must
+  // be added at the end of it. This pass and the one above share the buffer but
+  // not the fields: everything past this point belongs to the clean pass, and
+  // repeating it here would only mean two declarations to keep in step.
+  //
+  // There used to be a gCoef in this spot. It was never read, and it had not
+  // matched the C++ layout since the transfer and motion fields went in above
+  // it -- so anything that had read it would have got the motion gate's numbers
+  // and called them colour coefficients.
 };
 
 struct VSOut {
