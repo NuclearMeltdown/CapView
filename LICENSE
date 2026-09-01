@@ -19,12 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-
---------------------------------------------------------------------------
-Third-party components
---------------------------------------------------------------------------
-
-Dear ImGui (third_party/imgui) — Copyright (c) 2014-2025 Omar Cornut,
-MIT License. Its own LICENSE.txt ships alongside the sources and its copyright
-notice must be preserved.
