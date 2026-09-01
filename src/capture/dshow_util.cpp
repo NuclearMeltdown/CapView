@@ -3,9 +3,11 @@
 #include "i18n.h"
 
 #include <dvdmedia.h>  // VIDEOINFOHEADER2
+#include <ks.h>        // KSPROPERTY_SUPPORT_GET / _SET
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <set>
 
 namespace cap {
@@ -1031,13 +1033,146 @@ bool IsVideoConnector(long physicalType) {
   return physicalType < PhysConn_Audio_Tuner;
 }
 
+// ------------------------------------------------------ vendor input selectors
+//
+// Not every card that can switch its inputs says so through IAMCrossbar. The
+// SA7160 this program is measured against says nothing at all: its connectors
+// hang off a private KS property set that, until now, only the vendor's own
+// property page ever wrote to. Having such a set is not what makes the card
+// unusual -- having no crossbar beside it is -- so the selectors live in a
+// table, and a second card is an entry in it rather than a second code path.
+//
+// Asking a driver about a set it does not know is safe: IKsPropertySet answers
+// ERROR_SET_NOT_FOUND and touches nothing. That is what lets this be tried on
+// every card without first having to know which one it is, and it is why no
+// other card sees a changed path here.
+
+// One connector, as the vendor numbers it. The names are carried along instead
+// of coming out of PhysicalConnectorName, because two of them would collapse:
+// HDMI and SDI are separate sockets and both are PhysConn_Video_SerialDigital.
+struct VendorInput {
+  DWORD value;
+  long physicalType;
+  const char* name;
+};
+
+// The SA7160's own numbering. Read off the radio group in the driver's property
+// page, confirmed against the value the driver persists in its class key when
+// that group is used, and confirmed again against the label table inside
+// AmaRecTV, which writes the same property on the same set.
+//
+// Seven of the group's entries are named here. It has an eighth, and an AUTO
+// beside it, whose values were never pinned down -- a card sitting on one of
+// those reads back something this table does not name, which is the honest
+// answer: input unknown. The list is what the driver offers, not what is
+// soldered onto any one board; the vendor's own page offers exactly the same.
+constexpr VendorInput kSa7160Inputs[] = {
+    {0, PhysConn_Video_SerialDigital, "HDMI"},
+    {1, PhysConn_Video_ParallelDigital, "DVI-D"},
+    {2, PhysConn_Video_YRYBY, "Component (YPbPr)"},
+    {3, PhysConn_Video_RGB, "VGA / RGB"},  // the vendor calls this one DVI-A
+    {4, PhysConn_Video_SerialDigital, "SDI"},
+    {5, PhysConn_Video_Composite, "Composite"},
+    {6, PhysConn_Video_SVideo, "S-Video"},
+};
+
+struct VendorSelector {
+  const char* card;  // log lines only
+  GUID set;
+  DWORD property;
+  const VendorInput* inputs;
+  size_t count;
+};
+
+constexpr VendorSelector kVendorSelectors[] = {
+    {"SA7160",
+     {0xD1E5209F, 0x68FD, 0x4529, {0xBE, 0xE0, 0x5E, 0x7A, 0x1F, 0x47, 0x92, 0x1C}},
+     201,
+     kSa7160Inputs,
+     std::size(kSa7160Inputs)},
+};
+
+struct VendorSelection {
+  ComPtr<IKsPropertySet> ks;
+  const VendorSelector* sel = nullptr;
+};
+
+// Which of the known selectors this filter answers for, if any. One
+// QuerySupported call per entry, and a set only counts when the driver will let
+// the property be both read and written: a card offering inputs it cannot
+// actually switch would be worse than one offering none.
+VendorSelection FindVendorSelector(IBaseFilter* captureFilter) {
+  VendorSelection found;
+  if (!captureFilter) return found;
+  ComPtr<IKsPropertySet> ks;
+  if (FAILED(captureFilter->QueryInterface(IID_PPV_ARGS(&ks)))) return found;
+  for (const VendorSelector& s : kVendorSelectors) {
+    DWORD support = 0;
+    if (FAILED(ks->QuerySupported(s.set, s.property, &support))) continue;
+    if (!(support & KSPROPERTY_SUPPORT_GET)) continue;
+    if (!(support & KSPROPERTY_SUPPORT_SET)) continue;
+    found.ks = ks;
+    found.sel = &s;
+    break;
+  }
+  return found;
+}
+
+std::vector<CrossbarInput> VendorCrossbarInputs(IBaseFilter* captureFilter) {
+  std::vector<CrossbarInput> inputs;
+  const VendorSelection v = FindVendorSelector(captureFilter);
+  if (!v.sel) return inputs;
+  for (size_t i = 0; i < v.sel->count; ++i) {
+    CrossbarInput in;
+    in.pinIndex = (int)v.sel->inputs[i].value;
+    in.physicalType = v.sel->inputs[i].physicalType;
+    in.name = v.sel->inputs[i].name;
+    inputs.push_back(std::move(in));
+  }
+  return inputs;
+}
+
+// Index into the list above, or -1 when the card reads back a value it does not
+// name -- the eighth entry, AUTO, or anything a future driver adds.
+int CurrentVendorInput(IBaseFilter* captureFilter) {
+  const VendorSelection v = FindVendorSelector(captureFilter);
+  if (!v.sel) return -1;
+  DWORD value = 0;
+  DWORD returned = 0;
+  const HRESULT hr = v.ks->Get(v.sel->set, v.sel->property, nullptr, 0, &value, sizeof(value),
+                               &returned);
+  if (FAILED(hr) || returned != sizeof(value)) return -1;
+  for (size_t i = 0; i < v.sel->count; ++i) {
+    if (v.sel->inputs[i].value == value) return (int)i;
+  }
+  return -1;
+}
+
+bool RouteVendorInput(IBaseFilter* captureFilter, int index) {
+  const VendorSelection v = FindVendorSelector(captureFilter);
+  if (!v.sel) return false;
+  if (index < 0 || (size_t)index >= v.sel->count) return false;
+
+  DWORD value = v.sel->inputs[(size_t)index].value;
+  const HRESULT hr = v.ks->Set(v.sel->set, v.sel->property, nullptr, 0, &value, sizeof(value));
+  if (FAILED(hr)) {
+    CAP_WARN("%s: Eingang '%s' konnte nicht gesetzt werden (0x%08lX)", v.sel->card,
+             v.sel->inputs[(size_t)index].name, (unsigned long)hr);
+    return false;
+  }
+  CAP_LOG("%s: Eingang '%s' gesetzt (Property %lu = %lu)", v.sel->card,
+          v.sel->inputs[(size_t)index].name, (unsigned long)v.sel->property,
+          (unsigned long)value);
+  return true;
+}
+
 }  // namespace
 
 std::vector<CrossbarInput> EnumerateCrossbarInputs(ICaptureGraphBuilder2* builder,
                                                    IBaseFilter* captureFilter) {
   std::vector<CrossbarInput> inputs;
   ComPtr<IAMCrossbar> xbar = FindCrossbar(builder, captureFilter);
-  if (!xbar) return inputs;
+  if (!xbar) return VendorCrossbarInputs(captureFilter);
 
   long outCount = 0, inCount = 0;
   if (FAILED(xbar->get_PinCounts(&outCount, &inCount))) return inputs;
@@ -1068,7 +1203,7 @@ std::vector<CrossbarInput> EnumerateCrossbarInputs(ICaptureGraphBuilder2* builde
 bool RouteCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilter, int index) {
   if (index < 0) return true;  // "leave alone"
   ComPtr<IAMCrossbar> xbar = FindCrossbar(builder, captureFilter);
-  if (!xbar) return false;
+  if (!xbar) return RouteVendorInput(captureFilter, index);
 
   long outCount = 0, inCount = 0;
   if (FAILED(xbar->get_PinCounts(&outCount, &inCount))) return false;
@@ -1102,6 +1237,30 @@ bool RouteCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilt
   }
   if (!routed) CAP_WARN("Crossbar: Eingang %d konnte nicht geroutet werden", index);
   return routed;
+}
+
+int CurrentCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilter) {
+  ComPtr<IAMCrossbar> xbar = FindCrossbar(builder, captureFilter);
+  if (!xbar) return CurrentVendorInput(captureFilter);
+
+  long outCount = 0, inCount = 0;
+  if (FAILED(xbar->get_PinCounts(&outCount, &inCount))) return -1;
+  const std::vector<CrossbarInput> inputs = EnumerateCrossbarInputs(builder, captureFilter);
+
+  // The first video output that has something routed to it. A crossbar may have
+  // several outputs, but only one of them feeds the capture pin, and on every
+  // card that has one it is the first video output there is.
+  for (long o = 0; o < outCount; ++o) {
+    long relatedOut = 0, outPhys = 0;
+    if (FAILED(xbar->get_CrossbarPinInfo(FALSE, o, &relatedOut, &outPhys))) continue;
+    if (!IsVideoConnector(outPhys)) continue;
+    long routedFrom = -1;
+    if (FAILED(xbar->get_IsRoutedTo(o, &routedFrom)) || routedFrom < 0) continue;
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (inputs[i].pinIndex == (int)routedFrom) return (int)i;
+    }
+  }
+  return -1;
 }
 
 // ---------------------------------------------------------------------------

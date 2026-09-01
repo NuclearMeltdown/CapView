@@ -188,19 +188,31 @@ HRESULT ApplyFormat(IPin* capturePin, const FormatSel& fmt, VideoFormatInfo* app
 // -------------------------------------------------------------------- crossbar
 
 struct CrossbarInput {
-  int pinIndex = -1;  // index of the input pin on the crossbar
+  // Whatever identifies this input to the card: the index of the input pin on
+  // the crossbar, or, on a card whose inputs are switched through a private
+  // property set instead, the vendor's own number for the connector.
+  int pinIndex = -1;
   long physicalType = 0;
   std::string name;  // "HDMI", "Component (YPbPr)", "Composite", ...
 };
 
-// Enumerates the video inputs of the crossbar upstream of `captureFilter`.
-// Empty when the card has no crossbar (pure HDMI cards often do not).
+// Enumerates the video inputs of the crossbar upstream of `captureFilter`, and
+// where there is no crossbar, the inputs of a vendor selector the card is known
+// to answer for. Empty when the card offers neither, which is the honest answer
+// for a pure HDMI card and for any card whose selector is not known here.
 std::vector<CrossbarInput> EnumerateCrossbarInputs(ICaptureGraphBuilder2* builder,
                                                    IBaseFilter* captureFilter);
 
 // Routes the given input (index into the list above) to the crossbar output.
-// Also routes the matching audio input when the crossbar has one.
+// Also routes the matching audio input when the crossbar has one. On a card
+// switched through a vendor selector, sets that selector instead.
 bool RouteCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilter, int index);
+
+// Which input the card is on right now, as an index into the list above, or -1
+// when it cannot be read. Not the same question as which input CapView chose:
+// the card keeps its own setting, and until something writes to it that setting
+// is whatever the vendor's property page or the last program left behind.
+int CurrentCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilter);
 
 // Every crossbar the system registers, as its own device rather than as
 // something hanging off a capture filter. A WDM crossbar is a filter in its own

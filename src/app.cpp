@@ -4168,10 +4168,16 @@ bool App::SourceIsAnalogue() const {
 
 // Welcher Anschluss, wenn die Einstellung auf Automatisch steht.
 //
-// Der Crossbar weiss es, wo es einen gibt: `EnumerateCrossbarInputs` liest den
-// physischen Typ jedes Eingangs mit aus, und der geroutete ist der, an dem das
-// Bild haengt. Karten ohne Crossbar -- die SA7160 ist eine -- melden gar
-// nichts, und dann bleibt nur die Annahme.
+// Die Karte weiss es, wo sie ihre Eingaenge ueberhaupt offenlegt:
+// `EnumerateCrossbarInputs` liest den physischen Typ jedes Eingangs mit aus --
+// aus dem Crossbar, wo es einen gibt, sonst aus dem privaten Selektor des
+// Herstellers, wenn CapView ihn kennt (die SA7160 hat so einen).
+//
+// Gefragt wird zuerst nach dem eingestellten Eingang und, wo keiner eingestellt
+// ist, nach dem, auf dem die Karte tatsaechlich steht. Das ist nicht dasselbe:
+// "Nicht aendern" heisst, dass CapView den Selektor in Ruhe laesst, nicht dass
+// niemand wuesste, wo er steht. Nur wenn beides nichts hergibt, bleibt die
+// Annahme.
 //
 // Die Annahme ist Composite, und zwar in die sichere Richtung. Ein zu viel
 // angebotener Filter steht auf null und tut nichts, bis jemand ihn anfasst;
@@ -4182,7 +4188,8 @@ AnalogConnector App::ResolvedConnector() const {
   if (chosen != AnalogConnector::Auto) return chosen;
 
   const std::vector<CrossbarInput>& inputs = capture_.capabilities().crossbarInputs;
-  const int index = config_.active().capture.crossbarInput;
+  int index = config_.active().capture.crossbarInput;
+  if (index < 0) index = capture_.capabilities().currentInput;
   if (index >= 0 && index < (int)inputs.size()) {
     switch (inputs[(size_t)index].physicalType) {
       case PhysConn_Video_SVideo:

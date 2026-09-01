@@ -501,9 +501,13 @@ void PrintVideoDevices() {
     } else {
       std::printf("\n");
       for (size_t k = 0; k < probed.crossbarInputs.size(); ++k) {
-        std::printf("        [%zu] %s  (Pin %d, Typ %ld)\n", k,
+        std::printf("        [%zu]%s %s  (Pin %d, Typ %ld)\n", k,
+                    (int)k == probed.currentInput ? " <-" : "   ",
                     probed.crossbarInputs[k].name.c_str(), probed.crossbarInputs[k].pinIndex,
                     probed.crossbarInputs[k].physicalType);
+      }
+      if (probed.currentInput < 0) {
+        std::printf("        (auf welchem die Karte steht, sagt sie nicht)\n");
       }
     }
 
