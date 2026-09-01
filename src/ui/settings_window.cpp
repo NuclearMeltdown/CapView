@@ -1640,7 +1640,7 @@ void SettingsWindow::DrawImageTab() {
 
     ImGui::Spacing();
     ImGui::SeparatorText(composite ? T("Composite-Filter", "Composite filter")
-                                   : T("Analogfilter", "Analogue filter"));
+                                   : T("Rauschen", "Noise"));
     if (composite) {
       ImGui::TextDisabled(T("Gegen das, was Composite immer mitbringt: falsche Farbe, "
                             "Punktkriechen, Rauschen und einen weichen Bildrand.",
@@ -1650,10 +1650,11 @@ void SettingsWindow::DrawImageTab() {
       TextDisabledWrapped(
           Format(T("%s führt Helligkeit und Farbe getrennt. Punktkriechen, Regenbogenmuster "
                    "und der weiche Bildrand entstehen dabei gar nicht erst — die Filter "
-                   "dagegen sind deshalb nicht da. Was bleibt, ist Rauschen.",
+                   "dagegen sind deshalb nicht da. Was bleibt, ist Rauschen, und das hat "
+                   "jede analoge Leitung.",
                    "%s keeps brightness and colour apart. Dot crawl, rainbow patterns and "
                    "the soft top end never arise in the first place, so the filters against "
-                   "them are gone. What remains is noise."),
+                   "them are gone. What remains is noise, and every analogue line has it."),
                  AnalogConnectorName((int)connector_))
               .c_str());
     }
@@ -1725,20 +1726,36 @@ void SettingsWindow::DrawImageTab() {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    HelpMarker(T("Mittelt über vier Bilder und entfernt das Punktkriechen dort vollständig, "
-                 "wo sich nichts bewegt -- ohne einen Deut Schärfe zu kosten. Vier, weil der "
-                 "Farbträger eine Folge über vier Bilder durchläuft: bei zwei bliebe alles "
-                 "stehen.\n\n"
-                 "Fest angehakt, sobald der Regler darunter über null steht: ohne die "
-                 "Mittelung rechnet der Demodulator auch über ruhende Bildteile und "
-                 "bezahlt dort Schärfe für etwas, das hier umsonst zu haben ist.",
-                 "Averages over four frames and removes the crawl entirely wherever nothing "
-                 "is moving, at no cost in sharpness at all. Four, because the colour "
-                 "subcarrier walks through a four frame sequence; two would cancel "
-                 "nothing.\n\n"
-                 "Held on whenever the slider below is above zero: without the averaging "
-                 "the demodulator works over the still parts of the picture as well, and "
-                 "pays sharpness there for something that is free here."));
+    // Derselbe Filter, zwei Beschreibungen, und das ist keine Schoenfaerberei.
+    // Er mittelt vier Bilder; auf Composite loescht das den Farbtraeger, weil
+    // dessen Phase ueber genau vier Bilder umlaeuft, und nebenbei das Rauschen.
+    // Ohne Traeger bleibt die zweite Haelfte uebrig, und nur die. Ein Hilfetext,
+    // der hier weiter von Punktkriechen redet, beschriebe einen Fehler, den
+    // dieser Eingang nicht hat -- und genau daran sah die Liste aus, als sei der
+    // Dot-Crawl-Filter bloss halb verschwunden.
+    if (!composite) {
+      HelpMarker(T("Mittelt über vier Bilder und nimmt das Rauschen dort vollständig heraus, "
+                   "wo sich nichts bewegt -- ohne einen Deut Schärfe zu kosten. Wo sich "
+                   "etwas bewegt, lässt es los; das nimmt der Haken darunter auf.",
+                   "Averages over four frames and takes the noise out entirely wherever "
+                   "nothing is moving, at no cost in sharpness at all. Where something moves "
+                   "it lets go; the box below picks that up."));
+    } else {
+      HelpMarker(T("Mittelt über vier Bilder und entfernt das Punktkriechen dort vollständig, "
+                   "wo sich nichts bewegt -- ohne einen Deut Schärfe zu kosten. Vier, weil der "
+                   "Farbträger eine Folge über vier Bilder durchläuft: bei zwei bliebe alles "
+                   "stehen.\n\n"
+                   "Fest angehakt, sobald der Regler darunter über null steht: ohne die "
+                   "Mittelung rechnet der Demodulator auch über ruhende Bildteile und "
+                   "bezahlt dort Schärfe für etwas, das hier umsonst zu haben ist.",
+                   "Averages over four frames and removes the crawl entirely wherever nothing "
+                   "is moving, at no cost in sharpness at all. Four, because the colour "
+                   "subcarrier walks through a four frame sequence; two would cancel "
+                   "nothing.\n\n"
+                   "Held on whenever the slider below is above zero: without the averaging "
+                   "the demodulator works over the still parts of the picture as well, and "
+                   "pays sharpness there for something that is free here."));
+    }
 
     // Derselbe Filter an einem anderen Arbeitspunkt, nicht ein zweiter Filter.
     // Mitteln ueber Bewegung ist Schmieren -- das laesst sich nicht wegrechnen,
@@ -1753,26 +1770,49 @@ void SettingsWindow::DrawImageTab() {
     ImGui::Unindent();
     ImGui::EndDisabled();
     ImGui::SameLine();
-    HelpMarker(T("Wo die Mittelung bei Bewegung wieder loslaesst. Sie kann nur mitteln, und "
-                 "Mitteln über Bewegung ist Schmieren -- der Haken verschiebt also nur, wo "
-                 "der Tausch stattfindet, weg ist er nie.\n\n"
-                 "Aus: das Gatter hält lange fest. Punktkriechen bewegt sich selbst, und ein "
-                 "empfindliches Gatter schaltet den Filter genau dort ab, wo das Artefakt "
-                 "sitzt -- dafür wird eine langsam wandernde Kante mit drei älteren Kopien "
-                 "ihrer selbst gemittelt, und das ist die Fahne dahinter.\n\n"
-                 "An: das Gatter lässt nach vier von 255 Stufen los. Bewegte Kanten bleiben "
-                 "sauber, an langsamen Stellen bleibt etwas Kriechen stehen -- dort nimmt "
-                 "der Regler darunter die Arbeit wieder auf.",
-                 "Where the averaging lets go of moving parts. It can only average, and "
-                 "averaging across movement is smearing -- so this only moves where the "
-                 "trade happens, it never removes it.\n\n"
-                 "Off: the gate holds on late. Dot crawl crawls, so a sensitive gate "
-                 "switches the filter off exactly where the artefact is -- the price is "
-                 "that a slowly moving edge gets averaged with three older copies of "
-                 "itself, which is the trail behind it.\n\n"
-                 "On: the gate lets go within four levels out of 255. Moving edges stay "
-                 "clean, slow parts keep some crawl -- and there the slider below picks "
-                 "the work back up."));
+    // Derselbe Tausch, nur ohne den Grund, spaet loszulassen. Auf Composite
+    // haelt das Gatter lange fest, weil Punktkriechen sich selbst bewegt und
+    // ein empfindliches Gatter den Filter genau dort abschaltet, wo das
+    // Artefakt sitzt. Rauschen bewegt sich nicht, es steht ueberall, und die
+    // Frage schrumpft auf die eine Haelfte, die uebrig bleibt.
+    if (!composite) {
+      HelpMarker(T("Wo die Mittelung bei Bewegung wieder loslässt. Sie kann nur mitteln, und "
+                   "Mitteln über Bewegung ist Schmieren -- der Haken verschiebt also nur, wo "
+                   "der Tausch stattfindet, weg ist er nie.\n\n"
+                   "Aus: das Gatter hält lange fest, entrauscht auch noch langsame Bewegung "
+                   "und zieht dafür eine Fahne hinter wandernden Kanten her.\n\n"
+                   "An: das Gatter lässt nach vier von 255 Stufen los. Bewegte Kanten bleiben "
+                   "sauber, dafür bleibt ihr Rauschen stehen -- das nimmt der Haken darunter "
+                   "auf.",
+                   "Where the averaging lets go of moving parts. It can only average, and "
+                   "averaging across movement is smearing -- so this only moves where the "
+                   "trade happens, it never removes it.\n\n"
+                   "Off: the gate holds on late, denoises slow movement as well, and drags a "
+                   "trail behind travelling edges for it.\n\n"
+                   "On: the gate lets go within four levels out of 255. Moving edges stay "
+                   "clean, their noise stays with them -- and the box below picks that up."));
+    } else {
+      HelpMarker(T("Wo die Mittelung bei Bewegung wieder loslässt. Sie kann nur mitteln, und "
+                   "Mitteln über Bewegung ist Schmieren -- der Haken verschiebt also nur, wo "
+                   "der Tausch stattfindet, weg ist er nie.\n\n"
+                   "Aus: das Gatter hält lange fest. Punktkriechen bewegt sich selbst, und ein "
+                   "empfindliches Gatter schaltet den Filter genau dort ab, wo das Artefakt "
+                   "sitzt -- dafür wird eine langsam wandernde Kante mit drei älteren Kopien "
+                   "ihrer selbst gemittelt, und das ist die Fahne dahinter.\n\n"
+                   "An: das Gatter lässt nach vier von 255 Stufen los. Bewegte Kanten bleiben "
+                   "sauber, an langsamen Stellen bleibt etwas Kriechen stehen -- dort nimmt "
+                   "der Regler darunter die Arbeit wieder auf.",
+                   "Where the averaging lets go of moving parts. It can only average, and "
+                   "averaging across movement is smearing -- so this only moves where the "
+                   "trade happens, it never removes it.\n\n"
+                   "Off: the gate holds on late. Dot crawl crawls, so a sensitive gate "
+                   "switches the filter off exactly where the artefact is -- the price is "
+                   "that a slowly moving edge gets averaged with three older copies of "
+                   "itself, which is the trail behind it.\n\n"
+                   "On: the gate lets go within four levels out of 255. Moving edges stay "
+                   "clean, slow parts keep some crawl -- and there the slider below picks "
+                   "the work back up."));
+    }
 
     // Die andere Hälfte des Bildes. Der Haken darüber entscheidet, *wo* die
     // Mittelung loslässt; dieser hier nimmt auf, was sie fallen lässt.
@@ -1786,43 +1826,69 @@ void SettingsWindow::DrawImageTab() {
       img.motionCompensate = follow;
     }
     ImGui::SameLine();
-    HelpMarker(T("Sucht für jeden Punkt, wohin er sich seit den letzten drei Bildern "
-                 "bewegt hat, und mittelt entlang dieser Spur statt quer dazu. Damit "
-                 "verschwindet das analoge Rauschen auch dort, wo sich etwas bewegt -- "
-                 "bisher blieb es dort vollständig stehen.\n\n"
-                 "Gegen Punktkriechen hilft es nicht, und das ist kein Versäumnis: das "
-                 "Muster hängt am Raster, nicht am Bild. Ein verschobenes Bild bringt "
-                 "eine verschobene Trägerphase mit, und die Auslöschung über vier Bilder "
-                 "überlebt nur bei Geschwindigkeiten, die ein Vielfaches einer "
-                 "Viertel-Trägerperiode sind. Deshalb ist dieser Filter auf den Träger "
-                 "gesperrt und rührt das Kriechen weder an noch auf.\n\n"
-                 "Hilft dem Regler darunter indirekt: der schätzt aus den Bildpunkten, "
-                 "wie viel Muster da ist, und Rauschen ist genau das, was diese Schätzung "
-                 "verdirbt.\n\n"
-                 "Jedes der drei Bilder wird einzeln gefragt, ob die gefundene Bewegung "
-                 "auch zu ihm passt; eines, das widerspricht, bleibt draußen. Das ist der "
-                 "Grund, warum ein Objekt, das dreht oder stehenbleibt, keine Spur "
-                 "hinterlässt.\n\n"
-                 "Kostet Rechenzeit auf der Grafikkarte -- etwa so viel wie der Regler "
-                 "darunter.",
-                 "Searches, for every point, where it has moved to over the last three "
-                 "frames, and averages along that trail instead of across it. Analogue "
-                 "noise then goes away where something is moving as well -- until now it "
-                 "stayed there completely.\n\n"
-                 "It does not help against dot crawl, and that is not an omission: the "
-                 "pattern is fixed to the raster, not to the picture. A shifted frame "
-                 "brings a shifted carrier phase with it, and the four frame cancellation "
-                 "only survives at speeds that are a multiple of a quarter of the carrier "
-                 "period. So this filter is notched out at the carrier and neither "
-                 "removes the crawl nor stirs it up.\n\n"
-                 "It helps the slider below indirectly: that one works out how much "
-                 "pattern is present from the pixels in front of it, and noise is exactly "
-                 "what makes that estimate wrong.\n\n"
-                 "Each of the three frames is asked separately whether the movement found "
-                 "fits it too, and one that disagrees is left out. That is why an object "
-                 "that turns or stops leaves no trail behind it.\n\n"
-                 "Costs time on the graphics card -- about as much as the slider "
-                 "below."));
+    // Ohne Traeger faellt die halbe Erklaerung weg: kein Kriechen, an dem er
+    // nichts aendert, und kein Regler darunter, dem er zuarbeitet. Was bleibt,
+    // ist genau das, wofuer er gebaut wurde.
+    if (!composite) {
+      HelpMarker(T("Sucht für jeden Punkt, wohin er sich seit den letzten drei Bildern "
+                   "bewegt hat, und mittelt entlang dieser Spur statt quer dazu. Damit "
+                   "verschwindet das analoge Rauschen auch dort, wo sich etwas bewegt -- "
+                   "der Haken darüber lässt Bewegung ja gerade los, und hier wird sie "
+                   "wieder aufgenommen.\n\n"
+                   "Jedes der drei Bilder wird einzeln gefragt, ob die gefundene Bewegung "
+                   "auch zu ihm passt; eines, das widerspricht, bleibt draußen. Das ist der "
+                   "Grund, warum ein Objekt, das dreht oder stehenbleibt, keine Spur "
+                   "hinterlässt.\n\n"
+                   "Kostet Rechenzeit auf der Grafikkarte -- auf diesem Eingang ist es der "
+                   "einzige Filter, der nennenswert etwas kostet.",
+                   "Searches, for every point, where it has moved to over the last three "
+                   "frames, and averages along that trail instead of across it. Analogue "
+                   "noise then goes away where something is moving as well -- the box above "
+                   "lets go of movement, and this picks it back up.\n\n"
+                   "Each of the three frames is asked separately whether the movement found "
+                   "fits it too, and one that disagrees is left out. That is why an object "
+                   "that turns or stops leaves no trail behind it.\n\n"
+                   "Costs time on the graphics card -- on this input it is the only filter "
+                   "that costs anything worth mentioning."));
+    } else {
+      HelpMarker(T("Sucht für jeden Punkt, wohin er sich seit den letzten drei Bildern "
+                   "bewegt hat, und mittelt entlang dieser Spur statt quer dazu. Damit "
+                   "verschwindet das analoge Rauschen auch dort, wo sich etwas bewegt -- "
+                   "bisher blieb es dort vollständig stehen.\n\n"
+                   "Gegen Punktkriechen hilft es nicht, und das ist kein Versäumnis: das "
+                   "Muster hängt am Raster, nicht am Bild. Ein verschobenes Bild bringt "
+                   "eine verschobene Trägerphase mit, und die Auslöschung über vier Bilder "
+                   "überlebt nur bei Geschwindigkeiten, die ein Vielfaches einer "
+                   "Viertel-Trägerperiode sind. Deshalb ist dieser Filter auf den Träger "
+                   "gesperrt und rührt das Kriechen weder an noch auf.\n\n"
+                   "Hilft dem Regler darunter indirekt: der schätzt aus den Bildpunkten, "
+                   "wie viel Muster da ist, und Rauschen ist genau das, was diese Schätzung "
+                   "verdirbt.\n\n"
+                   "Jedes der drei Bilder wird einzeln gefragt, ob die gefundene Bewegung "
+                   "auch zu ihm passt; eines, das widerspricht, bleibt draußen. Das ist der "
+                   "Grund, warum ein Objekt, das dreht oder stehenbleibt, keine Spur "
+                   "hinterlässt.\n\n"
+                   "Kostet Rechenzeit auf der Grafikkarte -- etwa so viel wie der Regler "
+                   "darunter.",
+                   "Searches, for every point, where it has moved to over the last three "
+                   "frames, and averages along that trail instead of across it. Analogue "
+                   "noise then goes away where something is moving as well -- until now it "
+                   "stayed there completely.\n\n"
+                   "It does not help against dot crawl, and that is not an omission: the "
+                   "pattern is fixed to the raster, not to the picture. A shifted frame "
+                   "brings a shifted carrier phase with it, and the four frame cancellation "
+                   "only survives at speeds that are a multiple of a quarter of the carrier "
+                   "period. So this filter is notched out at the carrier and neither "
+                   "removes the crawl nor stirs it up.\n\n"
+                   "It helps the slider below indirectly: that one works out how much "
+                   "pattern is present from the pixels in front of it, and noise is exactly "
+                   "what makes that estimate wrong.\n\n"
+                   "Each of the three frames is asked separately whether the movement found "
+                   "fits it too, and one that disagrees is left out. That is why an object "
+                   "that turns or stops leaves no trail behind it.\n\n"
+                   "Costs time on the graphics card -- about as much as the slider "
+                   "below."));
+    }
 
     if (composite) {
       // Stufen statt freiem Lauf: die Zwischenwerte sind ohne Wirkung, und ein
