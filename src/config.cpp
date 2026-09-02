@@ -395,7 +395,7 @@ const char* ScaleFilterHelp(int i) {
 const char* DeinterlaceHelp(int i) {
   static const char* de[kDeinterlaceCount] = {
       "Halbbilder bleiben verwoben. Bei Bewegung Kammartefakte.",
-      "Volle Bildrate, keine Latenz. Zeigt je ein Halbbild doppelt, wodurch die Zeilenpaare im Takt der Halbbilder um eine Zeile wandern -- messbar 1,0 Zeilen. Für 240p/288p-Quellen ideal, für echtes Interlacing die unruhigste Wahl.",
+      "Volle Bildrate, keine Latenz. Zeigt je ein Halbbild doppelt, wodurch die Zeilenpaare im Takt der Halbbilder um eine Zeile wandern. Für 240p/288p ideal, für echtes Interlacing die unruhigste Wahl.",
       "Wie Bob, fehlende Zeilen interpoliert. Steht deutlich ruhiger als Bob, weil die Zeilen an ihrer wahren Position landen.",
       "Ruhige Bildteile behalten die volle Zeilenzahl, bewegte werden interpoliert. "
       "Keine Latenz.",
@@ -406,7 +406,7 @@ const char* DeinterlaceHelp(int i) {
   };
   static const char* en[kDeinterlaceCount] = {
       "Fields stay woven. Combing artefacts on motion.",
-      "Full frame rate, no added latency. Shows one field twice over, so the line pairs move by one line at field rate -- measured at 1.0 lines. Ideal for 240p/288p sources, the least steady choice for genuine interlacing.",
+      "Full frame rate, no added latency. Shows one field twice over, so the line pairs move by one line at field rate. Ideal for 240p/288p, the least steady choice for genuine interlacing.",
       "Like bob with interpolated lines. Considerably steadier than bob, because each line lands where it belongs.",
       "Still parts of the picture keep every line, moving parts are interpolated. "
       "No added latency.",
