@@ -1650,6 +1650,42 @@ static const int kBoundsSampleEvery = 9;
 static const int kBoundsFramesWanted = 5;
 static const int kBoundsColumnStep = 2;
 
+// An analogue frame does not stop cleanly at its last line. Measured on a
+// GameCube in PAL60 through this card: the bottom line of every frame arrives as
+// green 82 across the full width, then fourteen black lines, then the picture.
+// The search for what is not black read that line as picture and reported no
+// bottom border at all -- and since it is lit in every column, it dragged the
+// two side edges out with it.
+//
+// So a lit strip at the very edge only counts as picture when it is joined to
+// the picture. A thin one with black between it and everything else is the
+// signal ending, and the edge belongs on the far side of it.
+static const int kEdgeNoiseMax = 4;  // how thick the strip may be, in lines
+static const int kEdgeNoiseGap = 8;  // and how much black has to follow it
+
+// Where the picture starts, walking in from one end of a lit/unlit mask. One
+// entry covers `scale` lines or pixels. Returns `first` unchanged whenever there
+// is nothing to skip, so the caller can simply search for lit from here, and
+// `last + dir` when there is no picture behind the strip at all.
+static int SkipEdgeNoise(const std::vector<uint8_t>& lit, int first, int last, int dir, int scale) {
+  const int end = last + dir;
+  int i = first;
+  while (i != end && !lit[(size_t)i]) i += dir;
+  if (i == end) return first;  // nothing lit from this side
+  int strip = 0;
+  while (i != end && lit[(size_t)i]) { i += dir; ++strip; }
+  if (strip * scale > kEdgeNoiseMax) return first;  // too thick to be an artefact
+  int gap = 0;
+  while (i != end && !lit[(size_t)i]) { i += dir; ++gap; }
+  // Nothing behind the strip: the frame is black apart from the signal ending,
+  // which says as little as an entirely black one. Fades and scene changes are
+  // full of these, and taking the strip for the picture there is what put the
+  // edge back on the last line every few seconds.
+  if (i == end) return end;
+  if (gap * scale < kEdgeNoiseGap) return first;  // joined to the picture
+  return i;
+}
+
 void VideoRenderer::AnalyzeContentBounds(const FrameView& frame) {
   if (++boundsFramesSeen_ % kBoundsSampleEvery != 0) return;
 
@@ -1668,9 +1704,11 @@ void VideoRenderer::AnalyzeContentBounds(const FrameView& frame) {
   // A row counts as picture only when a decent stretch of it is above black. One
   // bright speck of analogue noise in the letterbox must not widen the crop.
   const int minRun = w / (50 * kBoundsColumnStep) > 2 ? w / (50 * kBoundsColumnStep) : 2;
-  int top = -1, bottom = -1, litRows = 0;
-  for (int y = 0; y < h; y += 2) {
-    const uint8_t* row = frame.data + offset + (size_t)y * pitch;
+  const int rows = (h + 1) / 2;
+  if ((int)rowLit_.size() != rows) rowLit_.assign((size_t)rows, 0);
+  int litRows = 0;
+  for (int i = 0; i < rows; ++i) {
+    const uint8_t* row = frame.data + offset + (size_t)(i * 2) * pitch;
     int lit = 0;
     for (int x = 0; x < w; x += kBoundsColumnStep) {
       if (row[(size_t)x * step] > kContentLuma) {
@@ -1678,25 +1716,51 @@ void VideoRenderer::AnalyzeContentBounds(const FrameView& frame) {
         ++columnHits_[(size_t)x];
       }
     }
-    if (lit >= minRun) {
-      if (top < 0) top = y;
-      bottom = y;
-      ++litRows;
-    }
+    rowLit_[(size_t)i] = lit >= minRun ? 1 : 0;
+    litRows += rowLit_[(size_t)i];
   }
   if (litRows == 0) return;  // an entirely black frame says nothing
+
+  int top = -1, bottom = -1;
+  for (int i = SkipEdgeNoise(rowLit_, 0, rows - 1, 1, 2); i < rows; ++i) {
+    if (rowLit_[(size_t)i]) { top = i * 2; break; }
+  }
+  for (int i = SkipEdgeNoise(rowLit_, rows - 1, 0, -1, 2); i >= 0; --i) {
+    if (rowLit_[(size_t)i]) { bottom = i * 2; break; }
+  }
+  if (top < 0 || bottom < top) return;
+
+  // A strip the row scan just dropped is still sitting in the column counts, and
+  // being lit right across it would drag both side edges out to the frame. Read
+  // those few lines again and take them back out. Rescanning the picture instead
+  // would cost a second pass over the whole frame, which this analysis cannot
+  // afford; taking back a line or two costs nothing.
+  for (int i = 0; i < rows; ++i) {
+    if (!rowLit_[(size_t)i] || (i * 2 >= top && i * 2 <= bottom)) continue;
+    const uint8_t* row = frame.data + offset + (size_t)(i * 2) * pitch;
+    for (int x = 0; x < w; x += kBoundsColumnStep) {
+      if (row[(size_t)x * step] > kContentLuma) --columnHits_[(size_t)x];
+    }
+    --litRows;
+  }
+  if (litRows <= 0) return;
 
   // Same idea the other way round: a column has to be lit in a fair number of
   // the rows that carry picture at all.
   const int minCol = litRows / 20 > 1 ? litRows / 20 : 1;
-  int left = -1, right = -1;
-  for (int x = 0; x < w; ++x) {
-    if (columnHits_[(size_t)x] >= minCol) {
-      if (left < 0) left = x;
-      right = x;
-    }
+  const int cols = (w + kBoundsColumnStep - 1) / kBoundsColumnStep;
+  if ((int)colLit_.size() != cols) colLit_.assign((size_t)cols, 0);
+  for (int i = 0; i < cols; ++i) {
+    colLit_[(size_t)i] = columnHits_[(size_t)(i * kBoundsColumnStep)] >= minCol ? 1 : 0;
   }
-  if (left < 0) return;
+  int left = -1, right = -1;
+  for (int i = SkipEdgeNoise(colLit_, 0, cols - 1, 1, kBoundsColumnStep); i < cols; ++i) {
+    if (colLit_[(size_t)i]) { left = i * kBoundsColumnStep; break; }
+  }
+  for (int i = SkipEdgeNoise(colLit_, cols - 1, 0, -1, kBoundsColumnStep); i >= 0; --i) {
+    if (colLit_[(size_t)i]) { right = i * kBoundsColumnStep; break; }
+  }
+  if (left < 0 || right < left) return;
 
   // Stored top-down. The bottom-up layouts are read in buffer order, so the two
   // vertical edges swap on the way out.

@@ -728,7 +728,9 @@ class VideoRenderer {
   int accL_ = 0, accT_ = 0, accR_ = 0, accB_ = 0;
   bool accAny_ = false;
   int boundsFramesSeen_ = 0;
-  std::vector<int> columnHits_;  // scratch, sized once per format
+  std::vector<int> columnHits_;    // scratch, sized once per format
+  std::vector<uint8_t> rowLit_;    // one entry per scanned line, likewise
+  std::vector<uint8_t> colLit_;
 };
 
 }  // namespace cap
