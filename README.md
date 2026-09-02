@@ -238,7 +238,9 @@ right-click menu, or on **F8** — which measures the black border as a union
 across about two seconds so a fade to black is not read as the picture getting
 smaller, and refuses when too little would survive: a GameCube home screen
 leaves 37 % of the area, against 57 % for the widest border that is still a
-border.
+border. A thin lit strip along the very edge with black behind it is the signal
+ending, not picture — a GameCube in PAL60 closes every frame with one green line
+across the full width — and the border goes on the far side of it.
 
 A crop is a count of source pixels, so it stops meaning anything the moment the
 source changes size. When that happens the crop is **dropped** and a notice says
