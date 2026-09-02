@@ -316,11 +316,18 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
     // A subtype without a size is what re-reading the card leaves behind: the
     // resolution is to be found again, the pixel format is not up for grabs.
     const std::string wish = wanted.subtype;
+    // Und die Rate erst recht nicht. PickDefault antwortet mit einem ganzen
+    // Format, Rate inbegriffen, und das ist der Vorschlag der Karte -- gefragt
+    // war er nicht. Ohne diese Zeile faellt "die des Signals" genau dort unter
+    // den Tisch, wo die Aufloesung neu gesucht wird, und die Karte laeuft
+    // stillschweigend auf ihrer hoechsten.
+    const double wishFps = wanted.fps;
     if (capabilities_.caps.nativeLines() > 0) {
       CAP_LOG("Auflösungssuche: %d Zeilen kommen an, hochskalierte Formate scheiden aus",
               capabilities_.caps.nativeLines());
     }
     wanted = capabilities_.caps.PickDefault(wish);
+    wanted.fps = wishFps;
     if (wish.empty()) {
       CAP_LOG("Kein Format konfiguriert, verwende Standard: %s", wanted.Label().c_str());
     } else if (wanted.subtype == wish) {
