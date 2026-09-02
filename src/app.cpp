@@ -5227,12 +5227,19 @@ void App::DrawUi() {
       // derselbe Bildschirm -- Zeichen, Schriftzug, eine Zeile darunter --, nur
       // sagt die Zeile hier, was als Naechstes zu tun ist, statt zu melden, dass
       // etwas fehlt. Beim ersten Mal fehlt naemlich noch nichts.
+      //
+      // Und sie nennt beide Wege hinein. Das Rechtsklickmenue steht sonst
+      // nirgends: es ist der schnellere von beiden, weil das Naheliegende darin
+      // gleich anklickbar ist statt hinter einem Reiter, aber wer nicht auf die
+      // Idee kommt, ins Bild zu klicken, findet es nie.
       DrawIdleScreen(
           (unsigned long long)idleIcon_.Get(), idleIconSize_,
-          firstRun_ ? T("Willkommen. F2 öffnet die Einstellungen — dort zuerst die "
-                        "Capture-Karte auswählen.",
-                        "Welcome. Press F2 for the settings, and pick your capture card "
-                        "there first.")
+          firstRun_ ? T("Willkommen, bitte zuerst die Capture-Karte auswählen: F2 öffnet die "
+                        "Einstellungen,\n"
+                        "oder Rechtsklick für das Kontextmenü.",
+                        "Welcome, please select your capture device first by pressing F2 to open "
+                        "settings,\n"
+                        "or right click for the context menu.")
                     : T("Kein Gerät aktiv — Rechtsklick oder F2 öffnet die Einstellungen.",
                         "No device active — right-click or press F2 for the settings."));
     }

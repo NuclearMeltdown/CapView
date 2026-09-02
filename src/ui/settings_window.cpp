@@ -476,100 +476,115 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
     tabContext_ = nowContext;
     wantTab_ = activeTab_;
   }
-  int tabIndex = 0;
-  auto tabFlags = [&]() {
-    const bool select = wantTab_ == tabIndex;
-    return select ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+  // Feste Nummern statt eines mitlaufenden Zaehlers: welcher Reiter zuletzt
+  // offen war, steht in der Konfiguration, und die Reihenfolge haengt davon ab,
+  // ob ein Geraet ausgewaehlt ist. Ein Zaehler wuerde dieselbe Zahl je nach Lage
+  // auf verschiedene Reiter zeigen lassen.
+  enum Tab {
+    kTabSource = 0,
+    kTabPicture,
+    kTabHdr,
+    kTabAudio,
+    kTabDisplay,
+    kTabRecord,
+    kTabEncoder,
+    kTabKeys,
+    kTabProfiles,
+    kTabUpdates,
+  };
+  auto tabFlags = [&](int tab) {
+    return wantTab_ == tab ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
   };
 
   if (ImGui::BeginTabBar("settings_tabs", ImGuiTabBarFlags_None)) {
-    if (ImGui::BeginTabItem(T("Quelle###source", "Source###source"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
+    if (ImGui::BeginTabItem(T("Quelle###source", "Source###source"), nullptr,
+                            tabFlags(kTabSource))) {
+      activeTab_ = kTabSource;
       ImGui::BeginChild("scroll_source", ImVec2(0, -footer));
       DrawSourceTab(caps);
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    ++tabIndex;
     // Ohne Gerät gibt es nur eine sinnvolle Handlung, und das ist eines
-    // auszuwählen. Neun weitere Reiter voller Regler, die alle auf ein Bild
+    // auszuwählen. Acht weitere Reiter voller Regler, die alle auf ein Bild
     // wirken sollen, das es nicht gibt, sind an dieser Stelle kein Angebot
     // sondern eine Hürde. Sie kommen zurück, sobald die Karte läuft -- und dann
     // gleich passend zu dem, was sie tatsächlich liefert.
+    //
+    // Updates ist die Ausnahme und steht deshalb ausserhalb: der Reiter hat mit
+    // dem Bild nichts zu tun, und wer gerade *keins* hat, ist womoeglich genau
+    // deshalb hier -- weil eine neuere Fassung die Karte kennt.
     if (!cfg().active().capture.video.empty()) {
-    if (ImGui::BeginTabItem(T("Bild###picture", "Picture###picture"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_image", ImVec2(0, -footer));
-      DrawImageTab();
-      ImGui::EndChild();
-      ImGui::EndTabItem();
-    }
-    ++tabIndex;
-    if (ImGui::BeginTabItem(T("HDR###hdr", "HDR###hdr"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_hdr", ImVec2(0, -footer));
-      DrawHdrTab();
-      ImGui::EndChild();
-      ImGui::EndTabItem();
-    }
-    ++tabIndex;
-    if (ImGui::BeginTabItem(T("Ton###audio", "Audio###audio"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_audio", ImVec2(0, -footer));
-      DrawAudioTab();
-      ImGui::EndChild();
-      ImGui::EndTabItem();
-    }
-    ++tabIndex;
-    if (ImGui::BeginTabItem(T("Anzeige###display", "Display###display"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_display", ImVec2(0, -footer));
-      DrawDisplayTab();
-      ImGui::EndChild();
-      ImGui::EndTabItem();
-    }
-    ++tabIndex;
-    if (ImGui::BeginTabItem(T("Aufnahme###recording", "Recording###recording"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_record", ImVec2(0, -footer));
-      DrawRecordTab(ffmpeg);
-      ImGui::EndChild();
-      ImGui::EndTabItem();
-    }
-    ++tabIndex;
-    if (ImGui::BeginTabItem(T("Encoder###encoder", "Encoder###encoder"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_encoder", ImVec2(0, -footer));
-      DrawEncoderTab(ffmpeg);
-      ImGui::EndChild();
-      ImGui::EndTabItem();
-    }
-    ++tabIndex;
-    if (ImGui::BeginTabItem(T("Tasten###keys", "Keys###keys"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_keys", ImVec2(0, -footer));
-      DrawHotkeysTab();
-      ImGui::EndChild();
-      ImGui::EndTabItem();
-    }
-    ++tabIndex;
-    if (ImGui::BeginTabItem(T("Profile###profiles", "Profiles###profiles"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
-      ImGui::BeginChild("scroll_profiles", ImVec2(0, -footer));
-      DrawProfilesTab(caps);
-      ImGui::EndChild();
-      ImGui::EndTabItem();
-    }
-    ++tabIndex;
-    if (ImGui::BeginTabItem(T("Updates###updates", "Updates###updates"), nullptr, tabFlags())) {
-      activeTab_ = tabIndex;
+      if (ImGui::BeginTabItem(T("Bild###picture", "Picture###picture"), nullptr,
+                              tabFlags(kTabPicture))) {
+        activeTab_ = kTabPicture;
+        ImGui::BeginChild("scroll_image", ImVec2(0, -footer));
+        DrawImageTab();
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem(T("HDR###hdr", "HDR###hdr"), nullptr, tabFlags(kTabHdr))) {
+        activeTab_ = kTabHdr;
+        ImGui::BeginChild("scroll_hdr", ImVec2(0, -footer));
+        DrawHdrTab();
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem(T("Ton###audio", "Audio###audio"), nullptr, tabFlags(kTabAudio))) {
+        activeTab_ = kTabAudio;
+        ImGui::BeginChild("scroll_audio", ImVec2(0, -footer));
+        DrawAudioTab();
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem(T("Anzeige###display", "Display###display"), nullptr,
+                              tabFlags(kTabDisplay))) {
+        activeTab_ = kTabDisplay;
+        ImGui::BeginChild("scroll_display", ImVec2(0, -footer));
+        DrawDisplayTab();
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem(T("Aufnahme###recording", "Recording###recording"), nullptr,
+                              tabFlags(kTabRecord))) {
+        activeTab_ = kTabRecord;
+        ImGui::BeginChild("scroll_record", ImVec2(0, -footer));
+        DrawRecordTab(ffmpeg);
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem(T("Encoder###encoder", "Encoder###encoder"), nullptr,
+                              tabFlags(kTabEncoder))) {
+        activeTab_ = kTabEncoder;
+        ImGui::BeginChild("scroll_encoder", ImVec2(0, -footer));
+        DrawEncoderTab(ffmpeg);
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem(T("Tasten###keys", "Keys###keys"), nullptr, tabFlags(kTabKeys))) {
+        activeTab_ = kTabKeys;
+        ImGui::BeginChild("scroll_keys", ImVec2(0, -footer));
+        DrawHotkeysTab();
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      if (ImGui::BeginTabItem(T("Profile###profiles", "Profiles###profiles"), nullptr,
+                              tabFlags(kTabProfiles))) {
+        activeTab_ = kTabProfiles;
+        ImGui::BeginChild("scroll_profiles", ImVec2(0, -footer));
+        DrawProfilesTab(caps);
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+    }  // Reiter, die ein Bild brauchen
+    if (ImGui::BeginTabItem(T("Updates###updates", "Updates###updates"), nullptr,
+                            tabFlags(kTabUpdates))) {
+      activeTab_ = kTabUpdates;
       ImGui::BeginChild("scroll_updates", ImVec2(0, -footer));
       DrawUpdatesTab();
       ImGui::EndChild();
       ImGui::EndTabItem();
     }
-    ++tabIndex;
-    }  // alle Reiter außer Quelle, nur mit ausgewähltem Gerät
     ImGui::EndTabBar();
   }
   wantTab_ = -1;
@@ -2155,8 +2170,6 @@ void SettingsWindow::DrawImageTab() {
           "labels mislead easily — on some cards they describe what is expected at the input, "
           "and then \"Full\" is the setting that passes the signal through untouched."));
   }
-  ImGui::TextDisabled(T("Beides auch per Rechtsklick im Bild erreichbar.",
-                        "Both are also in the right-click menu over the picture."));
 }
 
 // ----------------------------------------------------------------- audio tab

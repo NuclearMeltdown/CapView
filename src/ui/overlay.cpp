@@ -333,9 +333,18 @@ void DrawIdleScreen(unsigned long long icon, int iconPixels, const std::string& 
   centred("CapView", false);
   ImGui::SetWindowFontScale(1.0f);
 
+  // Zeilenweise, und jede Zeile fuer sich zentriert. Ein \n in einem einzelnen
+  // Textelement setzt die Zeilen zwar untereinander, aber linksbuendig zum
+  // Block -- und zwei verschieden lange Zeilen sehen dann verrutscht aus statt
+  // gesetzt.
   if (!detail.empty()) {
     ImGui::Spacing();
-    centred(detail.c_str(), true);
+    for (size_t at = 0; at <= detail.size();) {
+      const size_t brk = detail.find('\n', at);
+      centred(detail.substr(at, brk == std::string::npos ? brk : brk - at).c_str(), true);
+      if (brk == std::string::npos) break;
+      at = brk + 1;
+    }
   }
 
   ImGui::End();
