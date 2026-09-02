@@ -74,6 +74,25 @@ space are selected independently, so combinations a driver does not advertise
 but does accept can be forced — which covers the common case of a card reporting
 only 1080p30 for a mode it will in fact deliver at 1080p60.
 
+Two of those have answers that are not numbers. A card advertises the same list
+whatever is plugged into it — this one offers everything up to 1920×1080 at 60
+with a PAL composite cable in front of it — so the resolution offered by default
+is capped to the raster that is actually arriving, rather than upscaling a
+console to 1080p inside the card for nothing, and the rate list carries two
+modes beside the numbers: **highest available** and **the signal's rate**.
+Neither is stored as a number. Both are resolved when the card is opened, from
+the card that is really there, so a console switching from 576i50 to 480p60
+needs no one to edit a profile; each shows in brackets what it currently comes
+to.
+
+The signal's rate is the one the video standard prescribes: 50 under PAL and
+SECAM, 59.94 under NTSC and its relatives, a flat 60 under PAL-60 — which shares
+NTSC's 525 lines and not its rate. Both of those follow from the standard and
+neither follows from the other. It is offered only where the picture goes
+through the analogue decoder; component, VGA and everything digital carry
+whatever the source feels like, no standard describes it, and there the highest
+on offer remains the best guess there is.
+
 Cards with an analogue decoder also expose their **video standard** — PAL,
 PAL-60, NTSC, SECAM and the rest. It matters on a console that does both 50 and
 60 Hz: PAL is 625 lines at 50, PAL-60 is 525 at 60, and the wrong one gives
@@ -238,6 +257,16 @@ something else.
 Colour range and matrix default to automatic, the range measured from the image
 rather than inferred from the pixel format — a console set to full range
 delivers full range whether the card is asked for NV12 or RGB32.
+
+That verdict then holds until the picture format changes, which is right for a
+source that does not become something else halfway through a session and wrong
+for the one thing that changes without touching the format: an option in the
+card's own driver, which moves every black level in the picture and leaves the
+media type exactly as it was. **Measure again** sits beside the verdict, in the
+right-click menu, and on **F6**. Under it stand the numbers it came from —
+lowest and highest sample, the share below 16 and above 235 — because black at 0
+and black at 16 both read as *detected*, and while setting a card up those are
+precisely the two that have to be told apart.
 
 A **native pixel grid** setting resolves every output pixel to the console's own
 rather than to a fraction of one. A card samples the line at a fixed rate,
@@ -545,6 +574,7 @@ More: [Updates](../../wiki/Updates).
 | F2 | Settings |
 | F5 | Restart capture |
 | Shift+F5 | Reinitialise card |
+| F6 | Measure colour range again |
 | F7 | Detect video standard |
 | F8 | Detect border |
 | F9 | Start / stop recording |
