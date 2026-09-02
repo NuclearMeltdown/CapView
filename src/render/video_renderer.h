@@ -231,6 +231,33 @@ class VideoRenderer {
   enum class RangeVerdict { Pending, Limited, Full };
   RangeVerdict detectedRange() const { return rangeVerdict_; }
 
+  // Die Zahlen, aus denen das Urteil gefallen ist. "Begrenzt" oder "voll" ist
+  // die Antwort auf die Frage, die der Renderer hat; wer wissen will, was eine
+  // Treibereinstellung angerichtet hat, braucht die Frage davor: liegt Schwarz
+  // bei 0 oder bei 16. Dieselbe Auskunft steht im Log, aber genau einmal, in
+  // dem Augenblick, in dem sie feststand.
+  //
+  // Ohne Sperre gelesen, wie das Urteil selbst: geschrieben wird beim Messen,
+  // gelesen beim Zeichnen. Der schlimmste Fall ist ein Satz Zahlen aus zwei
+  // aufeinanderfolgenden Bildern -- fuer eine Anzeige belanglos, und eine
+  // Sperre in den Messpfad zu legen waere es nicht wert.
+  struct RangeNumbers {
+    int min = 255;
+    int max = 0;
+    unsigned long long below16 = 0;
+    unsigned long long above235 = 0;
+    unsigned long long samples = 0;
+  };
+  RangeNumbers rangeNumbers() const {
+    RangeNumbers n;
+    n.min = rangeMin_;
+    n.max = rangeMax_;
+    n.below16 = rangeBelow16_;
+    n.above235 = rangeAbove235_;
+    n.samples = rangeSamples_;
+    return n;
+  }
+
   // Whether the source is interlaced, measured the same way and for the same
   // reason: the media type is the obvious place to ask and routinely does not
   // answer. A plain VIDEOINFOHEADER has no field to say it in, and cards that do
@@ -365,6 +392,13 @@ class VideoRenderer {
   // different signal on the same pins without the format changing, and none of
   // the verdicts survive that.
   void ResetAnalysis();
+
+  // Nur den Wertebereich. Das ist die eine Messung, die man von Hand wiederholen
+  // will: sie haengt an Einstellungen ausserhalb von CapView -- Treiberoption,
+  // Quellgeraet -- die sich aendern koennen, ohne dass am Format etwas
+  // passiert. Die Verschraenkung und die Bildgrenzen davon mitzureissen waere
+  // nur schaedlich, denn beide zu verlieren sieht man sofort.
+  void ResetRangeAnalysis();
 
   // Copies the current picture out once, tightly packed, in
   // kReadbackPixelFormat. Unlike the recording path this waits for the GPU,

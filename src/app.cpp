@@ -1718,6 +1718,22 @@ void App::StandardSearchText(std::string* headline, std::string* detail) const {
 // Der Umweg dafuer war bisher, im Normwaehler irgendeine feste Norm zu setzen
 // und wieder auf Automatisch zu stellen. Das funktioniert und findet niemand,
 // der es nicht schon weiss.
+void App::RemeasureRange() {
+  if (captureState_ != CaptureState::Running) {
+    Toast(T("Keine laufende Quelle.", "No source is running."));
+    return;
+  }
+  renderer_.ResetRangeAnalysis();
+  CAP_LOG("Wertebereich: Messung von Hand neu gestartet");
+  // Gesagt werden muss es, weil sonst nichts passiert, was man sehen koennte:
+  // die Messung braucht vierzig Bilder, und bis dahin steht in der Anzeige
+  // dasselbe wie vorher.
+  Toast(config_.active().image.range == ColorRange::Auto
+            ? T("Wertebereich wird neu gemessen.", "Measuring the range again.")
+            : T("Wertebereich wird neu gemessen — verwendet wird die feste Einstellung.",
+                "Measuring the range again — the fixed setting is what gets used."));
+}
+
 void App::RescanVideoStandard() {
   if (captureState_ != CaptureState::Running) {
     Toast(T("Keine laufende Quelle.", "No source is running."));
@@ -5350,6 +5366,26 @@ void App::DrawUi() {
   }
   settings_.SetDetectedRange(&detectedRangeText_);
 
+  // Die Zahlen hinter dem Urteil. Der Anteil unter 16 ist der, an dem es
+  // haengt (die Schwelle steht bei 0,2 %), der ueber 235 steht daneben, weil
+  // Superweiss in einem begrenzten Signal erlaubt ist und beim Ablesen sonst
+  // wie ein Widerspruch aussieht.
+  {
+    const VideoRenderer::RangeNumbers n = renderer_.rangeNumbers();
+    if (n.samples > 0) {
+      rangeNumbersText_ = Format(T("min %d, max %d, %.2f %% unter 16, %.2f %% über 235, "
+                                   "%llu Proben",
+                                   "min %d, max %d, %.2f %% below 16, %.2f %% above 235, "
+                                   "%llu samples"),
+                                 n.min, n.max, 100.0 * (double)n.below16 / (double)n.samples,
+                                 100.0 * (double)n.above235 / (double)n.samples,
+                                 (unsigned long long)n.samples);
+    } else {
+      rangeNumbersText_.clear();
+    }
+  }
+  settings_.SetRangeNumbers(&rangeNumbersText_);
+
   switch (renderer_.detectedInterlace()) {
     case VideoRenderer::InterlaceVerdict::Interlaced:
       detectedInterlaceText_ = renderer_.sourceCoSitedFields()
@@ -5433,6 +5469,7 @@ void App::DrawUi() {
   if (settings_.takeDeviceConfigRequest()) OpenDeviceConfig();
   if (settings_.takeCropDetectRequest()) DetectCrop();
   if (settings_.takeCardResetRequest()) ReinitialiseCard();
+  if (settings_.takeRangeRemeasureRequest()) RemeasureRange();
   settings_.setProbeBusy(probing_.load(std::memory_order_relaxed));
   // Drawn here only when the settings live inside the picture. The separate
   // window is deliberately not touched from in here: this runs between the main
@@ -5647,6 +5684,18 @@ void App::DrawContextMenu() {
                    "Searches for the video standard again, even when the current one holds. "
                    "For colours that are wrong in a way no measurement catches."));
 
+  // Und die dritte Messung derselben Art. Sie steht hier vor allem deshalb,
+  // weil sie sonst nur im Einstellungsfenster zu erreichen waere -- und wer im
+  // Treiber der Karte etwas umstellt, hat CapView im Ruecken, nicht offen.
+  if (ImGui::MenuItem(T("Wertebereich neu messen", "Measure range again"),
+                      sc(HotkeyAction::RemeasureRange))) {
+    RemeasureRange();
+  }
+  WrappedTooltip(T("Das Urteil über voll oder begrenzt steht, bis sich das Bildformat ändert. "
+                   "Nach einer Umstellung im Treiber der Karte hiermit neu messen.",
+                   "The verdict on full or limited holds until the picture format changes. "
+                   "After changing something in the card's driver, measure again here."));
+
   if (ImGui::MenuItem(T("Aufnahme neu starten", "Restart capture"), sc(HotkeyAction::RestartCapture))) RestartAll(true);
   if (ImGui::MenuItem(T("Karte neu einlesen", "Reinitialise card"), sc(HotkeyAction::ReinitCard))) ReinitialiseCard();
   if (ImGui::MenuItem(T("Beenden", "Quit"), "Alt+F4")) ::PostMessageW(hwnd_, WM_CLOSE, 0, 0);
@@ -5719,6 +5768,9 @@ bool App::HandleKeyDown(WPARAM key) {
       return true;
     case HotkeyAction::DetectStandard:
       RescanVideoStandard();
+      return true;
+    case HotkeyAction::RemeasureRange:
+      RemeasureRange();
       return true;
     case HotkeyAction::Mute:
       ToggleMute();

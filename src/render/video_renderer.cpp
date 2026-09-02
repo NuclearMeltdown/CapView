@@ -1120,7 +1120,7 @@ static const double kDoubleFloor = 4.0;
 static const int kRateVetoMinHeight = 720;
 static const double kRateVetoMinFps = 48.0;
 
-void VideoRenderer::ResetAnalysis() {
+void VideoRenderer::ResetRangeAnalysis() {
   rangeVerdict_ = RangeVerdict::Pending;
   rangeFramesSeen_ = 0;
   rangeSamples_ = 0;
@@ -1128,6 +1128,10 @@ void VideoRenderer::ResetAnalysis() {
   rangeAbove235_ = 0;
   rangeMin_ = 255;
   rangeMax_ = 0;
+}
+
+void VideoRenderer::ResetAnalysis() {
+  ResetRangeAnalysis();
 
   interlaceVerdict_ = InterlaceVerdict::Pending;
   coSitedFields_ = false;

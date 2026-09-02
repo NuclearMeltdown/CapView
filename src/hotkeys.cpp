@@ -25,6 +25,11 @@ Hotkeys::Hotkeys() {
   // Automatik nicht misst. Und wie dort gilt, dass der Moment zaehlt -- ein
   // Rundgang auf einem schwarzen Bild entscheidet nichts.
   (*this)[HotkeyAction::DetectStandard].vk = VK_F7;
+  // Die dritte derselben Sorte, und deshalb die dritte Taste in derselben
+  // Reihe. Sie ist die einzige, die eine *stehende* Messung wegwirft: das
+  // Urteil ueber den Wertebereich haelt, bis sich das Bildformat aendert, und
+  // eine im Treiber umgestellte Option aendert es nicht.
+  (*this)[HotkeyAction::RemeasureRange].vk = VK_F6;
   (*this)[HotkeyAction::Mute].vk = 'M';
   (*this)[HotkeyAction::VolumeUp].vk = VK_OEM_PLUS;
   (*this)[HotkeyAction::VolumeDown].vk = VK_OEM_MINUS;
@@ -48,6 +53,7 @@ const char* HotkeyActionName(HotkeyAction action) {
     case HotkeyAction::Screenshot: return T("Screenshot", "Screenshot");
     case HotkeyAction::DetectCrop: return T("Rand suchen", "Detect border");
     case HotkeyAction::DetectStandard: return T("Videonorm suchen", "Detect video standard");
+    case HotkeyAction::RemeasureRange: return T("Wertebereich neu messen", "Measure range again");
     case HotkeyAction::Mute: return T("Stumm", "Mute");
     case HotkeyAction::VolumeUp: return T("Lauter", "Volume up");
     case HotkeyAction::VolumeDown: return T("Leiser", "Volume down");
@@ -66,6 +72,7 @@ const char* HotkeyActionKey(HotkeyAction action) {
     case HotkeyAction::Screenshot: return "screenshot";
     case HotkeyAction::DetectCrop: return "detectCrop";
     case HotkeyAction::DetectStandard: return "detectStandard";
+    case HotkeyAction::RemeasureRange: return "remeasureRange";
     case HotkeyAction::Mute: return "mute";
     case HotkeyAction::VolumeUp: return "volumeUp";
     case HotkeyAction::VolumeDown: return "volumeDown";
