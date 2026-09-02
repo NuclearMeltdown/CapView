@@ -9,6 +9,15 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
+# The version number has one home: project(... VERSION) above. From there it
+# reaches the C++ side as CAPVIEW_VERSION and the Windows version resource
+# through res/capview.rc.in, so a release bumps one number in one file. It used
+# to be two, and the second one drifted -- 3.5.1 shipped an executable that told
+# Explorer it was 3.5.0.0.
+add_compile_definitions(CAPVIEW_VERSION="${PROJECT_VERSION}")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/res/capview.rc.in"
+               "${CMAKE_BINARY_DIR}/capview.rc" @ONLY)
+
 set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
 
 # The virtual camera's DirectShow source filter. A DLL of its own because it
@@ -77,7 +86,7 @@ add_executable(CapView WIN32
   src/ui/settings_window.cpp
   src/ui/overlay.cpp
 
-  res/capview.rc
+  "${CMAKE_BINARY_DIR}/capview.rc"
 
   ${IMGUI_DIR}/imgui.cpp
   ${IMGUI_DIR}/imgui_draw.cpp

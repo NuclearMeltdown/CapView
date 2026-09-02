@@ -55,7 +55,15 @@ std::wstring ExeDirectory();
 // What this build calls itself. Compared against the newest release tag on
 // GitHub, so it has to line up with how those are named -- "v1.1" there against
 // "1.1" here.
-inline const char* kAppVersion = "3.6.0";
+//
+// Set by CMake from project(CapView VERSION ...), which is also where the
+// version resource in the executable comes from. Deliberately no fallback: a
+// default here would be a second place the number can live, and the point is
+// that there is only one.
+#ifndef CAPVIEW_VERSION
+#error "CAPVIEW_VERSION comes from CMake -- configure the build rather than compiling by hand."
+#endif
+inline const char* kAppVersion = CAPVIEW_VERSION;
 
 // Creates a directory and every missing parent. True when it exists afterwards.
 bool EnsureFolder(const std::wstring& path);
