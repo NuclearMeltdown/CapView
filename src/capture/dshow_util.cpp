@@ -781,11 +781,68 @@ std::vector<FpsOption> CapsModel::FpsList(const std::string& subtype, int width,
   std::sort(out.begin(), out.end(),
             [](const FpsOption& a, const FpsOption& b) { return a.fps > b.fps; });
 
-  // Above the numbers, the entry that is not a number. It leads because it is
-  // the right answer for almost everyone: it cannot go stale when the console
-  // switches from 576i50 to 480p60.
-  out.insert(out.begin(), FpsOption{0.0, false, true});
+  // Above the numbers, the entries that are not numbers. They lead because they
+  // are the right answer for almost everyone: neither can go stale when the
+  // console switches from 576i50 to 480p60.
+  out.insert(out.begin(), FpsOption{0.0, false, true, false});
+  // Und ueber der hoechsten die richtige, wo bekannt ist, welche das ist. Sie
+  // steht nur da, wenn die Norm es sagt -- eine Auswahl anzubieten, die sich
+  // beim Oeffnen als "geht nicht" herausstellt, waere schlechter als keine.
+  if (nativeFieldRate_ > 0.0) out.insert(out.begin(), FpsOption{0.0, false, false, true});
   return out;
+}
+
+void CapsModel::SetNativeStandard(long standard) {
+  nativeLines_ = VideoStandardLines(standard);
+  nativeFieldRate_ = VideoStandardFieldRate(standard);
+}
+
+double CapsModel::NativeFps(const std::string& subtype, int width, int height) const {
+  // Die Rate steht in der Normtabelle: 50 auf 625 Zeilen, 59,94 auf 525, 60 bei
+  // PAL 60. Gefragt ist die Halbbildrate, nicht die halbe -- CapView zeigt
+  // Halbbilder einzeln, und eine Karte, die 720x576 anbietet, nennt dieselbe 50
+  // dazu.
+  const double want = nativeFieldRate_;
+  if (want <= 0.0) return 0.0;
+
+  // Ueber denselben Bereich wie "hoechste verfuegbare", damit beide Betriebs-
+  // arten dieselbe Auskunft benutzen: der schliesst Eintraege ein, die diese
+  // Groesse nur ueberdecken statt sie zu nennen, und leiht sich bei einer von
+  // Hand erzwungenen Groesse die Raten des Formats. Sonst haette die Rate des
+  // Signals nur dort funktioniert, wo die Karte genau diese Zeile auffuehrt --
+  // also fuer 720x576 in jedem Pixelformat, aber fuer nichts Erzwungenes.
+  const FpsRange range = ReportedRange(entries_, subtype, width, height);
+  if (range.have && want >= range.min - 0.05 && want <= range.max + 0.05) return want;
+
+  // Nennt die Karte sie nirgends, das Naechstgelegene von dem, was sie nennt --
+  // eine, die nur 60,00 kennt, soll 60,00 bekommen und nicht 0. Erst aus den
+  // Eintraegen zu dieser Groesse, und nur wenn es keine gibt, aus dem ganzen
+  // Format.
+  double best = 0.0;
+  double bestErr = 1e9;
+  auto consider = [&](double c) {
+    if (c <= 0.0) return;
+    const double err = std::fabs(c - want);
+    if (err < bestErr) {
+      bestErr = err;
+      best = c;
+    }
+  };
+  for (int pass = 0; pass < 2 && best <= 0.0; ++pass) {
+    for (const CapsEntry& e : entries_) {
+      if (e.subtypeLabel != subtype) continue;
+      if (pass == 0) {
+        const bool sameRes = (e.width == width && e.height == height);
+        const bool coversRes = width >= e.minWidth && width <= e.maxWidth &&
+                               height >= e.minHeight && height <= e.maxHeight;
+        if (!sameRes && !coversRes) continue;
+      }
+      consider(e.defaultFps);
+      consider(e.minFps);
+      consider(e.maxFps);
+    }
+  }
+  return best;
 }
 
 double CapsModel::HighestFps(const std::string& subtype, int width, int height) const {
@@ -815,19 +872,42 @@ bool CapsModel::IsAdvertised(const std::string& subtype, int width, int height, 
 }
 
 FormatSel CapsModel::PickDefault(const std::string& preferSubtype) const {
+  // Wieviele Zeilen das Bild hoechstens tragen kann. Ein 625-Zeilen-Raster hat
+  // 576 sichtbare, ein 525er 480; ein paar Treiber bieten fuer 525 auch 486 an,
+  // dafuer der Schlupf. Der laesst 576 unter 625 durch und 720 nirgends.
+  const int activeLines = nativeLines_ >= 600 ? 576 : (nativeLines_ > 0 ? 480 : 0);
+
   FormatSel best;
   long long bestScore = -1;
   for (const CapsEntry& e : entries_) {
     // A named subtype beats everything below it, and everything below it still
     // decides between the entries that carry it. The area term tops out around
-    // 2^33 at 4K and the renderer bonus sits at 2^40, so 2^42 clears both.
+    // 2^33 at 4K, the line bonus sits at 2^39, the renderer bonus at 2^40 and
+    // the raster bonus at 2^41, so 2^42 clears all four.
     const long long wishBonus =
         (!preferSubtype.empty() && e.subtypeLabel == preferSubtype) ? 1LL << 42 : 0;
+    // Die richtige Groesse vor der bequemen. Wo das Raster bekannt ist, gewinnt
+    // jeder Eintrag, der hineinpasst, gegen jeden, der darueber liegt -- auch
+    // gegen einen, den der Renderer lieber haette. Ein Dekoder im Graphen
+    // kostet Rechenzeit, eine hochskalierte Aufnahme kostet das Bild, und das
+    // eine ist ruecknehmbar, das andere nicht. Passt gar nichts darunter,
+    // bekommt jeder Eintrag dieselbe Null und es bleibt beim Groessten.
+    const long long fitBonus =
+        (activeLines > 0 && e.height > 0 && e.height <= activeLines + 16) ? 1LL << 41 : 0;
     // Prefer formats the renderer can take without a decoder in the graph.
     const long long formatBonus = IsRendererSubtype(e.subtype) ? 1LL << 40 : 0;
+    // Unter dem Raster entscheidet sonst wieder die Flaeche, und die groesste
+    // ist dort 768x576 -- eine Zeile, die dieselben 720 Abtastwerte auf 768
+    // breitgerechnet hat, damit die Pixel quadratisch werden. Genau das soll
+    // die Aufnahme nicht: eine Norm-Zeile hat 13,5 MHz und damit 720 Werte,
+    // egal ob 525 oder 625 Zeilen (704 bei den Karten, die den Rand weglassen).
+    // Also der echten Zeilenlaenge den Vorzug, der Umrechnung nicht. Bietet
+    // niemand eine an, bleibt es bei Null und die Flaeche entscheidet weiter.
+    const long long lineBonus =
+        (activeLines > 0 && e.width >= 704 && e.width <= 720) ? 1LL << 39 : 0;
     const double fps = e.maxFps > 0.0 ? e.maxFps : e.defaultFps;
-    const long long score =
-        wishBonus + formatBonus + (long long)e.width * e.height * 1000 + (long long)(fps * 10);
+    const long long score = wishBonus + fitBonus + formatBonus + lineBonus +
+                            (long long)e.width * e.height * 1000 + (long long)(fps * 10);
     if (score > bestScore) {
       bestScore = score;
       best.subtype = e.subtypeLabel;
@@ -1263,6 +1343,25 @@ int CurrentCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFil
   return -1;
 }
 
+bool ConnectorFollowsVideoStandard(long physicalType) {
+  switch (physicalType) {
+    case PhysConn_Video_Composite:
+    case PhysConn_Video_SVideo:
+    case PhysConn_Video_Tuner:
+    case PhysConn_Video_SCART:
+    case PhysConn_Video_AUX:
+      // SCART fuehrt je nach Kabel Composite oder RGB, aber beide in einem
+      // Sendersaster: es gibt kein SCART, das 720p traegt.
+      return true;
+    default:
+      // Composite und S-Video sind die einzigen, bei denen die Norm die
+      // Zeilenzahl wirklich festlegt. Component und VGA sind analog und tragen
+      // trotzdem, was die Quelle will; HDMI, DVI und SDI beantworten die Frage
+      // gar nicht erst.
+      return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Analogue video standard
 
@@ -1272,21 +1371,38 @@ struct StandardEntry {
   long value;
   const char* name;
   int lines;
+  // Halbbilder je Sekunde. Nicht aus der Zeilenzahl ableitbar: die 525-Zeiler
+  // teilen sich in die, deren Takt am NTSC-Farbtraeger haengt -- 60000/1001,
+  // die krumme Rate --, und PAL 60, das es nur gibt, weil eine umgebaute
+  // Konsole oder ein Player ein PAL-Bild mit *glatten* 60 Hz erzeugt. Beide
+  // bietet dieselbe Karte an, und wer bei PAL 60 die 59,94 nimmt, hat sich um
+  // ein Bild in tausend vertan.
+  double fieldRate;
 };
 
 // Ordered so the common ones come first. The config stores the DirectShow value
 // and not the index, so this list may be reordered and regrouped freely.
 const StandardEntry kStandards[] = {
-    {AnalogVideo_PAL_B, "PAL B", 625},        {AnalogVideo_PAL_G, "PAL G", 625},
-    {AnalogVideo_PAL_I, "PAL I", 625},        {AnalogVideo_PAL_D, "PAL D", 625},
-    {AnalogVideo_PAL_H, "PAL H", 625},        {AnalogVideo_PAL_N, "PAL N", 625},
-    {AnalogVideo_PAL_60, "PAL 60", 525},      {AnalogVideo_PAL_M, "PAL M", 525},
-    {AnalogVideo_NTSC_M, "NTSC M", 525},      {AnalogVideo_NTSC_M_J, "NTSC M (Japan)", 525},
-    {AnalogVideo_NTSC_433, "NTSC 4.43", 525}, {AnalogVideo_SECAM_B, "SECAM B", 625},
-    {AnalogVideo_SECAM_D, "SECAM D", 625},    {AnalogVideo_SECAM_G, "SECAM G", 625},
-    {AnalogVideo_SECAM_H, "SECAM H", 625},    {AnalogVideo_SECAM_K, "SECAM K", 625},
-    {AnalogVideo_SECAM_K1, "SECAM K1", 625},  {AnalogVideo_SECAM_L, "SECAM L", 625},
-    {AnalogVideo_SECAM_L1, "SECAM L1", 625},  {AnalogVideo_PAL_N_COMBO, "PAL N combo", 625},
+    {AnalogVideo_PAL_B, "PAL B", 625, 50.0},
+    {AnalogVideo_PAL_G, "PAL G", 625, 50.0},
+    {AnalogVideo_PAL_I, "PAL I", 625, 50.0},
+    {AnalogVideo_PAL_D, "PAL D", 625, 50.0},
+    {AnalogVideo_PAL_H, "PAL H", 625, 50.0},
+    {AnalogVideo_PAL_N, "PAL N", 625, 50.0},
+    {AnalogVideo_PAL_60, "PAL 60", 525, 60.0},
+    {AnalogVideo_PAL_M, "PAL M", 525, 59.94},
+    {AnalogVideo_NTSC_M, "NTSC M", 525, 59.94},
+    {AnalogVideo_NTSC_M_J, "NTSC M (Japan)", 525, 59.94},
+    {AnalogVideo_NTSC_433, "NTSC 4.43", 525, 59.94},
+    {AnalogVideo_SECAM_B, "SECAM B", 625, 50.0},
+    {AnalogVideo_SECAM_D, "SECAM D", 625, 50.0},
+    {AnalogVideo_SECAM_G, "SECAM G", 625, 50.0},
+    {AnalogVideo_SECAM_H, "SECAM H", 625, 50.0},
+    {AnalogVideo_SECAM_K, "SECAM K", 625, 50.0},
+    {AnalogVideo_SECAM_K1, "SECAM K1", 625, 50.0},
+    {AnalogVideo_SECAM_L, "SECAM L", 625, 50.0},
+    {AnalogVideo_SECAM_L1, "SECAM L1", 625, 50.0},
+    {AnalogVideo_PAL_N_COMBO, "PAL N combo", 625, 50.0},
 };
 const int kStandardCount = (int)(sizeof(kStandards) / sizeof(kStandards[0]));
 
@@ -1410,6 +1526,11 @@ int VideoStandardIndexOf(long value) {
 int VideoStandardLines(long value) {
   const int index = VideoStandardIndexOf(value);
   return index < 0 ? 0 : kStandards[index].lines;
+}
+
+double VideoStandardFieldRate(long value) {
+  const int index = VideoStandardIndexOf(value);
+  return index < 0 ? 0.0 : kStandards[index].fieldRate;
 }
 
 int VideoStandardGroupCount() { return kStandardGroupCount; }
