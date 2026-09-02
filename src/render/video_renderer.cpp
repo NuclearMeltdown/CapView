@@ -974,49 +974,66 @@ void VideoRenderer::AnalyzeLevels(const FrameView& frame) {
 
   const int w = source_.width;
   const int h = source_.height;
-  if (w <= 0 || h <= 0) return;
+  if (w < 32 || h < 32) return;
 
-  // Where the brightness lives, and how far apart two of them are. For the
-  // packed YUV layouts luma is every other byte; NV12 and planar keep it in a
-  // plane of its own; RGB has no luma, so every channel is looked at directly
-  // -- limited range RGB confines all three to 16-235.
+  // Where the brightness lives -- the same answer the rest of the file gets.
+  // This had a switch of its own until 3.6.1, and it had drifted: RGB was read
+  // byte by byte instead of green only, so in RGB32 every fourth sample was the
+  // padding byte. That byte is zero, which put a quarter of the evidence in the
+  // "below 16" column before the signal was looked at.
   size_t offset = 0;
-  size_t step = 2;
-  size_t span = 0;
-  switch (kind_) {
-    case FormatKind::Yuy2:
-    case FormatKind::Yvyu:
-      offset = 0; step = 2; span = (size_t)w * 2 * (size_t)h; break;
-    case FormatKind::Uyvy:
-      offset = 1; step = 2; span = (size_t)w * 2 * (size_t)h; break;
-    case FormatKind::Nv12:
-    case FormatKind::Planar420:
-      offset = 0; step = 1; span = (size_t)w * (size_t)h; break;
-    case FormatKind::Rgb:
-    default:
-      offset = 0; step = 1;
-      span = (size_t)w * (size_t)h * (source_.subtypeLabel == "RGB24" ? 3 : 4);
-      break;
+  size_t step = 1;
+  if (!LumaLayout(&offset, &step)) return;
+  const size_t pitch = (size_t)w * step;
+  if (pitch * (size_t)h > frame.size) return;
+
+  // And blanking is not picture. Everything outside the active line digitises
+  // below black -- on a PEXHDCAP60L it pins to exactly 0 in RGB and 1 in Y, 1.2
+  // million samples without one outlier -- and it is an eighth of the frame.
+  // Measured along with the picture it drowns the question the measurement is
+  // asking: the same capture reads 13.1 % below 16 taken whole and 0.22 % taken
+  // inside the picture, against a threshold of 0.2 %. The border was deciding
+  // the verdict, on every signal, in the same direction.
+  //
+  // The content bounds are the right place to stop, and they are ready in time:
+  // five windows of nine frames is 45, and no verdict is due before 120. Until
+  // they are, a sixteenth off each side, which clears the 22 and 26 point border
+  // this card leaves without needing to know anything about it.
+  int x0 = w / 16, x1 = w - w / 16;
+  int y0 = h / 16, y1 = h - h / 16;
+  int bl = 0, bt = 0, br = 0, bb = 0;
+  if (contentBounds(&bl, &bt, &br, &bb)) {
+    // They are stored top-down and indexed here in buffer order, so for the
+    // bottom-up layouts the two vertical edges swap back. The flip is its own
+    // inverse.
+    if (source_.bottomUp) {
+      const int t = h - 1 - bb;
+      bb = h - 1 - bt;
+      bt = t;
+    }
+    x0 = bl; x1 = br + 1; y0 = bt; y1 = bb + 1;
   }
-  if (span > frame.size) span = frame.size;
-  if (span <= offset + step) return;
+  if (x1 - x0 < 32 || y1 - y0 < 32) {
+    x0 = 0; x1 = w; y0 = 0; y1 = h;
+  }
 
   // A prime stride so the samples do not land on the same column every row,
   // which on a UI heavy picture would read one vertical stripe and call it the
   // whole frame.
-  const size_t usable = span - offset;
-  const size_t count = usable / step;
-  size_t stride = count / (size_t)kRangeSamplesPerFrame;
+  size_t stride = (size_t)(x1 - x0) * (size_t)(y1 - y0) / (size_t)kRangeSamplesPerFrame;
   if (stride < 1) stride = 1;
   if (stride % 2 == 0) ++stride;
 
-  for (size_t i = 0; i < count; i += stride) {
-    const int v = frame.data[offset + i * step];
-    if (v < rangeMin_) rangeMin_ = v;
-    if (v > rangeMax_) rangeMax_ = v;
-    if (v < 16) ++rangeBelow16_;
-    else if (v > 235) ++rangeAbove235_;
-    ++rangeSamples_;
+  for (int y = y0; y < y1; ++y) {
+    const uint8_t* row = frame.data + offset + (size_t)y * pitch;
+    for (int x = x0 + (int)((size_t)y % stride); x < x1; x += (int)stride) {
+      const int v = row[(size_t)x * step];
+      if (v < rangeMin_) rangeMin_ = v;
+      if (v > rangeMax_) rangeMax_ = v;
+      if (v < 16) ++rangeBelow16_;
+      else if (v > 235) ++rangeAbove235_;
+      ++rangeSamples_;
+    }
   }
 
   const int analysed = rangeFramesSeen_ / kRangeSampleEvery;
@@ -1046,9 +1063,11 @@ void VideoRenderer::AnalyzeLevels(const FrameView& frame) {
   // The black end decides. Values above 235 are not proof of anything: limited
   // range signals are allowed to carry superwhites, and plenty of sources do.
   rangeVerdict_ = below > 0.002 ? RangeVerdict::Full : RangeVerdict::Limited;
-  CAP_LOG("Wertebereich erkannt: %s (min %d, max %d, %.3f %% unter 16, %llu Proben)",
-          rangeVerdict_ == RangeVerdict::Full ? "voll 0-255" : "begrenzt 16-235", rangeMin_,
-          rangeMax_, below * 100.0, (unsigned long long)rangeSamples_);
+  CAP_LOG(
+      "Wertebereich erkannt: %s (min %d, max %d, %.3f %% unter 16, %llu Proben aus x %d..%d, y "
+      "%d..%d)",
+      rangeVerdict_ == RangeVerdict::Full ? "voll 0-255" : "begrenzt 16-235", rangeMin_, rangeMax_,
+      below * 100.0, (unsigned long long)rangeSamples_, x0, x1 - 1, y0, y1 - 1);
 }
 
 // Two questions, asked of the same samples.
