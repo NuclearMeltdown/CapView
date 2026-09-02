@@ -130,7 +130,9 @@ void LevelMeter(const char* id, float peak, bool active) {
 }
 
 std::string FpsLabel(double fps) {
-  // Zero is the stored form of "highest available" -- a mode, not a rate.
+  // Zero is the stored form of "highest available" and -1 of "the signal's
+  // own" -- modes, not rates.
+  if (fps < 0.0) return T("Rate des Signals", "The signal's rate");
   if (fps <= 0.0) return T("Höchste verfügbare", "Highest available");
   std::string s = Format("%.2f", fps);
   if (CurrentLanguage() == Language::German) {
@@ -287,7 +289,15 @@ void SettingsWindow::EnsureValidFormat(const DeviceProbeResult& caps) {
   // ordinary choice back the moment the settings page was drawn.
   if (!p.capture.format.valid() ||
       std::find(subtypes.begin(), subtypes.end(), p.capture.format.subtype) == subtypes.end()) {
+    // Die Betriebsart der Bildrate ueberlebt die Neuwahl. PickDefault liefert
+    // immer eine Zahl -- die schreibt hier aber gerade nicht ins Profil, wer
+    // "hoechste verfuegbare" oder "Rate des Signals" ausgesucht hat: das ist
+    // eine Anweisung fuers Oeffnen der Karte und keine Eigenschaft des
+    // gefundenen Formats. Sonst wuerde ein Normwechsel, der die Aufloesung
+    // loslaesst, beim naechsten Zeichnen der Seite eine feste Zahl hinterlassen.
+    const double mode = p.capture.format.fps;
     p.capture.format = caps.caps.PickDefault(p.capture.format.subtype);
+    if (mode <= 0.0) p.capture.format.fps = mode;
   }
   p.capture.format.forced =
       !caps.caps.IsAdvertised(p.capture.format.subtype, p.capture.format.width,
@@ -1077,14 +1087,13 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
           fmt.width = res.front().width;
           fmt.height = res.front().height;
         }
-        // The rate goes back to "highest available" rather than to a number
-        // carried over from a format that may not offer it. That entry leads
-        // the list, so taking the first unforced one lands on it.
+        // The rate goes back to a mode rather than to a number carried over
+        // from a format that may not offer it. Those entries lead the list, so
+        // taking the first unforced one lands on one of them.
         for (const FpsOption& f : caps.caps.FpsList(s, fmt.width, fmt.height)) {
-          if (!f.forced) {
-            fmt.fps = f.fps;
-            break;
-          }
+          if (f.forced) continue;
+          fmt.fps = f.native ? kFpsNative : (f.highest ? kFpsHighest : f.fps);
+          break;
         }
       }
       if (selected) ImGui::SetItemDefaultFocus();
@@ -1118,12 +1127,24 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
   }
 
   const std::vector<FpsOption> fpsOptions = caps.caps.FpsList(fmt.subtype, fmt.width, fmt.height);
+  // Was die beiden Betriebsarten gerade bedeuten. Aufgeloest wird erst beim
+  // Oeffnen der Karte, aber die Karte steht ja da -- und "Rate des Signals"
+  // ohne die Zahl daneben ist ein Versprechen, das man erst nach einem Neustart
+  // nachpruefen koennte.
+  const double nativeNow = caps.caps.NativeFps(fmt.subtype, fmt.width, fmt.height);
+  const double highestNow = caps.caps.HighestFps(fmt.subtype, fmt.width, fmt.height);
+  auto fpsEntryLabel = [&](double stored) {
+    std::string text = FpsLabel(stored);
+    const double resolved = stored < 0.0 ? nativeNow : (stored <= 0.0 ? highestNow : 0.0);
+    if (resolved > 0.0) text += "  (" + FpsLabel(resolved) + ")";
+    return text;
+  };
   ImGui::SetNextItemWidth(-260.0f);
-  if (ImGui::BeginCombo(T("Bildrate", "Frame rate"), FpsLabel(fmt.fps).c_str())) {
+  if (ImGui::BeginCombo(T("Bildrate", "Frame rate"), fpsEntryLabel(fmt.fps).c_str())) {
     bool forcedSection = false;
     bool namedSection = false;
     for (const FpsOption& f : fpsOptions) {
-      if (!f.highest && !namedSection) {
+      if (!f.highest && !f.native && !namedSection) {
         namedSection = true;
         ImGui::SeparatorText(T("Gemeldet", "Reported"));
       }
@@ -1132,20 +1153,32 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
         ImGui::SeparatorText(T("Für diese Auflösung nicht gemeldet",
                                "Not reported for this resolution"));
       }
-      const bool selected =
-          f.highest ? (fmt.fps <= 0.0) : (fmt.fps > 0.0 && std::fabs(f.fps - fmt.fps) < 0.05);
-      if (ImGui::Selectable(FpsLabel(f.fps).c_str(), selected) && !selected) fmt.fps = f.fps;
+      const double stored = f.native ? kFpsNative : (f.highest ? kFpsHighest : f.fps);
+      const bool selected = f.native    ? (fmt.fps < 0.0)
+                            : f.highest ? (std::fabs(fmt.fps) < 0.05)
+                                        : (fmt.fps > 0.0 && std::fabs(f.fps - fmt.fps) < 0.05);
+      if (ImGui::Selectable(fpsEntryLabel(stored).c_str(), selected) && !selected) {
+        fmt.fps = stored;
+      }
       if (selected) ImGui::SetItemDefaultFocus();
     }
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  HelpMarker(T("\"Höchste verfügbare\" nimmt beim Öffnen der Karte deren Maximum und bleibt "
-               "richtig, wenn die Quelle den Modus wechselt. Darunter steht, was der Treiber "
-               "meldet. Etwas anderes erzwingen: unten von Hand eingeben.",
-               "\"Highest available\" takes the card's maximum when it is opened and stays "
-               "right when the source changes mode. Below it is what the driver reports. "
-               "To force something else, enter it by hand below."));
+  HelpMarker(T("\"Rate des Signals\" nimmt, was die Videonorm vorgibt — 50 Hz bei PAL und "
+               "SECAM, 59,94 bei NTSC, glatte 60 bei PAL 60 —, und steht nur da, wo die Norm "
+               "bekannt ist. \"Höchste verfügbare\" nimmt stattdessen das Maximum der Karte; "
+               "bei einer Karte, die jede Auflösung anbietet, ist das mehr, als die Quelle "
+               "hat. Beide werden beim Öffnen der Karte aufgelöst und bleiben richtig, wenn "
+               "die Quelle den Modus wechselt; in Klammern steht, worauf sie gerade "
+               "hinauslaufen. Darunter steht, was der Treiber meldet.",
+               "\"The signal's rate\" takes what the video standard prescribes — 50 Hz for PAL "
+               "and SECAM, 59.94 for NTSC, a flat 60 for PAL 60 — and is only offered where "
+               "the standard is known. \"Highest available\" takes the card's maximum instead; "
+               "on a card that offers every resolution that is more than the source has. Both "
+               "are resolved when the card is opened and stay right when the source changes "
+               "mode; the brackets say what they come to right now. Below them is what the "
+               "driver reports."));
   ImGui::EndDisabled();
 
   ImGui::Checkbox(T("Werte von Hand eingeben", "Enter values manually"), &customFormat_);

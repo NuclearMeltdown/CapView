@@ -557,6 +557,12 @@ void PrintVideoDevices() {
 
     FormatSel def = probed.caps.PickDefault();
     std::printf("    Standardauswahl: %s\n", def.Label().c_str());
+    if (probed.caps.nativeLines() > 0) {
+      std::printf("        (auf das %d-Zeilen-Raster des Eingangs begrenzt)\n",
+                  probed.caps.nativeLines());
+    } else {
+      std::printf("        (kein Raster bekannt, also die größte angebotene Auflösung)\n");
+    }
   }
   std::printf("\n  (* = nicht vom Treiber gemeldet, wird als erzwungen angeboten)\n\n");
 }

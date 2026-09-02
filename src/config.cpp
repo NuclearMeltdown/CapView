@@ -787,9 +787,10 @@ std::string FormatSel::Label() const {
   if (!fpsText.empty()) {
     out += " @ " + fpsText + " Hz";
   } else if (width > 0) {
-    // No rate stored is not "unknown", it is the request to take whatever the
-    // card tops out at. Saying so beats a label that quietly omits the rate.
-    out += T(" @ höchste verfügbare", " @ highest available");
+    // No rate stored is not "unknown", it is the request to work one out on
+    // open. Saying so beats a label that quietly omits the rate.
+    out += fps < 0.0 ? T(" @ Rate des Signals", " @ the signal's rate")
+                     : T(" @ höchste verfügbare", " @ highest available");
   }
   if (!subtype.empty()) out += "  " + subtype;
   if (forced) out += T("  [erzwungen]", "  [forced]");

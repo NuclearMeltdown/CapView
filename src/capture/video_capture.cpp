@@ -67,6 +67,35 @@ size_t FrameBytes(const std::string& subtypeLabel, int width, int height) {
 
 // The requested format first, then the same resolution in every other format
 // the card offers, cheapest first, and finally the driver's own default.
+// Welche Videonorm bei dieser Quelle ankommt, oder 0, wenn es sich nicht sagen
+// laesst. Aus ihr kommen zwei Dinge: das Raster, an dem die Aufloesung haengt,
+// und die Halbbildrate.
+//
+// Die Frage ist nicht, ob die Karte einen Analogdekoder hat: eine Karte, die
+// beides kann, meldet ihn auch dann, wenn das Bild ueber HDMI hereinkommt. Die
+// Frage ist, ob das Bild durch ihn hindurchgeht, und beantwortet wird sie am
+// Eingang -- ausdruecklich nicht an der Bildhoehe, denn die ist gerade das, was
+// hier herauskommen soll.
+//
+// Gefragt wird zuerst nach dem eingestellten Eingang, dann nach dem, auf dem die
+// Karte steht, und wo beides nichts hergibt, bleibt die Annahme: eine Karte, die
+// Videonormen meldet und ihre Eingaenge nicht offenlegt, ist eine SD-Karte, und
+// an der haengt Composite. Dieselbe Reihenfolge und dieselbe Annahme wie in
+// App::ResolvedConnector -- zwei Stellen, die verschieden raten, waeren schlimmer
+// als eine, die falsch raet.
+long NativeStandardOf(const DeviceProbeResult& caps, int chosenInput, bool digital) {
+  if (digital) return 0;
+  if (caps.availableStandards == 0) return 0;  // kein Analogdekoder, keine Norm
+
+  int index = chosenInput;
+  if (index < 0) index = caps.currentInput;
+  if (index >= 0 && index < (int)caps.crossbarInputs.size() &&
+      !ConnectorFollowsVideoStandard(caps.crossbarInputs[(size_t)index].physicalType)) {
+    return 0;
+  }
+  return caps.currentStandard;
+}
+
 std::vector<FormatSel> BuildFormatCandidates(const FormatSel& wanted, const CapsModel& caps) {
   std::vector<FormatSel> out;
   if (wanted.valid()) out.push_back(wanted);
@@ -166,6 +195,11 @@ DeviceProbeResult VideoCapture::Probe(const DeviceRef& device) {
   }
   out.crossbarInputs = EnumerateCrossbarInputs(builder.Get(), filter.Get());
   out.currentInput = CurrentCrossbarInput(builder.Get(), filter.Get());
+  // Erst hier, denn die Antwort haengt am Eingang, und der steht erst, seit der
+  // Pin verbunden ist. Ein Wunsch des Nutzers ist an dieser Stelle nicht bekannt
+  // -- die Karte wird ja gerade erst befragt --, also entscheidet, worauf sie
+  // steht.
+  out.caps.SetNativeStandard(NativeStandardOf(out, -1, false));
 
   ComPtr<IAMStreamConfig> config;
   if (SUCCEEDED(pin->QueryInterface(IID_PPV_ARGS(&config)))) {
@@ -260,6 +294,21 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
   capabilities_.currentStandard = CurrentVideoStandard(captureFilter_.Get());
 
   capabilities_.caps.Build(EnumerateCaps(capturePin_.Get()));
+
+  // Vorlaeufig, fuer die Formatwahl gleich darunter: ein privater Selektor
+  // antwortet ohne Graphen, ein Crossbar erst, wenn der Capture-Pin verbunden
+  // ist -- und verbunden wird der erst, wenn das Format steht. Wo hier schon
+  // etwas zu holen ist, wird es geholt; sonst bleibt stehen, was der vorige Lauf
+  // hinterlassen hat, denn umgesteckt wird zwischen zwei Laeufen selten. Die
+  // verbindliche Fassung kommt weiter unten, sobald der Graph steht.
+  std::vector<CrossbarInput> earlyInputs =
+      EnumerateCrossbarInputs(builder_.Get(), captureFilter_.Get());
+  if (!earlyInputs.empty()) {
+    capabilities_.crossbarInputs = std::move(earlyInputs);
+    capabilities_.currentInput = CurrentCrossbarInput(builder_.Get(), captureFilter_.Get());
+  }
+  capabilities_.caps.SetNativeStandard(
+      NativeStandardOf(capabilities_, settings.crossbarInput, digital));
   capabilities_.ok = true;
 
   FormatSel wanted = settings.format;
@@ -267,6 +316,10 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
     // A subtype without a size is what re-reading the card leaves behind: the
     // resolution is to be found again, the pixel format is not up for grabs.
     const std::string wish = wanted.subtype;
+    if (capabilities_.caps.nativeLines() > 0) {
+      CAP_LOG("Auflösungssuche: %d Zeilen kommen an, hochskalierte Formate scheiden aus",
+              capabilities_.caps.nativeLines());
+    }
     wanted = capabilities_.caps.PickDefault(wish);
     if (wish.empty()) {
       CAP_LOG("Kein Format konfiguriert, verwende Standard: %s", wanted.Label().c_str());
@@ -279,11 +332,28 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
     }
   }
 
-  // "Highest available" is stored as no rate at all, and this is where it turns
-  // into one. Late on purpose: the number then comes from the card that is
-  // actually in front of us, so the setting survives a console switching from
-  // 576i50 to 480p60 without anyone editing it. If the card names no rate the
-  // zero simply stays, and the driver's own default interval is left in place.
+  // Weder "hoechste verfuegbare" noch "die des Signals" ist eine Zahl, und hier
+  // wird eine daraus. Spaet mit Absicht: die Zahl kommt dann von der Karte, die
+  // wirklich davorsteht, und die Einstellung uebersteht einen Wechsel von
+  // 576i50 auf 480p60, ohne dass jemand sie anfasst.
+  //
+  // Die Rate des Signals zuerst, weil sie die genauere Auskunft ist. Kennt die
+  // Karte die Norm nicht -- Digitaleingang, kein Dekoder --, gibt es nichts
+  // abzuleiten, und es bleibt bei der hoechsten. Das ist kein Fehler, sondern
+  // dieselbe Antwort wie vorher.
+  if (wanted.fps < 0.0) {
+    const double nat = capabilities_.caps.NativeFps(wanted.subtype, wanted.width, wanted.height);
+    if (nat > 0.0) {
+      wanted.fps = nat;
+      CAP_LOG("Bildrate des Signals für %dx%d %s: %.3f fps (%s, %d Zeilen, Norm %.3f Hz)",
+              wanted.width, wanted.height, wanted.subtype.c_str(), nat,
+              VideoStandardName(VideoStandardIndexOf(capabilities_.currentStandard)),
+              capabilities_.caps.nativeLines(), capabilities_.caps.nativeFieldRate());
+    } else {
+      wanted.fps = 0.0;
+      CAP_LOG("Bildrate des Signals: keine Norm bekannt, weiche auf die höchste aus");
+    }
+  }
   if (wanted.fps <= 0.0) {
     const double top = capabilities_.caps.HighestFps(wanted.subtype, wanted.width, wanted.height);
     if (top > 0.0) {

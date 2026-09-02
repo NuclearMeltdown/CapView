@@ -280,13 +280,23 @@ struct DeviceRef {
   }
 };
 
+// Zwei Betriebsarten anstelle einer Zahl, beide erst aufgeloest, wenn die Karte
+// offen ist. Eine Zahl, die heute stimmt, ist falsch, sobald die Konsole den
+// Modus wechselt -- deshalb steht sie gar nicht erst in der Konfiguration.
+//
+// Ein aelteres CapView liest beide als "hoechste verfuegbare", weil es nur auf
+// `fps <= 0` prueft. Das ist genau das alte Verhalten und damit in Ordnung.
+inline constexpr double kFpsHighest = 0.0;  // was die Karte hergibt
+inline constexpr double kFpsNative = -1.0;  // was die Norm des Signals vorgibt
+
 // One concrete capture format. `subtype` is a short label such as "YUY2",
 // "UYVY", "NV12", "RGB24" or "MJPG".
 struct FormatSel {
   std::string subtype;
   int width = 0;
   int height = 0;
-  double fps = 0.0;
+  // Eine Rate in Hz, oder kFpsHighest / kFpsNative.
+  double fps = kFpsHighest;
   // True when this combination is not advertised by the driver but lies inside
   // the ranges it reports -- the 1080p60 case.
   bool forced = false;

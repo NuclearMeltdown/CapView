@@ -595,11 +595,15 @@ bool App::ReleaseStandardBoundFormat(int newLines) {
   if (appliedStandardLines_ == newLines) return false;
   FormatSel& f = config_.active().capture.format;
   if (f.width <= 0 && f.height <= 0 && f.fps <= 0.0) return false;
-  CAP_LOG("Videonorm: %d statt %d Zeilen -- Auflösung %dx%d @ %.2f wird losgelassen",
-          newLines, appliedStandardLines_, f.width, f.height, f.fps);
+  CAP_LOG("Videonorm: %d statt %d Zeilen -- %s wird losgelassen", newLines, appliedStandardLines_,
+          f.Label().c_str());
   f.width = 0;
   f.height = 0;
-  f.fps = 0.0;
+  // Eine Zahl faellt weg, eine Betriebsart nicht. "Hoechste verfuegbare" und
+  // "die des Signals" sind keine Werte, die an der Norm haengen -- sie sind die
+  // Anweisung, nach dem Umschalten neu zu antworten, und genau die soll das
+  // Umschalten nicht loeschen.
+  if (f.fps > 0.0) f.fps = kFpsHighest;
   f.forced = false;
   return true;
 }

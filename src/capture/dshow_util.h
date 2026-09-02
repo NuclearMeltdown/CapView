@@ -141,10 +141,18 @@ struct ResolutionOption {
 // whatever the card turns out to top out at, and is resolved when the card is
 // opened rather than when it is picked. A number written down today is wrong
 // the moment the console changes mode; this one is not.
+// `native` is the second one of those: the rate the incoming video standard
+// prescribes -- 50 Hz under PAL and SECAM, 59,94 under NTSC, 60 under PAL 60 --
+// rather than the fastest the card will go. The difference only exists on a
+// card that is not pinned to one mode: such a card offers 720x576 at 59,94 as
+// readily as at 50, and taking the top means asking for a rate the signal does
+// not have. Only offered where the standard is known, which is the same
+// condition as CapsModel::SetNativeStandard.
 struct FpsOption {
-  double fps = 0.0;  // 0 together with `highest`: resolved on open
+  double fps = 0.0;  // 0 together with `highest` or `native`: resolved on open
   bool forced = false;
   bool highest = false;
+  bool native = false;
 };
 
 // Derives the three dropdown lists (format / resolution / frame rate) from a
@@ -152,6 +160,19 @@ struct FpsOption {
 class CapsModel {
  public:
   void Build(std::vector<CapsEntry> entries);
+
+  // Welche Videonorm vorne anliegt, als DirectShow-Bitmaske, oder 0, wenn das
+  // niemand sagen kann. Keine Eigenschaft der Karte: die zaehlt dieselbe Liste
+  // auf, was auch immer angeschlossen ist. Es ist der Zusammenhang, der
+  // entscheidet, welcher Eintrag dieser Liste der richtige ist, und ohne ihn
+  // gewinnt die groesste Flaeche zur hoechsten Rate. Siehe PickDefault.
+  //
+  // Die Norm und nicht die Zeilenzahl, weil an ihr zwei Dinge haengen, die sich
+  // nicht auseinander ableiten lassen: das Raster (525/625) und die Halbbild-
+  // rate. PAL 60 und NTSC haben dasselbe Raster und verschiedene Raten.
+  void SetNativeStandard(long standard);
+  int nativeLines() const { return nativeLines_; }
+  double nativeFieldRate() const { return nativeFieldRate_; }
 
   bool empty() const { return entries_.empty(); }
   const std::vector<CapsEntry>& entries() const { return entries_; }
@@ -164,11 +185,26 @@ class CapsModel {
   // claims none. This is what a stored fps of 0 turns into on open.
   double HighestFps(const std::string& subtype, int width, int height) const;
 
+  // Die Rate, die die Norm des ankommenden Signals vorgibt, auf das gerundet,
+  // was die Karte fuer diese Kombination wirklich anbietet -- oder 0, wenn die
+  // Norm unbekannt ist oder nichts in ihre Naehe kommt. Das ist es, was ein
+  // gespeichertes fps von kFpsNative beim Oeffnen wird.
+  double NativeFps(const std::string& subtype, int width, int height) const;
+
   // True when the combination is advertised by the driver as-is.
   bool IsAdvertised(const std::string& subtype, int width, int height, double fps) const;
 
-  // Picks a sensible starting format: highest resolution at the highest
-  // advertised frame rate, preferring uncompressed formats.
+  // Picks a sensible starting format: the largest resolution the incoming
+  // signal actually has, at the highest advertised frame rate, preferring
+  // uncompressed formats.
+  //
+  // "The largest the signal has" rather than "the largest on offer", and the
+  // difference only shows on a card that is not pinned to one resolution: such
+  // a card advertises everything up to 1080p whatever is plugged in, and taking
+  // the biggest means recording a GameCube as 1080p -- scaled up by the card,
+  // without a single detail gained. SetNativeStandard is what draws that line;
+  // without it, or when nothing on offer fits underneath, the biggest wins as
+  // it always did.
   //
   // `preferSubtype`, when given, outranks all of that as long as the card still
   // offers it. Re-reading a card is not a reason to lose the pixel format
@@ -179,6 +215,8 @@ class CapsModel {
 
  private:
   std::vector<CapsEntry> entries_;
+  int nativeLines_ = 0;
+  double nativeFieldRate_ = 0.0;
 };
 
 // Applies a format to the capture pin. Returns the media type that was actually
@@ -195,6 +233,15 @@ struct CrossbarInput {
   long physicalType = 0;
   std::string name;  // "HDMI", "Component (YPbPr)", "Composite", ...
 };
+
+// True for the connectors whose raster the analogue video standard settles
+// completely: 625 lines carry 576 visible ones, 525 carry 480, and there is no
+// third possibility on a composite or S-Video cable.
+//
+// Component and VGA are analogue as well and are deliberately not among them.
+// They carry whatever the source feels like -- 480p, 720p, 1080i -- and no
+// video standard describes any of it, so the line count says nothing there.
+bool ConnectorFollowsVideoStandard(long physicalType);
 
 // Enumerates the video inputs of the crossbar upstream of `captureFilter`, and
 // where there is no crossbar, the inputs of a vendor selector the card is known
@@ -249,6 +296,10 @@ const char* VideoStandardName(int index);
 int VideoStandardIndexOf(long value);
 // 525 or 625, or 0 when unknown. Derived from the standard, not measured.
 int VideoStandardLines(long value);
+// Halbbilder je Sekunde, oder 0 bei unbekannter Norm. 50 auf 625 Zeilen,
+// 59,94 auf 525 -- ausser bei PAL 60, das glatte 60 hat. Ebenfalls abgeleitet
+// und nicht gemessen: es ist die Rate, die das Signal haben *soll*.
+double VideoStandardFieldRate(long value);
 
 // The same list again, collapsed to the eight that actually look different on a
 // baseband input. The letters behind PAL and SECAM describe the RF channel, not
