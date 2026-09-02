@@ -167,6 +167,9 @@ class App {
   // Ob das gemessene "interlaced" bei dieser Quelle nach einem Irrtum aussieht
   // und deshalb nachgefragt statt behauptet wird. Siehe die Umsetzung.
   bool InterlaceVerdictDoubtful(const Profile& profile) const;
+  // Ob an einem analogen Eingang der volle Wertebereich ankommt, wo die Norm
+  // 16-235 vorsieht -- ein Hinweis, keine Warnung. Siehe die Umsetzung.
+  bool AnalogueRangeIsFull() const;
 
   // Finds the analogue video standard by watching whether the decoder locks.
   // Runs only when the source is set to automatic.
@@ -386,6 +389,11 @@ class App {
   // Zurueckgesetzt, sobald der Zweifel weg ist, damit das naechste Umschlagen
   // wieder eine Meldung wert ist.
   bool interlaceDoubtToasted_ = false;
+  // Dasselbe fuer den Wertebereich, nur fuers Protokoll: der Zustand haelt,
+  // solange die Quelle anliegt -- das Urteil friert ein und taut nur auf F6
+  // oder einen Formatwechsel wieder auf -- also gehoert die Zeile an den
+  // Augenblick, in dem er eintritt, und nicht an jedes Bild danach.
+  bool analogueFullRangeLogged_ = false;
   DevicePropertyPages devicePages_;
   SettingsHost settingsHost_;
   Updater updater_;
