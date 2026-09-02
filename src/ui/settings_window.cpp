@@ -2120,6 +2120,41 @@ void SettingsWindow::DrawImageTab() {
       ImGui::TextDisabled("%s", rangeNumbers_->c_str());
     }
   }
+  // Ausserhalb des Automatik-Zweigs, weil der Hinweis nichts ueber CapViews
+  // Einstellung sagt, sondern ueber das, was ankommt: er gilt genauso, wenn der
+  // Wertebereich hier von Hand steht. Und in einer Zeile plus Fragezeichen,
+  // nicht als Absatz: an einer analogen Karte, die streckt, steht er dauerhaft
+  // da, und was dauerhaft dasteht, darf nicht schreien.
+  if (analogueFullRange_) {
+    TextDisabledWrapped(T("Analoger Eingang, trotzdem voller Bereich — Schwarz liegt nicht auf 16.",
+                          "Analogue input, yet full range — black is not sitting on 16."));
+    ImGui::SameLine();
+    HelpMarker(
+        T("An Composite, S-Video oder Tuner gilt BT.601, und die legt Schwarz auf 16. Kommt es "
+          "stattdessen unten am Anschlag an, hat etwas davor den Bereich gestreckt, "
+          "üblicherweise die Karte selbst.\n\n"
+          "Fürs Bild ist das kein Schaden: CapView misst den Bereich und stellt sich darauf "
+          "ein. Was beim Strecken über die Enden hinausgefallen ist, ist allerdings weg, bevor "
+          "CapView das Bild sieht — kein Regler hier holt es zurück, und in der Aufnahme fehlt "
+          "es ebenso. Ob überhaupt etwas hinausgefallen ist, lässt sich von hier aus nicht "
+          "feststellen.\n\n"
+          "Umstellen lässt sich der Bereich nur im Treiber der Karte, im Reiter Quelle unter "
+          "„Karte konfigurieren …“; er heißt dort oft „Colour Range“ oder „Video Range“. Die "
+          "Bezeichnung führt leicht in die Irre — bei manchen Karten beschreibt sie, was am "
+          "Eingang erwartet wird, und dann ist „Full“ die Stellung, die das Signal unverändert "
+          "durchreicht.",
+          "Composite, S-Video and tuner inputs carry BT.601, which puts black on 16. When it "
+          "arrives at the bottom rail instead, something upstream stretched the range, usually "
+          "the card itself.\n\n"
+          "The picture is not harmed by that: CapView measures the range and adapts. But "
+          "whatever the stretch pushed past the ends is gone before CapView sees the frame — "
+          "nothing here brings it back, and it is missing from recordings just the same. "
+          "Whether anything was pushed past at all cannot be determined from here.\n\n"
+          "Only the card's own driver can change the range, on the Source tab under "
+          "\"Configure card ...\", usually called \"Colour Range\" or \"Video Range\". The "
+          "labels mislead easily — on some cards they describe what is expected at the input, "
+          "and then \"Full\" is the setting that passes the signal through untouched."));
+  }
   ImGui::TextDisabled(T("Beides auch per Rechtsklick im Bild erreichbar.",
                         "Both are also in the right-click menu over the picture."));
 }

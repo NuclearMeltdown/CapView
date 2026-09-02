@@ -4361,6 +4361,30 @@ bool App::InterlaceVerdictDoubtful(const Profile& profile) const {
   return fmt.height >= 720;
 }
 
+// Ein analoger Eingang, an dem der volle Wertebereich ankommt. Ein Dekoder fuer
+// Composite, S-Video oder Tuner liefert BT.601, und das heisst 16-235: Schwarz
+// liegt auf 16, weil die Norm es dort hinlegt, nicht weil eine Quelle sich so
+// entschieden hat. Liegt es stattdessen unten am Anschlag, hat irgendwer davor
+// gestreckt -- ueblicherweise die Karte, auf deren Wertebereichsschalter. An
+// einem digitalen Eingang sagt dasselbe Bild nichts: ein PC-Desktop hat
+// reichlich echte Nullen und echte 255er, und die sind keine Fehlfunktion.
+//
+// Mehr steht hier nicht drin, und das ist Absicht. Ob beim Strecken etwas
+// hinausgefallen ist, laesst sich von hier aus *nicht* feststellen: die
+// Verstaerkung sitzt vor dem Wandler, also fehlt der Kamm, an dem man eine
+// digitale Streckung erkennen wuerde, und die Stapel an den Enden hat der
+// Dekoder ohnehin -- BT.601 verbietet 0 und 255, alles Dunklere kommt auf 1 an
+// und alles Hellere auf 254. Ein Versuch, daraus ein Urteil zu bauen, hat
+// zuverlaessig auch dann angeschlagen, wenn nichts anlag.
+//
+// Deshalb ist das ein Hinweis im Reiter Bild und keine Warnung: er sagt, was
+// gemessen wurde und wo man nachsieht, und behauptet keinen Schaden.
+bool App::AnalogueRangeIsFull() const {
+  if (captureState_ != CaptureState::Running) return false;
+  if (!SourceIsAnalogue()) return false;
+  return renderer_.detectedRange() == VideoRenderer::RangeVerdict::Full;
+}
+
 bool App::SourceLooksInterlaced(const Profile& profile) const {
   if (!profile.image.deinterlaceAuto) return true;
   // The media type is believed when it claims interlaced -- a card that bothers
@@ -5421,6 +5445,26 @@ void App::DrawUi() {
                    fmt.width, fmt.height));
     } else if (!doubtful) {
       interlaceDoubtToasted_ = false;
+    }
+  }
+
+  // Und der Hinweis auf einen analogen Eingang, an dem trotzdem der volle
+  // Wertebereich ankommt. Anders als das Interlacing darueber gibt es dafuer
+  // *keinen* Toast: es ist nichts kaputt, es gibt nichts zu bestaetigen, und die
+  // Lage ist an dieser Karte der Normalfall. Wer wissen will, warum Schwarz
+  // unten am Anschlag liegt, findet den Hinweis im Reiter Bild, gleich neben dem
+  // Regler, um den es geht.
+  {
+    const bool full = AnalogueRangeIsFull();
+    settings_.SetAnalogueFullRange(full);
+    if (full && !analogueFullRangeLogged_) {
+      analogueFullRangeLogged_ = true;
+      const VideoRenderer::RangeNumbers n = renderer_.rangeNumbers();
+      CAP_LOG("Analoger Eingang liefert vollen Wertebereich (min %d, max %d) -- Hinweis im Reiter "
+              "Bild",
+              n.min, n.max);
+    } else if (!full) {
+      analogueFullRangeLogged_ = false;
     }
   }
   settings_.SetCoSitedFields(renderer_.sourceCoSitedFields());

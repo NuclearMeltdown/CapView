@@ -65,6 +65,10 @@ class SettingsWindow {
   // Ob neben der Messung der Satz stehen soll, dass sie hier vermutlich irrt.
   // Die Bedingungen dafuer stehen bei App::InterlaceVerdictDoubtful.
   void SetInterlaceDoubtful(bool doubtful) { interlaceDoubtful_ = doubtful; }
+  // Ob unter dem Wertebereich der Hinweis stehen soll, dass an einem analogen
+  // Eingang der volle Bereich ankommt. Die Bedingungen dafuer stehen bei
+  // App::AnalogueRangeIsFull.
+  void SetAnalogueFullRange(bool full) { analogueFullRange_ = full; }
   void SetCoSitedFields(bool on) { coSitedFields_ = on; }
   // False while the app is itself trying to open the card. Probing means
   // building a second graph on the same device, and doing that while the first
@@ -263,6 +267,7 @@ class SettingsWindow {
   bool rangeRemeasureRequested_ = false;
   const char* const* detectedInterlace_ = nullptr;
   bool interlaceDoubtful_ = false;
+  bool analogueFullRange_ = false;
   bool fillsWindow_ = false;
   bool probeAllowed_ = true;
   Updater* updater_ = nullptr;
