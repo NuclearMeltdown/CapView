@@ -51,6 +51,16 @@ class SettingsWindow {
   // selector so "Automatic" is not a black box. Points at a static string owned
   // by the caller, or null while nothing has been measured.
   void SetDetectedRange(const char* const* text) { detectedRange_ = text; }
+  // Die Rohzahlen dahinter, schon fertig gesetzt, oder ein leerer Text. Sie
+  // stehen klein unter dem Urteil, weil das Urteil zwei Faelle zusammenfasst,
+  // die beim Einstellen der Karte gerade auseinandergehalten werden muessen:
+  // Schwarz bei 0 und Schwarz bei 16 heissen beide "erkannt", meinen aber
+  // Verschiedenes. Zeigt auf einen Text, der dem Aufrufer gehoert.
+  void SetRangeNumbers(const std::string* text) { rangeNumbers_ = text; }
+  // Gesetzt, wenn der Benutzer die Bereichsmessung von vorn haben will. Das
+  // Urteil friert sonst ein, bis sich das Format aendert -- und eine
+  // umgestellte Treiberoption aendert das Format nicht.
+  bool takeRangeRemeasureRequest();
   void SetDetectedInterlace(const char* const* text) { detectedInterlace_ = text; }
   // Ob neben der Messung der Satz stehen soll, dass sie hier vermutlich irrt.
   // Die Bedingungen dafuer stehen bei App::InterlaceVerdictDoubtful.
@@ -249,6 +259,8 @@ class SettingsWindow {
   // Index into Hotkeys::items currently being rebound, -1 when idle.
   int captureAction_ = -1;
   const char* const* detectedRange_ = nullptr;
+  const std::string* rangeNumbers_ = nullptr;
+  bool rangeRemeasureRequested_ = false;
   const char* const* detectedInterlace_ = nullptr;
   bool interlaceDoubtful_ = false;
   bool fillsWindow_ = false;

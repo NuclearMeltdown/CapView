@@ -180,6 +180,11 @@ class App {
   // Siehe die Umsetzung: was ein Mensch an einer Norm auszusetzen hat, misst
   // die Automatik nicht unbedingt mit.
   void RescanVideoStandard();
+  // Dasselbe fuer den Wertebereich: das Urteil steht, bis sich das Bildformat
+  // aendert, und eine Option im Treiber der Karte aendert es nicht. Wirft nur
+  // diese eine Messung weg -- Verschraenkung und Bildgrenzen bleiben stehen,
+  // die neu zu suchen sieht man sofort.
+  void RemeasureRange();
   // Das Ergebnis eines von Hand ausgeloesten Suchlaufs festhalten, damit es
   // ein paar Sekunden im Bild stehen kann. Tut nichts, wenn keiner lief.
   void FinishManualStandardSearch(long standard, const std::string& detail);
@@ -371,6 +376,9 @@ class App {
   } cropPick_;
   // Filled from the renderer each frame; the settings dialog reads it.
   const char* detectedRangeText_ = nullptr;
+  // Die Zahlen unter dem Urteil, schon gesetzt. Leer, solange nichts gemessen
+  // ist. Siehe SettingsWindow::SetRangeNumbers.
+  std::string rangeNumbersText_;
   const char* detectedInterlaceText_ = nullptr;
   // Ob der Hinweis auf ein fragwuerdiges "interlaced" schon einmal aufgeploppt
   // ist. Die Meldung gehoert zum Umschlagen, nicht zum Zustand -- ohne das hier

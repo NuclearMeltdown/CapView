@@ -222,6 +222,12 @@ bool SettingsWindow::takeCardResetRequest() {
   return requested;
 }
 
+bool SettingsWindow::takeRangeRemeasureRequest() {
+  const bool requested = rangeRemeasureRequested_;
+  rangeRemeasureRequested_ = false;
+  return requested;
+}
+
 int SettingsWindow::takeVirtualCameraRequest() {
   const int request = virtualCameraRequest_;
   virtualCameraRequest_ = 0;
@@ -2090,8 +2096,29 @@ void SettingsWindow::DrawImageTab() {
   ImGui::SameLine();
   HelpMarker(T("BT.601 für SD, BT.709 für HD. Falsch gewählt kippen Hauttöne.",
                "BT.601 for SD, BT.709 for HD. Set wrong, skin tones shift."));
-  if (img.range == ColorRange::Auto && detectedRange_ && *detectedRange_) {
-    ImGui::TextDisabled(T("Gemessen: %s", "Measured: %s"), *detectedRange_);
+  if (img.range == ColorRange::Auto) {
+    if (detectedRange_ && *detectedRange_) {
+      ImGui::TextDisabled(T("Gemessen: %s", "Measured: %s"), *detectedRange_);
+    } else {
+      ImGui::TextDisabled(T("Gemessen: läuft noch", "Measured: still running"));
+    }
+    // Der Knopf daneben und nicht anderswo: wer im Treiber etwas umstellt,
+    // kommt hierher, um nachzusehen, was es gebracht hat -- und das Urteil
+    // steht bis zum naechsten Formatwechsel, den eine Treiberoption nicht
+    // ausloest. Ohne den Knopf zeigt die Zeile vier Sekunden alte Zahlen und
+    // laesst sich nicht dazu bewegen, neue zu holen.
+    ImGui::SameLine();
+    if (ImGui::SmallButton(T("Neu messen", "Measure again"))) rangeRemeasureRequested_ = true;
+    ImGui::SameLine();
+    HelpMarker(T("Die Messung steht fest, bis sich das Bildformat ändert. Eine Einstellung im "
+                 "Treiber der Karte ändert es nicht — nach so einer Umstellung hier neu "
+                 "messen lassen.",
+                 "The measurement is held until the picture format changes. A setting in the "
+                 "card's own driver does not change it — after such a change, measure again "
+                 "here."));
+    if (rangeNumbers_ && !rangeNumbers_->empty()) {
+      ImGui::TextDisabled("%s", rangeNumbers_->c_str());
+    }
   }
   ImGui::TextDisabled(T("Beides auch per Rechtsklick im Bild erreichbar.",
                         "Both are also in the right-click menu over the picture."));
