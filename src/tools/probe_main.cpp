@@ -1221,6 +1221,14 @@ void TestHistogram(const std::string& subtypeWanted, int framesWanted,
   const int kBorderColumns = 12;
   uint64_t borderCounts[256] = {};
   uint64_t borderSamples = 0;
+  // Und dasselbe noch einmal ohne den Rand, denn der verfaelscht die Frage nach
+  // dem Wertebereich vollstaendig: die Austastluecke liegt unter Schwarz und
+  // damit immer unter 16, egal was die Konsole schickt. Ein Zwanzigstel je
+  // Seite liegt bei 720x576 sicher innerhalb der gemessenen 22 und 26 Punkte.
+  const int insetX = format.width / 20;
+  const int insetY = format.height / 20;
+  uint64_t innerCounts[256] = {};
+  uint64_t innerSamples = 0;
   uint64_t lastSequence = 0;
   int analysed = 0;
   int seen = 0;
@@ -1243,6 +1251,7 @@ void TestHistogram(const std::string& subtypeWanted, int framesWanted,
       const size_t start = (size_t)y * stride;
       if (start + rowBytes > view.size) break;
       const uint8_t* row = view.data + start;
+      const bool innerRow = y >= insetY && y < format.height - insetY;
       int column = 0;
       for (size_t x = plan.offset; x < rowBytes; x += plan.step, ++column) {
         const uint8_t value = row[x];
@@ -1251,6 +1260,10 @@ void TestHistogram(const std::string& subtypeWanted, int framesWanted,
         if (column < kBorderColumns || column >= format.width - kBorderColumns) {
           ++borderCounts[value];
           ++borderSamples;
+        }
+        if (innerRow && column >= insetX && column < format.width - insetX) {
+          ++innerCounts[value];
+          ++innerSamples;
         }
       }
     }
@@ -1315,6 +1328,34 @@ void TestHistogram(const std::string& subtypeWanted, int framesWanted,
                 "Mittel %.2f\n",
                 kBorderColumns, (unsigned long long)borderSamples, borderLow, borderHigh,
                 median, (double)weighted / (double)borderSamples);
+  }
+
+  // Das Bildinnere ist die Auskunft, die zaehlt. Steht Schwarz auf 16, sind die
+  // Faecher darunter hier so gut wie leer und 16 traegt einen Berg; steht es auf
+  // 0, liegt der Berg auf 0. Der Rand kann das eine wie das andere vortaeuschen,
+  // deshalb ist er hier abgezogen.
+  if (innerSamples > 0) {
+    int innerLow = -1;
+    int innerHigh = -1;
+    for (int v = 0; v < 256; ++v) {
+      if (innerCounts[v] == 0) continue;
+      if (innerLow < 0) innerLow = v;
+      innerHigh = v;
+    }
+    uint64_t innerBelow = 0;
+    uint64_t innerAbove = 0;
+    for (int v = 0; v < 16; ++v) innerBelow += innerCounts[v];
+    for (int v = 236; v < 256; ++v) innerAbove += innerCounts[v];
+    std::printf("  Bildinneres (je %d/%d Punkte Rand ab, %llu Proben): min %d, max %d, "
+                "unter 16: %.3f %%, über 235: %.3f %%\n",
+                insetX, insetY, (unsigned long long)innerSamples, innerLow, innerHigh,
+                (double)innerBelow / (double)innerSamples * 100.0,
+                (double)innerAbove / (double)innerSamples * 100.0);
+    std::printf("    unterste Fächer:");
+    for (int v = 0; v < 20; ++v) std::printf(" %d:%llu", v, (unsigned long long)innerCounts[v]);
+    std::printf("\n    oberste Fächer:");
+    for (int v = 232; v < 256; ++v) std::printf(" %d:%llu", v, (unsigned long long)innerCounts[v]);
+    std::printf("\n");
   }
 
   if (gaps > 0) {
