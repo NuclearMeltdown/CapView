@@ -11,7 +11,9 @@
 #include <olectl.h>
 
 #include <cctype>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <set>
 #include <string>
@@ -1100,6 +1102,252 @@ void DumpPropertySet(const std::string& guidText, const std::string& deviceMatch
   std::printf("\n");
 }
 
+// ---------------------------------------------------------------- histogram
+
+// Where the brightness byte sits in one pixel, and what it is called. Same
+// table as VideoRenderer::LumaLayout(), deliberately duplicated rather than
+// shared: this tool has to keep working when that one is being changed.
+struct LumaPlan {
+  size_t offset = 0;
+  size_t step = 0;
+  const char* channel = "";
+
+  bool ok() const { return step > 0; }
+};
+
+LumaPlan PlanFor(const std::string& subtype) {
+  if (subtype == "YUY2" || subtype == "YVYU") return {0, 2, "Y"};
+  if (subtype == "UYVY" || subtype == "HDYC") return {1, 2, "Y"};
+  if (subtype == "NV12" || subtype == "YV12" || subtype == "I420" || subtype == "IYUV")
+    return {0, 1, "Y"};
+  if (subtype == "RGB24") return {1, 3, "Grün"};
+  if (subtype == "RGB32" || subtype == "ARGB32") return {1, 4, "Grün"};
+  return {};
+}
+
+// Counts every pixel of every frame into 256 bins and prints the shape.
+//
+// The renderer's own measurement samples 8192 pixels per frame and answers one
+// question -- full or limited. This answers a different one: whether a driver's
+// range setting changes the ADC's gain before quantisation, or stretches
+// 16-235 to 0-255 afterwards. A stretch maps about 220 distinct inputs onto 256
+// outputs and leaves the other 36 codes unreachable, in a regular comb that
+// analogue noise does not fill; a gain change fills every bin. That difference
+// is visible here and nowhere else in CapView.
+//
+// One way it can lie: a driver that dithers while stretching fills the gaps and
+// reads as a gain change.
+//
+// A screenshot cannot stand in for this. VideoRenderer's readback copies the
+// *rendered* picture -- after the shader, the range expansion and the
+// deinterlacer -- so it would show a comb CapView made rather than one the
+// driver made.
+void TestHistogram(const std::string& subtypeWanted, int framesWanted,
+                   const std::string& nameWanted) {
+  std::vector<VideoDeviceInfo> devices = EnumerateVideoDevices();
+  const VideoDeviceInfo* found = nullptr;
+  for (const VideoDeviceInfo& d : devices) {
+    if (d.name.find(nameWanted) != std::string::npos) {
+      found = &d;
+      break;
+    }
+  }
+  if (!found) {
+    std::printf("Kein Videogerät gefunden, dessen Name '%s' enthält.\n", nameWanted.c_str());
+    for (const VideoDeviceInfo& d : devices) std::printf("  vorhanden: %s\n", d.name.c_str());
+    return;
+  }
+  const VideoDeviceInfo& device = *found;
+
+  CaptureSettings settings;
+  settings.video = DeviceRef{device.name, device.id};
+  settings.audioSource = AudioSource::None;
+  settings.format.subtype = subtypeWanted;
+  // No size forced, and the rate the standard prescribes rather than the
+  // highest on offer: asking a 576-line format for 59.94 Hz gets frames the
+  // source never sent, which is not what the driver produces on its own.
+  settings.format.fps = kFpsNative;
+
+  std::printf("== %s ==\n", subtypeWanted.c_str());
+  std::printf("  Gerät: %s\n", device.name.c_str());
+
+  VideoCapture capture;
+  std::string error;
+  if (!capture.Start(settings, &error)) {
+    std::printf("  Start fehlgeschlagen: %s\n\n", error.c_str());
+    return;
+  }
+
+  FrameSink* sink = capture.sink();
+  if (!sink) {
+    std::printf("  Kein Sink.\n\n");
+    return;
+  }
+
+  VideoFormatInfo format = sink->format();
+  for (int i = 0; i < 50 && !format.valid(); ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    format = sink->format();
+  }
+  if (!format.valid()) {
+    std::printf("  Kein Format zustande gekommen.\n\n");
+    capture.Stop();
+    return;
+  }
+
+  const LumaPlan plan = PlanFor(format.subtypeLabel);
+  if (!plan.ok()) {
+    std::printf("  %s wird hier nicht ausgewertet.\n\n", format.subtypeLabel.c_str());
+    capture.Stop();
+    return;
+  }
+
+  std::printf("  Format: %s %dx%d @ %.3f fps, Zeilenlänge %d Byte%s\n",
+              format.subtypeLabel.c_str(), format.width, format.height, format.fps,
+              format.stride, format.interlaced ? ", verschränkt" : "");
+  if (format.colorInfoPresent) {
+    std::printf("  Der Treiber beschreibt die Farben selbst: Wertebereich %s, Matrix %s\n",
+                NominalRangeName(format.nominalRange), TransferMatrixName(format.transferMatrix));
+  } else {
+    std::printf("  Der Treiber legt keine Farbbeschreibung bei.\n");
+  }
+
+  uint64_t counts[256] = {};
+  uint64_t samples = 0;
+  // The border outside the picture is the one part of the frame the content
+  // cannot move: it is blanking, and wherever the driver puts it is its black
+  // reference. Twelve columns at each edge sits well inside the 22 and 26 pixel
+  // border this card leaves at 720x576.
+  const int kBorderColumns = 12;
+  uint64_t borderCounts[256] = {};
+  uint64_t borderSamples = 0;
+  uint64_t lastSequence = 0;
+  int analysed = 0;
+  int seen = 0;
+  // The first frames after a start carry whatever the decoder had locked before
+  // it, so they are watched and thrown away.
+  const int kSkip = 8;
+  const DWORD deadline = ::GetTickCount() + 20000;
+
+  while (analysed < framesWanted && ::GetTickCount() < deadline) {
+    ::WaitForSingleObject(sink->frameEvent(), 200);
+    FrameView view;
+    if (!sink->AcquireFrame(&view) || !view.valid()) continue;
+    if (view.sequence == lastSequence) continue;
+    lastSequence = view.sequence;
+    if (++seen <= kSkip) continue;
+
+    const size_t stride = format.stride > 0 ? (size_t)format.stride : (size_t)format.width * plan.step;
+    const size_t rowBytes = (size_t)format.width * plan.step;
+    for (int y = 0; y < format.height; ++y) {
+      const size_t start = (size_t)y * stride;
+      if (start + rowBytes > view.size) break;
+      const uint8_t* row = view.data + start;
+      int column = 0;
+      for (size_t x = plan.offset; x < rowBytes; x += plan.step, ++column) {
+        const uint8_t value = row[x];
+        ++counts[value];
+        ++samples;
+        if (column < kBorderColumns || column >= format.width - kBorderColumns) {
+          ++borderCounts[value];
+          ++borderSamples;
+        }
+      }
+    }
+    ++analysed;
+  }
+  capture.Stop();
+
+  if (samples == 0) {
+    std::printf("  Keine Bilder bekommen.\n\n");
+    return;
+  }
+
+  int lowest = -1;
+  int highest = -1;
+  int occupied = 0;
+  for (int v = 0; v < 256; ++v) {
+    if (counts[v] == 0) continue;
+    if (lowest < 0) lowest = v;
+    highest = v;
+    ++occupied;
+  }
+  int gaps = 0;
+  for (int v = lowest; v <= highest; ++v)
+    if (counts[v] == 0) ++gaps;
+
+  uint64_t below16 = 0;
+  uint64_t above235 = 0;
+  for (int v = 0; v < 16; ++v) below16 += counts[v];
+  for (int v = 236; v < 256; ++v) above235 += counts[v];
+  const double belowShare = (double)below16 / (double)samples;
+
+  std::printf("  %d Bilder, %llu Proben (%s)\n", analysed, (unsigned long long)samples,
+              plan.channel);
+  std::printf("  min %d, max %d\n", lowest, highest);
+  std::printf("  belegte Werte: %d von 256   Lücken zwischen min und max: %d von %d\n",
+              occupied, gaps, highest - lowest + 1);
+  std::printf("  unter 16: %.3f %%   über 235: %.3f %%\n", belowShare * 100.0,
+              (double)above235 / (double)samples * 100.0);
+  std::printf("  CapViews Regel (>0,2 %% unter 16): %s\n",
+              belowShare > 0.002 ? "voll 0-255" : "begrenzt 16-235");
+
+  if (borderSamples > 0) {
+    int borderLow = -1;
+    int borderHigh = -1;
+    uint64_t weighted = 0;
+    for (int v = 0; v < 256; ++v) {
+      if (borderCounts[v] == 0) continue;
+      if (borderLow < 0) borderLow = v;
+      borderHigh = v;
+      weighted += (uint64_t)v * borderCounts[v];
+    }
+    uint64_t running = 0;
+    int median = 0;
+    for (int v = 0; v < 256; ++v) {
+      running += borderCounts[v];
+      if (running * 2 >= borderSamples) {
+        median = v;
+        break;
+      }
+    }
+    std::printf("  Rand, je %d Spalten aussen (%llu Proben): min %d, max %d, Median %d, "
+                "Mittel %.2f\n",
+                kBorderColumns, (unsigned long long)borderSamples, borderLow, borderHigh,
+                median, (double)weighted / (double)borderSamples);
+  }
+
+  if (gaps > 0) {
+    std::printf("  leer bei:");
+    int shown = 0;
+    for (int v = lowest; v <= highest && shown < 48; ++v) {
+      if (counts[v] != 0) continue;
+      std::printf(" %d", v);
+      ++shown;
+    }
+    if (shown < gaps) std::printf(" … (%d weitere)", gaps - shown);
+    std::printf("\n");
+  }
+
+  // Sixteen rows of sixteen. A dot is an empty bin, a digit is the order of
+  // magnitude -- enough to see a comb at a glance, which is the whole point.
+  std::printf("  Verteilung (. = leer, Ziffer = Größenordnung der Anzahl):\n");
+  for (int base = 0; base < 256; base += 16) {
+    std::printf("   %3d ", base);
+    for (int v = base; v < base + 16; ++v) {
+      if (counts[v] == 0) {
+        std::printf(".");
+        continue;
+      }
+      int magnitude = 0;
+      for (uint64_t n = counts[v]; n >= 10 && magnitude < 9; n /= 10) ++magnitude;
+      std::printf("%d", magnitude);
+    }
+    std::printf("\n");
+  }
+  std::printf("\n");
+}
+
 int main(int argc, char** argv) {
   ::SetConsoleOutputCP(CP_UTF8);
   ComScope com(COINIT_MULTITHREADED);
@@ -1169,6 +1417,21 @@ int main(int argc, char** argv) {
     }
     SetOneProperty(argv[2], (DWORD)std::strtoul(argv[3], nullptr, 0),
                    (DWORD)std::strtoul(argv[4], nullptr, 0), argc > 5 ? argv[5] : "SA7160");
+    return 0;
+  }
+
+  if (argc > 1 && std::string(argv[1]) == "histogram") {
+    const int asked = argc > 3 ? (int)std::strtol(argv[3], nullptr, 10) : 0;
+    const int frames = asked > 0 ? asked : 60;
+    const std::string name = argc > 4 ? argv[4] : "SA7160";
+    if (argc > 2 && std::string(argv[2]) != "-") {
+      TestHistogram(argv[2], frames, name);
+    } else {
+      // Both at once, because it also shows where the driver's range setting
+      // lives: in its YUV-to-RGB conversion, or already in the decoder.
+      TestHistogram("RGB32", frames, name);
+      TestHistogram("YUY2", frames, name);
+    }
     return 0;
   }
 
