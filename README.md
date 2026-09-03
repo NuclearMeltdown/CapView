@@ -13,291 +13,99 @@
 CapView displays the output of a capture card with as little delay as the
 hardware allows, so the captured signal can be played on rather than only
 watched. Measured on a StarTech PEXHDCAP60L: **1080p60 sustained, around 1 ms
-from a frame arriving to the present that hands it to the compositor** — the
-whole stretch CapView is answerable for, with nothing before or after it
-quietly folded in.
+from a frame arriving to the present that hands it to the compositor.**
 
 It is meant for using a capture card to play. Recording, screenshots, a
 microphone track and a virtual camera are included; scenes, overlays,
 compositing and streaming are not. For those, use OBS.
 
-> **The [wiki](../../wiki) is the detailed documentation** — one page per
-> feature, covering what the code does, why it works that way, and what was
-> measured to arrive at it.
+> **The [wiki](../../wiki) is the documentation** — one page per feature,
+> covering what the code does, why it works that way, and what was measured to
+> arrive at it. This page is the short version.
 
 ## Latency
 
-Four decisions account for the measured figure.
-
-- **No queue in the capture path.** The capture filter copies each frame into a
-  triple buffer and returns immediately. Frames arriving faster than they can be
-  shown are dropped rather than buffered, so delay cannot accumulate.
-- **No graph clock.** The DirectShow graph runs without a reference clock, so
-  frames are not held back until a presentation time.
-- **Flip-model swap chain**, maximum frame latency of one, tearing permitted.
-  VSync is off by default.
+- **No queue in the capture path.** Each frame goes into a triple buffer and the
+  filter returns; frames arriving faster than they can be shown are dropped
+  rather than buffered, so delay cannot accumulate.
+- **No graph clock**, so frames are not held back until a presentation time.
+- **Flip-model swap chain**, maximum frame latency of one, tearing permitted,
+  VSync off by default.
 - **Format conversion on the GPU.** YUY2, UYVY, YVYU, NV12, planar 4:2:0, RGB
   and P010 are unpacked in a pixel shader rather than on the CPU.
 
-Details: [Latency](../../wiki/Latency).
+More: [Latency](../../wiki/Latency).
 
 ## Features
 
-### Settings follow the source
+**Settings follow the source.** They live in a window of their own with its own
+Direct3D device, so it can be moved to a second monitor; an embedded panel
+remains, because a window capture in OBS cannot see a second window. Controls
+that cannot apply to the current source are absent rather than disabled, and are
+not applied to the picture either — the native pixel grid and composite filter
+on analogue sources, scanlines and mask at 576 lines or fewer, deinterlacing
+where there are fields, the HDR curve where the source is not analogue. The test
+is the picture rather than the socket: no analogue standard produces more than
+576 lines. [The settings window](../../wiki/The-settings-window)
 
-The settings live in a window of their own by default, with its own Direct3D
-device, so it can be sized freely or moved to a second monitor. An embedded
-panel remains under **Display**, because a window capture in OBS cannot see a
-second window.
+**Source.** Any DirectShow video device. Resolution, frame rate, pixel format
+and colour space are selected independently, so combinations a driver does not
+advertise but does accept can be forced — which covers the common case of a card
+reporting only 1080p30 for a mode it will in fact deliver at 60. Beside the
+numbers the rate list carries **highest available** and **the signal's rate**,
+both resolved from the card when it is opened rather than stored, so a console
+switching from 576i50 to 480p60 needs no one to edit a profile. Analogue cards
+also expose their video standard and which cable is in use; the latter is asked
+rather than measured, because `IAMCrossbar` is missing on plenty of cards, and
+it decides which picture filters exist at all. **Configure card** opens the
+driver's own property pages while the picture keeps running. Whether anything is
+coming in is measured from the pixels: an analogue card with nothing connected
+keeps delivering frames. [Source and signal](../../wiki/Source-and-signal),
+[Signal detection](../../wiki/Signal-detection)
 
-Their contents follow the source. Before a device is chosen there is nothing but
-the device picker; afterwards, controls that cannot apply are absent rather than
-disabled, and are not applied to the picture either:
+**Automatic video standard.** The standard is not chosen once at startup but
+kept correct for as long as the program runs, so switching a console from 50 to
+60 Hz is followed without touching the settings. A lock pass settles the line
+count and the timing; a colour round then measures the picture itself, because
+PAL B, PAL N and SECAM all fit 625 lines and the decoder reports a lock for the
+wrong one as confidently as for the right one. From a deliberately wrong
+standard to a confirmed right one takes 1.7 to 2.4 seconds on the hardware this
+was built against. A round that ran on a still-black or moving picture is
+refused rather than believed, and **F7** asks for a search by hand — the one
+case measurement does not cover is colour that is wrong rather than missing.
+Every step is written to `CapView.log` with what was measured.
+[Automatic video standard](../../wiki/Automatic-video-standard)
 
-| | Shown when |
-|---|---|
-| Native pixel grid, composite filter | the source is analogue |
-| Scanlines and CRT mask | the source is 576 lines or fewer, analogue or not |
-| Deinterlacing | the source has fields at all |
-| HDR source curve and source peak | the source is not analogue |
+**Picture.** Nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear
+scaling; contrast adaptive sharpening; aspect override, integer scaling and a
+square-pixel mode that takes its shape from the console's own grid; rotation in
+quarter turns; line doubling for 240p and 288p sources. A **native pixel grid**
+setting resolves every output pixel to the console's own rather than to a
+fraction of one — a card samples the line 720 times where a SNES drew 256.
+Optional scanlines and shadow mask, off by default, display only, each
+compensating its own brightness. [Scaling and
+sharpening](../../wiki/Scaling-and-sharpening)
 
-The test is the picture, not the socket: no analogue standard produces more than
-576 lines, so a hybrid card delivering more is treated as digital however its
-decoder is reported.
+**Crop and colour range.** The crop is dragged on the picture or found by
+**Detect** (**F8**), which measures the black border as a union across about two
+seconds so a fade to black is not read as the picture shrinking, and refuses when
+too little would survive. It is a count of source pixels, so it is **dropped**
+when the source changes size rather than scaled into a guess — or kept per
+picture size, for a console that keeps changing between 50 and 60 Hz. Colour
+range and matrix default to automatic, the range measured from the image rather
+than inferred from the pixel format, with **F6** to measure again after a change
+in the card's own driver. [Cropping and
+geometry](../../wiki/Cropping-and-geometry), [Colour range and
+matrix](../../wiki/Colour-range-and-matrix)
 
-The first run opens on a welcome screen rather than on the settings.
-
-### Source
-
-Any DirectShow video device. Resolution, frame rate, pixel format and colour
-space are selected independently, so combinations a driver does not advertise
-but does accept can be forced — which covers the common case of a card reporting
-only 1080p30 for a mode it will in fact deliver at 1080p60.
-
-Two of those have answers that are not numbers. A card advertises the same list
-whatever is plugged into it — this one offers everything up to 1920×1080 at 60
-with a PAL composite cable in front of it — so the resolution offered by default
-is capped to the raster that is actually arriving, rather than upscaling a
-console to 1080p inside the card for nothing, and the rate list carries two
-modes beside the numbers: **highest available** and **the signal's rate**.
-Neither is stored as a number. Both are resolved when the card is opened, from
-the card that is really there, so a console switching from 576i50 to 480p60
-needs no one to edit a profile; each shows in brackets what it currently comes
-to.
-
-The signal's rate is the one the video standard prescribes: 50 under PAL and
-SECAM, 59.94 under NTSC and its relatives, a flat 60 under PAL-60 — which shares
-NTSC's 525 lines and not its rate. Both of those follow from the standard and
-neither follows from the other. It is offered only where the picture goes
-through the analogue decoder; component, VGA and everything digital carry
-whatever the source feels like, no standard describes it, and there the highest
-on offer remains the best guess there is.
-
-Cards with an analogue decoder also expose their **video standard** — PAL,
-PAL-60, NTSC, SECAM and the rest. It matters on a console that does both 50 and
-60 Hz: PAL is 625 lines at 50, PAL-60 is 525 at 60, and the wrong one gives
-either no picture or one with the wrong number of lines. Leaving it on
-**automatic** is the intended way to run it; see below. The standard belongs to
-the analogue decoder, so it is dropped whenever the input it described goes
-away, and a source declared Digital never gets one.
-
-**Which cable is in use** is asked in the same breath. One list — *Input* —
-runs Automatic, Composite, S-Video, Component / RGB, Digital, because saying
-composite already says analogue and nobody ever answered those as two
-questions. Each entry describes the plug rather than the standard, for the
-people who need this answered and do not know which cable they are holding.
-
-It asks rather than measures because on many cards there is nothing to measure:
-the documented way to read the input selector is `IAMCrossbar`, plenty of cards
-do not implement it, and their selector then lives only in the vendor's own
-dialog behind a private property set. Where a crossbar does exist, the entry is
-prefilled from it and the list can be left on automatic.
-
-The answer decides which of the picture filters exist at all. Dot crawl,
-rainbow shimmer and the soft top end are faults of sharing one wire between
-brightness and colour; S-Video splits them onto two, component onto three, and
-on those inputs the filters against them are hidden and switched off rather than
-offered as a trade of sharpness for nothing. The colour round of the standard
-search is skipped for the same reason — it decides between subcarriers, and
-component has none. What stays is the noise reduction, because every analogue
-line has noise, and the line standard itself, because 50 against 60 Hz is still
-a real question on component.
-
-**Configure card** opens the driver's own property pages while the picture keeps
-running. **Reinitialise card** releases the card, finds it again and returns the
-standard and format to automatic, leaving the device and input alone — enough,
-after moving a card from composite to DVI, to have 1920×1080 at 60 found on its
-own.
-
-Whether anything is coming in is measured from the pixels, not from whether
-frames arrive: an analogue card with nothing connected keeps delivering frames,
-and no signal on composite is snow rather than black.
-
-More: [Source and signal](../../wiki/Source-and-signal),
-[Signal detection](../../wiki/Signal-detection).
-
-![The Source tab: the capture device, the analogue video standard set to PAL 60, and the decoder reporting no lock because nothing was connected when this was taken](docs/settings-source.png)
-
-### Finding the video standard
-
-On **automatic**, the standard is not chosen once at startup but kept correct
-for as long as the program runs. Switching a console from 50 to 60 Hz, or
-unplugging the cable and putting it back, is followed without touching the
-settings.
-
-It takes two stages, because the decoder can answer only half the question.
-
-**The lock** settles the line count and the timing. Candidates are tried in
-turn, and the list is walked twice: a fast pass giving each 0.6 s, and — only if
-that finds nothing — a patient one at the full deadline. A standard with the
-wrong line count never locks at all, it only sits out its deadline, and in a
-list of eight that is most of the time the search spends. Nothing is discarded
-for good, so a slow lock the fast pass misses is caught by the second, and the
-overlay names which pass is running. The standard that was last good and its
-50/60 Hz partner are tried first and given longer in the patient pass, since a
-console that is restarting needs a moment before anything stable comes out of
-it. A
-candidate whose line count does not match what is arriving delivers no frames at
-all — that is not evidence against it, so it is not discarded, but the program
-stops waiting on it and moves on. A full pass with nothing locking means the
-console is off, and the card is left alone for a few seconds before looking
-again. In practice a lock is found well under a second.
-
-**The colour round** settles the rest. Several standards lock equally well on
-the same line count and differ only in how colour is carried — PAL B, PAL N and
-SECAM all fit 625 lines, and the decoder reports a lock for the wrong one just
-as confidently as for the right one. So each remaining candidate is set in turn
-and the picture itself is measured: how much colour is present, and how far
-black areas are tinted. The winner has to be clearly ahead rather than merely
-ahead, and standards that carry colour identically are not tried twice, since
-nothing in the picture could tell them apart.
-
-Two of them cannot be separated that way at all. PAL 60 and NTSC 4.43 carry
-colour on the same subcarrier and differ only in that PAL reverses the phase on
-every other line — so the wrong one of the pair does not decode nonsense, it
-decodes *less*, and measuring amounts rewards it for the omission. The round
-therefore also measures the reversal directly: colour that flips from line to
-line on one axis and not the other is a decoder working against the signal, and
-that standard is dropped from the comparison rather than scored in it.
-
-Each candidate takes only as long as it actually needs. Rather than giving every
-one of them a fixed moment to settle — which means giving all of them whatever
-the slowest one requires — the round watches the measurement itself: while the
-decoder is still locking the reading climbs, and once it stands the candidate is
-done. On the hardware this was built against that is a third of a second for
-most standards and about twice that for PAL 60, which recovers its colour
-noticeably more slowly than the rest.
-
-Most of the time none of that happens: a standard that already shows confident
-colour with black that stays black is simply the answer, and nothing is switched
-at all. From a deliberately wrong standard to a confirmed right one takes 1.7 to
-2.4 seconds on the hardware this was built against, where it used to take six:
-the lock costs a third of a second, and each candidate after it is measured only
-until its reading stops climbing rather than for a fixed window sized to the
-slowest of them.
-
-A round is only as good as the picture it ran on, so two cases are refused
-rather than believed. If the scene changes while the round is running the
-comparison is void and repeated a second later — what was missing there is
-stillness, and waiting longer does not supply it. If the screen is essentially
-black there is nothing to compare at all, since black is black in every
-standard; the program waits for a picture instead, and waiting costs nothing it
-would need later. A scene that is genuinely grey when decoded correctly cannot
-decide this either, and is not made to: the measurement is repeated after 3 and
-6 seconds and then left alone. Until it decides, the picture runs on in the
-standard that matches the configured region.
-
-While either stage is running, the picture says which step of how many is on
-screen and what set the search off — colour too pale for a standard that could
-be right, colour reaching into the blacks, or no lock at all. The standards are
-switched in front of you either way; the line is there so that what you are
-watching has a reason attached to it.
-
-The search can also be **asked for**: **F7**, or *Detect video standard* in the
-right-click menu, runs both stages again even when the current standard holds
-and shows plenty of colour. That is the case none of these measurements covers —
-colour that is wrong rather than missing — and the only route to it used to be
-picking a standard by hand and setting it back to automatic. A search asked for
-this way **says what it found** when it stops: the standard, and which of its
-ways out it took — corrected by colour, confirmed, nothing to decide with, no
-signal at all.
-
-Every step is written to `CapView.log` with what was measured and why it was
-enough, so a wrong decision can be read back rather than guessed at.
-
-More: [Automatic video standard](../../wiki/Automatic-video-standard).
-
-### Picture
-
-Nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear scaling; contrast
-adaptive sharpening; aspect override, integer scaling and a square-pixel mode
-that takes its shape from the console's own grid; rotation in quarter turns;
-line doubling for 240p and 288p sources.
-
-Crop is dragged on the picture, or found by **Detect** — in the settings, in the
-right-click menu, or on **F8** — which measures the black border as a union
-across about two seconds so a fade to black is not read as the picture getting
-smaller, and refuses when too little would survive: a GameCube home screen
-leaves 37 % of the area, against 57 % for the widest border that is still a
-border. A thin lit strip along the very edge with black behind it is the signal
-ending, not picture — a GameCube in PAL60 closes every frame with one green line
-across the full width — and the border goes on the far side of it.
-
-A crop is a count of source pixels, so it stops meaning anything the moment the
-source changes size. When that happens the crop is **dropped** and a notice says
-so, rather than being scaled into a guess or silently cutting the wrong edge off
-a 480-line picture measured on a 576-line one. It is not re-measured
-automatically either: the moment a standard changes is the worst moment to
-measure, since the picture is usually a logo on black or nothing at all.
-
-A console that keeps changing between 50 and 60 Hz would then want its border
-measured twice over, every time. **Remember per picture size** keeps one crop
-per source size instead, so a PAL GameCube's 576-line crop and its 480-line one
-both stay set up and the switch puts the right one back. Off by default, because
-dropping the crop is the right answer for a source that has genuinely become
-something else.
-
-Colour range and matrix default to automatic, the range measured from the image
-rather than inferred from the pixel format — a console set to full range
-delivers full range whether the card is asked for NV12 or RGB32.
-
-That verdict then holds until the picture format changes, which is right for a
-source that does not become something else halfway through a session and wrong
-for the one thing that changes without touching the format: an option in the
-card's own driver, which moves every black level in the picture and leaves the
-media type exactly as it was. **Measure again** sits beside the verdict, in the
-right-click menu, and on **F6**. Under it stand the numbers it came from —
-lowest and highest sample, the share below 16 and above 235 — because black at 0
-and black at 16 both read as *detected*, and while setting a card up those are
-precisely the two that have to be told apart.
-
-A **native pixel grid** setting resolves every output pixel to the console's own
-rather than to a fraction of one. A card samples the line at a fixed rate,
-usually 720, while a SNES draws 256 pixels across it, so the boundaries land
-wherever the arithmetic puts them; told the real count, the grid comes back. It
-recovers the *grid*, not the detail that grid carried — only sampling at the
-console's own dot clock does that, and nothing downstream of a capture card can.
-
-Optional **scanlines** and a **shadow mask**, off by default and display only,
-each compensating its own brightness so the sliders change structure rather than
-exposure. Scanlines switch off below twice the source height, where there is
-nowhere to put a gap.
-
-More: [Scaling and sharpening](../../wiki/Scaling-and-sharpening),
-[Cropping and geometry](../../wiki/Cropping-and-geometry),
-[Colour range and matrix](../../wiki/Colour-range-and-matrix).
-
-### Deinterlacing
-
-Whether the source is interlaced is measured rather than believed — a media type
-is entitled to say so and frequently does not. The figures are vertical movement
-between consecutive frames, measured on a 480i console:
+**Deinterlacing.** Whether the source is interlaced is measured rather than
+believed. Vertical movement between consecutive frames, on a 480i console:
 
 | Mode | Vertical movement | |
 |---|---|---|
 | Off (weave) | none | combing on anything that moves |
 | Bob | **1.0 line** | full rate, no latency, no interpolation |
-| Bob interpolated | 0.56 | the alternation between sharp and interpolated lines |
+| Bob interpolated | 0.56 | alternates sharp and interpolated lines |
 | Motion adaptive | **0.005** | weaves what is still, interpolates what is not |
 | Edge directed | 0.69 | follows edges; meant for pixel art |
 | YADIF | **0.002** | best quality; keeps one frame in memory |
@@ -306,266 +114,86 @@ between consecutive frames, measured on a 480i console:
 
 More: [Deinterlacing](../../wiki/Deinterlacing).
 
-### Composite
-
-A composite signal carries colour and brightness on one wire, and the two leak
-into each other: dot crawl along colour edges, rainbow shimmer over fine detail.
-The same wire adds noise to everything and rolls the top of the brightness band
-away towards the subcarrier, which is the softness a composite picture has and a
-component one does not.
-
-Two controls address the dot crawl and hand over to each other. A **four-frame
-average** removes it wherever the picture stands still, at no cost in sharpness;
-a **synchronous demodulator** handles what is moving, reconstructing the colour
-subcarrier out of the brightness and subtracting it at some cost in horizontal
-sharpness. The averaging engages whenever the demodulator is used, so it never
-pays for what is already free. Its slider snaps to the steps that actually
-change the window width — nine on PAL — because the positions in between compute
-the same filter.
-
-**Avoid ghosting** decides where the averaging lets go of movement. Averaging
-across movement is smearing, so this moves the trade rather than removing it:
-held on late, slow low-contrast movement drags a trail; released early, moving
-edges stay clean and slow areas keep some crawl for the demodulator.
-
-**Follow the movement** covers what the average has just let go of. It searches
-the previous frames for where this piece of line went and averages along that
-path instead of across it, so a moving picture gets noise taken off it where
-before it got nothing. It cannot help the dot crawl, and that is a result rather
-than a shortcoming: the crawl is fixed to the raster, not to the picture, so
-following the picture pulls the four frames out of the phase relationship the
-cancellation depends on. It helps the demodulator indirectly instead, since a
-cleaner line is one whose subcarrier content can be measured more accurately.
-Each of the three previous frames is asked separately whether the movement found
-in the nearest one explains it too, and any that disagrees is left out — which is
-what stops an object that turns, stops or is passed in front of from leaving a
-trail behind it.
+**Composite filter.** Composite carries colour and brightness on one wire, and
+the two leak into each other. A **four-frame average** removes dot crawl
+wherever the picture stands still at no cost in sharpness; a **synchronous
+demodulator** takes over where it moves, at some cost in horizontal sharpness.
+**Follow the movement** averages along the path a piece of line took rather than
+across it, so a moving picture gets its noise taken off too. Colour shimmer is
+handled by a weighted sideways average, optionally only where the brightness
+carries energy at the subcarrier's own frequency. **Restore bandwidth** puts back
+the top of the band the transmission rolled off, with a filter that places a
+second-order null on the subcarrier instead of lifting the dot crawl with it. All
+of it is derived while the shader runs from a single number, the subcarrier
+period in samples, so it is right for PAL, PAL 60, NTSC, NTSC 4.43, PAL M and
+PAL N alike and at any source width. SECAM is approximated.
 
 ![Left: a GameCube over composite with the filter off, dot crawl speckling the gold laurel and the chequered flag. Right: the same frame with the filter on](docs/composite-before-after.png)
 
-Colour shimmer is handled separately, by averaging the colour sideways — which
-composite carries at a quarter of the bandwidth anyway. Each neighbour is
-weighted by how close its colour is to the centre's; an unweighted average
-across a colour edge turns complementary neighbours into grey. **Only where
-needed** narrows that to the places the decoder can actually have invented the
-colour — where the brightness carries energy at the subcarrier's own frequency,
-which is what a pinstripe, a dither pattern or a brick wall does and what a plain
-picture does not. Everywhere else the colour is as real as composite gets it, and
-blurring it sideways is pure loss.
-
-**Restore bandwidth** puts back the band the transmission rolled off. This is not
-the sharpening on the Scaling tab: that one runs after scaling and raises the
-contrast of edges that are already there, while this one runs in the source's own
-samples with a filter built from the subcarrier frequency, and lifts frequencies
-the chain genuinely attenuated. The filter is the difference of two triangular
-windows, one reaching a subcarrier period to each side and one reaching two. A
-triangle is a box convolved with itself, so it places a second-order null on the
-subcarrier with no sidelobe near it — where a plain unsharp mask rises all the way
-to Nyquist and would lift the dot crawl harder than the picture. Because the band
-composite rolled off is also the band its colour crosstalk sits in, which no fixed
-filter can separate, the lift is additionally held back wherever the line does
-carry energy at the subcarrier.
-
-All of it follows from a single number, the subcarrier period measured in samples
-of the line. There is no filter per standard and no table of kernels: every
-window above is derived from that number while the shader runs, which makes them
-right for PAL, PAL 60, NTSC, NTSC 4.43, PAL M and PAL N alike, and right again at
-any source width. The number comes from whichever standard the card is locked to,
-so the Source tab matters here too. SECAM carries its colour differently and is
-approximated; the demodulator does not handle it, the rest does.
-
 More: [The composite filter](../../wiki/The-composite-filter).
 
-![The Picture tab: scaling and sharpening, the deinterlacer, the crop with its Detect button, and
-the composite filter with its two controls](docs/settings-picture.png)
+**High dynamic range.** P010 and P016 sources are read against PQ (ST 2084) or
+HLG (BT.2100). An ordinary screen gets BT.2390 tone mapping, an HDR screen
+scRGB. Recording, screenshots and the virtual camera each take the tone mapped
+picture by default and can be told to keep the range instead — P010, or JPEG XR
+and AVIF for a still. [High dynamic range](../../wiki/High-dynamic-range)
 
-### High dynamic range
+**Audio.** The card's embedded audio or any Windows recording device, played out
+through WASAPI, with a configurable buffer target, optional exclusive mode and
+an A/V offset. Drift between the capture and playback clocks is corrected by
+nudging the playback rate by a fraction of a per cent. An optional microphone is
+recorded as a separate input and never played back; by default the file gets
+three tracks — a mix, plus the capture and microphone separately.
+[Audio](../../wiki/Audio)
 
-P010 and P016 sources are read against either PQ (ST 2084) or HLG (BT.2100) and
-turned into linear light. An ordinary screen gets BT.2390 tone mapping; an HDR
-screen gets scRGB.
+**Recording.** H.264, H.265 or AV1 through NVENC, Quick Sync, AMF, x264 or x265,
+encoded by ffmpeg, at source resolution — after crop and deinterlacing, before
+window scaling, so the window size does not affect the result. The capture audio
+is the master clock and the video timeline follows the audio samples written, so
+the output is constant frame rate and does not drift: 1 ms over 15 seconds. A
+console switched from 60 to 50 Hz mid-recording **cuts the file and continues in
+a new one** at the new shape. Rate control, preset, tuning, look-ahead, adaptive
+quantisation and multipass are exposed under one set of names and translated
+into each vendor's own, everything defaulting to automatic.
+[Recording](../../wiki/Recording), [Encoder
+settings](../../wiki/Encoder-settings)
 
-Recording, screenshots and the virtual camera each get the tone mapped picture
-by default, and each can be told to keep the range instead — ten bit P010 for a
-recording, JPEG XR or AVIF for a screenshot, ten bit P010 for the camera.
+**Screenshots.** Also at source resolution, and taken **before the interface is
+drawn**, so no overlay or panel reaches the file; **Include the interface** saves
+the finished window instead. PNG and JPEG go through Windows Imaging Component,
+so **no ffmpeg is needed**. An HDR source can keep its range as JPEG XR, which
+Windows ships the encoder for and little but the Photos app reads, or as AVIF,
+which needs ffmpeg and is read by every browser.
+[Screenshots](../../wiki/Screenshots)
 
-More: [High dynamic range](../../wiki/High-dynamic-range).
+**Virtual camera.** The picture is offered to other programs as a webcam called
+**CapView Virtual Camera**, at the source's own resolution and rate rather than
+from a list of sizes: a 240p SNES goes out as 240p, a 1080p60 Switch as 1080p60.
+Programs that cannot take that get one of the ordinary sizes below it, scaled
+and letterboxed in their own process. Nothing above the source is offered, since
+a camera that advertises more than it has misleads whoever picks the largest
+entry. Installing costs one UAC prompt, because a DirectShow filter is
+registered machine-wide. **Leave the reading program's resolution on automatic**
+— in OBS, *Resolution/FPS Type: Device Default* — because a format is settled
+when the camera is opened and kept until it is reopened. [Virtual
+camera](../../wiki/Virtual-camera)
 
-![The HDR tab: source curve, what goes to the display, paper white and source peak, and the three
-switches for keeping the range — greyed out here, because the source was SDR](docs/settings-hdr.png)
+**One profile per console.** A profile holds everything: the device, the input,
+the video standard, the capture format and every picture and audio setting.
+Ctrl+1 to Ctrl+9 switch between them, and **Save current as …** turns whatever
+is set up right now into one. Almost nothing carries over between consoles — a
+SNES over composite wants the dot crawl filters, a native width of 256 and PAL
+at 50 Hz, a Switch over HDMI wants none of that — so this is how the program is
+meant to be used. A profile can also say **which video standard means it**, and
+the search then picks the profile: the same cable, two consoles, and no
+keystroke at all.
 
-### Audio
+**Updates.** *Settings → Updates* compares the build against the newest release
+on GitHub. Installing replaces `CapView.exe` by renaming rather than
+overwriting, so a failed update leaves the program as it was.
+[Updates](../../wiki/Updates)
 
-The card's embedded audio, or any Windows recording device, played out through
-WASAPI. The buffer target is configurable, exclusive mode is optional, and an
-A/V offset is available. Drift between the capture and playback clocks is
-corrected by nudging the playback rate by a fraction of a per cent.
-
-An optional microphone is recorded as a separate input with its own gain, and is
-never played back. By default the file gets three tracks: a mix, plus the
-capture and microphone separately.
-
-More: [Audio](../../wiki/Audio).
-
-### Recording
-
-H.264, H.265 or AV1 through NVENC, Quick Sync, AMF, x264 or x265, encoded by
-ffmpeg. The recording is made at source resolution, after crop and deinterlacing
-and before window scaling, so window size does not affect the result.
-
-The capture audio serves as the master clock and the video timeline is derived
-from the number of audio samples written, so the output is constant frame rate
-and does not drift: measured at 1 ms over 15 seconds.
-
-Frame size and rate stand fixed in the encoder's command line for the length of
-a file, so a console switched from 60 to 50 Hz while recording no longer fits
-the file being written. When that happens the recording is **cut and continued
-in a new file** at the new shape, rather than stopping at the change or filling
-the rest of the file with frames that do not match its header. A standard search
-walks through several line counts on its way to an answer, so the cut waits
-until the source has held one shape for a moment — a search that ends where it
-started does not cut at all.
-
-More: [Recording](../../wiki/Recording).
-
-### Screenshots
-
-Taken at source resolution, after crop and deinterlacing and before window
-scaling. The grab happens **before the interface is drawn**, so no overlay,
-toolbar or settings panel reaches the file. **Include the interface** moves it to
-after, saving the finished window instead — window-sized rather than
-source-sized, and always SDR.
-
-**SDR: PNG or JPEG.** Both go through Windows Imaging Component, so **no ffmpeg
-is needed**. PNG is the default; JPEG has an adjustable quality.
-
-**HDR: JPEG XR or AVIF.** When the source is HDR, a screenshot can keep the
-range instead of being mapped down to SDR first. The two are a genuine trade
-rather than a preference:
-
-| | Needs | Read by |
-|---|---|---|
-| **JPEG XR** (`.jxr`) | nothing — Windows ships the encoder | the Windows Photos app; little else |
-| **AVIF** (`.avif`) | **ffmpeg**, with libaom | every browser, and most things that are not Windows |
-
-AVIF is the only part of screenshots that needs ffmpeg. Without it the setting
-says so and points at the download, rather than failing at the moment you press
-the key. The still is encoded as 10-bit AV1 on the PQ curve, tagged BT.2020 —
-without those tags a viewer reads the samples as ordinary SDR and shows a dark
-picture.
-
-Whether HDR stills are written at all is a switch of its own under **HDR**,
-alongside the equivalents for recordings and the virtual camera.
-
-More: [Screenshots](../../wiki/Screenshots).
-
-### Encoder settings
-
-Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass
-are exposed under one set of names and translated into each vendor's own.
-Everything defaults to automatic, which passes nothing at all rather than
-passing the encoder's default. Anything a given encoder has no opinion about is
-greyed out rather than hidden.
-
-**Bitrate and quality sit directly under rate control**, which is what decides
-which of the two counts; whichever is not in use is greyed out rather than
-hidden. The bitrate slider is logarithmic, because the range a card like this
-actually lands in — 1 to 10 Mbit — is nine percent of a linear scale that runs
-to 100, and a field beside it takes a typed number for when the slider is close
-but not right.
-
-More: [Encoder settings](../../wiki/Encoder-settings).
-
-![The Encoder tab: ffmpeg at the top, then which encoder — naming the five that passed the test on
-this machine and the four that did not — and the settings it is given](docs/settings-encoder.png)
-
-### Virtual camera
-
-The picture can be offered to other programs as a webcam called **CapView
-Virtual Camera**, at the source's own resolution and the source's own frame
-rate. Not a list of sizes: a 240p SNES goes out as 240p, a 1080p60 Switch as
-1080p60, and if you ever put 8K at 120 in front of it, that is what comes out.
-
-Programs that cannot take that get one of the ordinary sizes below it -- 640x480
-and the rest -- scaled and letterboxed inside their own process, at no cost to
-anything else reading the same camera. Every consumer negotiates for itself, and
-the settings page lists them by name while they read.
-
-Nothing above the source is offered. A camera that advertises more than it has
-is a camera that misleads: the program picks the largest entry, keeps that
-choice for as long as it holds the camera, and goes on listing it after the
-console has changed. So a 576i console offers 576i and smaller, and a program
-wanting 1080p from it upscales at its own end, where that work belongs.
-
-An HDR source is additionally offered as ten bit P010, with the eight bit form
-right behind it so that programs which have never heard of an HDR webcam still
-find something they understand.
-
-The cost is a one-time install with a UAC prompt, because a DirectShow filter is
-registered machine-wide. There is an uninstall button next to it.
-
-Being registered machine-wide also means the camera stays in every device list
-once installed, whether CapView is running or not -- the same as OBS's virtual
-camera. While nothing is feeding it, it shows a picture that says so instead of
-black.
-
-A program settles its format once, when it opens the camera, and keeps it for as
-long as it holds it open. Swapping a 1080p console for a 576i one changes what
-CapView publishes straight away, but a program already reading goes on asking
-for the size it negotiated, so it keeps getting the new picture fitted into the
-old shape. Reopening the camera there picks the new size up.
-
-**Whatever program you read the camera with, leave its resolution on automatic
-and do not pick a size by hand.** In OBS that is **Resolution/FPS Type: Device
-Default**; on *Custom* it asks for the size written in the box and nothing else,
-whatever the console is now doing. After changing console, disable the device
-and enable it again and OBS picks the new size up. Discord needs no more than
-the camera off and back on.
-
-More: [Virtual camera](../../wiki/Virtual-camera).
-
-![The Recording tab: container, bitrate, frame rate and output folder, with screenshots and the virtual camera below them](docs/settings-recording.png)
-
-### One profile per console
-
-A profile holds **everything**: the device, the card input, the video standard,
-the capture format, and every picture and audio setting. Ctrl+1 to Ctrl+9 switch
-between them. This is how the program is meant to be used, and it is worth
-setting up before anything else.
-
-Almost nothing carries over between consoles. A SNES over composite wants the
-four-frame average and the demodulator against dot crawl, a native width of 256,
-PAL at 625 lines and 50 Hz; a Switch over HDMI wants none of that and 1080p at
-60. Set both up once and swapping a cable is one keystroke rather than a tour of
-the settings.
-
-**Save current as …** turns whatever is set up right now into a profile, asking
-for a name with the cursor already in the field, so a second console is a matter
-of changing what is actually different rather than rebuilding what was already
-correct.
-
-Settings that do not apply to the current source are **not applied**, not merely
-hidden. The values stay in the profile — that console will be back — but they
-are not restored on the way out and back, since the next analogue source may
-well be a different console.
-
-A profile can also say **which video standard means it**. Give the PAL profile
-PAL and the NTSC one NTSC, and the standard the search settles on picks the
-profile: the same cable, two consoles, and neither a keystroke nor a menu. It
-fires when the colour round has settled rather than when the lock comes in,
-because until then the standard is only a line count — and never during a
-recording, never onto a profile on a different input, and never away from a
-profile that already answers to what is on screen. A profile chosen by hand
-stays until the source really changes.
-
-### Updates
-
-*Settings → Updates* compares this build against the newest release on GitHub,
-either at startup or on request. Installing replaces `CapView.exe` itself, by
-renaming rather than overwriting, and a failed update leaves the program as it
-was rather than gone.
-
-More: [Updates](../../wiki/Updates).
+![The Picture tab: scaling and sharpening, the deinterlacer, the crop with its Detect button, and the composite filter with its two controls](docs/settings-picture.png)
 
 ## Shortcuts
 
@@ -588,10 +216,7 @@ More: [Updates](../../wiki/Updates).
 | Right click | Menu |
 
 All of these except Esc, the profile digits and Alt+F4 can be reassigned under
-*Settings → Keys*.
-
-More: [Shortcuts](../../wiki/Shortcuts),
-[The settings window](../../wiki/The-settings-window).
+*Settings → Keys*. More: [Shortcuts](../../wiki/Shortcuts).
 
 ## Building
 
@@ -602,39 +227,25 @@ no external dependencies; Dear ImGui is vendored in `third_party/`.
 build.bat
 ```
 
-The result is `CapView.exe` in the repository root, about 2 MB, linked
-against the static CRT. `build.bat keep` retains the build tree for incremental
-rebuilds, and `build.bat debug` produces a debug configuration.
+The result is `CapView.exe` in the repository root, about 2 MB, linked against
+the static CRT. `build.bat keep` retains the build tree for incremental
+rebuilds, `build.bat debug` produces a debug configuration.
 
 Settings are stored in `CapView.json` beside the executable; nothing is written
 to the registry. Prebuilt executables are attached to each
-[release](../../releases).
-
-More: [Building](../../wiki/Building).
+[release](../../releases). More: [Building](../../wiki/Building).
 
 ## ffmpeg
 
-Two things require `ffmpeg.exe`, and nothing else does:
+Two things require `ffmpeg.exe`, and nothing else does: **recording**, whichever
+encoder is used, and **HDR screenshots in AVIF**. The preview, the composite
+filters, deinterlacing, the virtual camera and SDR screenshots run without it.
 
-- **Recording**, whichever encoder is used.
-- **HDR screenshots in AVIF**, which go through libaom. The other HDR format,
-  JPEG XR, does not — Windows ships that encoder — so an HDR still can be saved
-  without ffmpeg by choosing it instead. SDR screenshots never need it.
-
-The preview, the composite filters, deinterlacing and the virtual camera run
-without it.
-
-*Settings → Encoder* provides a button that downloads a static build, verifies
-its published SHA-256 and extracts only the executable. The same is available
-from the command line:
-
-```bash
-CapView.exe --fetch-ffmpeg
-```
-
-Available encoders are determined by test-encoding two frames with each
-candidate, rather than by reading `ffmpeg -encoders`, which lists what the build
-was compiled with rather than what the hardware supports.
+*Settings → Encoder* downloads a static build, verifies its published SHA-256
+and extracts only the executable; `CapView.exe --fetch-ffmpeg` does the same
+from the command line. Available encoders are determined by test-encoding two
+frames with each candidate, rather than by reading `ffmpeg -encoders`, which
+lists what the build was compiled with rather than what the hardware supports.
 
 More: [ffmpeg](../../wiki/ffmpeg).
 
@@ -643,26 +254,22 @@ More: [ffmpeg](../../wiki/ffmpeg).
 - **A card grants its capture pin to one process at a time.** If OBS holds it,
   CapView cannot open it, and the other way round.
 - **The virtual camera is not visible to packaged apps.** Its shared memory
-  lives in the session namespace, which an app container cannot see -- so the
+  lives in the session namespace, which an app container cannot see — so the
   Windows Camera app and Store builds of Teams do not find it. Everything that
   loads DirectShow normally does: OBS, Discord, browsers, vMix, XSplit.
 - **S-Video and component have not been run.** Every measurement behind the
   analogue path was taken on composite, from a PAL SNES and a GameCube. Picking
-  either of the other two removes filters and skips the colour round, which is
-  the safe direction to be wrong in — nothing is applied that was not asked for
-  — but the claim that the picture is then correct rests on how the signals are
-  defined and not on anything measured here.
+  either of the others removes filters and skips the colour round, which is the
+  safe direction to be wrong in, but the claim that the picture is then correct
+  rests on how the signals are defined and not on anything measured here.
 - **The HDR display path is untested on real HDR hardware.** The maths is
   checked against the standards and the tone mapped path is verified; the scRGB
   output has never been run against an HDR monitor.
-- **SECAM** carries colour as frequency modulation on two subcarriers that
-  alternate line by line, at 4.250 and 4.40625 MHz, and CapView works from a
+- **SECAM is approximated.** It carries colour as frequency modulation on two
+  alternating subcarriers, at 4.250 and 4.40625 MHz, and CapView works from a
   single figure of 4.43362 MHz. The demodulator does not handle SECAM at all;
-  the four-frame average, the noise filter and the bandwidth restore do, the
-  last two with their null landing within 0.6 % of the one carrier and 4.3 % of
-  the other. A second-order null is flat enough around its centre that even the
-  worse of those leaks under a fifth of a percent, so the cost is small — but it
-  is an approximation, and it has not been measured against a SECAM source.
+  the four-frame average, the noise filter and the bandwidth restore do, and it
+  has not been measured against a SECAM source.
 
 ## Why DirectShow
 
@@ -674,11 +281,10 @@ Foundation enumerates three.
 
 ## Licence
 
-CapView is [MIT](LICENSE) licensed. Dear ImGui is MIT licensed as well; the
-components and their terms are listed in [THIRD-PARTY.md](THIRD-PARTY.md).
+CapView is [MIT](LICENSE) licensed, as is Dear ImGui; the components and their
+terms are listed in [THIRD-PARTY.md](THIRD-PARTY.md).
 
 ffmpeg is a separate program, downloaded from upstream and executed as a child
-process. The usual Windows builds contain x264 and x265 and are therefore GPL
-licensed; invoking a program is not linking against it, so those terms do not
-extend to CapView. Redistributing CapView together with an ffmpeg build is a
-different matter, and the GPL then applies to what is being distributed.
+process. The usual Windows builds are GPL licensed, and invoking a program is
+not linking against it — but redistributing CapView together with an ffmpeg
+build is a different matter, and the GPL then applies to what is distributed.
