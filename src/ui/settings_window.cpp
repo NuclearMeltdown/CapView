@@ -1370,10 +1370,9 @@ void SettingsWindow::DrawImageTab() {
   ImGui::SameLine();
   HelpMarker(AspectHelp(aspect));
 
-  // Bei Strecken und Ganzzahlig gibt es nichts umzurechnen: das eine hat
-  // ueberhaupt keine eigene Form, das andere ist ein Versprechen ueber Pixel,
-  // das genau durch Umrechnen gebrochen wuerde.
-  if (img.aspect != AspectMode::Stretch && img.aspect != AspectMode::Integer) {
+  // Nur beim Strecken gibt es nichts umzurechnen: dieser Modus hat ueberhaupt
+  // keine eigene Form, er nimmt die des Fensters.
+  if (img.aspect != AspectMode::Stretch) {
     // Eigene ID: derselbe Satz steht auf dieser Seite ein zweites Mal, weiter
     // unten bei den Bildreglern. ImGui bildet die ID aus der Beschriftung, also
     // waeren es sonst zwei Bedienelemente mit einer ID -- und ImGui sagt das
