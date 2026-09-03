@@ -2626,11 +2626,15 @@ void VideoRenderer::ComputeDeliverySize(const ImageSettings& image) {
 
   if (!image.squarePixelOutput) return;
   if (outputWidth_ <= 0 || outputHeight_ <= 0) return;
-  // Neither of these has a shape to resample to. Stretch takes whatever the
-  // window happens to be, which is not a property of the picture at all, and
-  // Integer is a promise about pixels that resampling is precisely the way to
-  // break.
-  if (image.aspect == AspectMode::Stretch || image.aspect == AspectMode::Integer) return;
+  // Stretch has no shape to resample to: it takes whatever the window happens
+  // to be, which is not a property of the picture at all.
+  //
+  // Integer used to be exempt as well, on the grounds that it was a promise
+  // about pixels. It is not -- the whole-number factor is a property of the
+  // *display*, worked out from the window size, and a file has no window. What
+  // Integer does have since 3.6.3 is a shape, the same one every other mode
+  // has, and leaving it out here would put the wrong shape in every recording.
+  if (image.aspect == AspectMode::Stretch) return;
 
   const double target = TargetAspect(image);
   if (target <= 0.0) return;
@@ -2703,28 +2707,52 @@ void VideoRenderer::ComputeDestRectIn(const ImageSettings& image, int winW, int 
     return;
   }
 
-  if (image.aspect == AspectMode::Integer) {
-    int scale = std::min(winW / srcW, winH / srcH);
-    if (scale < 1) {
-      // Window too small for 1:1 -- fall back to fitting, otherwise nothing
-      // would be visible at all.
-      const double a = (double)srcW / (double)srcH;
-      int w = winW, h = (int)(winW / a);
-      if (h > winH) {
-        h = winH;
-        w = (int)(winH * a);
-      }
-      videoRect_ = RECT{(winW - w) / 2, (winH - h) / 2, (winW - w) / 2 + w, (winH - h) / 2 + h};
-      return;
-    }
-    const int w = srcW * scale;
-    const int h = srcH * scale;
-    videoRect_ = RECT{(winW - w) / 2, (winH - h) / 2, (winW - w) / 2 + w, (winH - h) / 2 + h};
-    return;
-  }
-
   double target = TargetAspect(image);
   if (target <= 0.0) target = (double)srcW / (double)srcH;
+
+  if (image.aspect == AspectMode::Integer) {
+    // The whole-number factor goes on the *lines*, and the width follows the
+    // aspect rather than a second factor of its own.
+    //
+    // Until 3.6.3 both axes took the same integer factor off the pixel counts,
+    // which quietly threw the shape away: an analogue line is not a row of
+    // pixels, it is a voltage the card sampled 720 times, so a picture cropped
+    // to 668x448 came out at 1,49 where every other mode showed it at 1,33 --
+    // twelve per cent too wide, and visible the moment you switched modes.
+    //
+    // The lines are the one axis where the source really has a discrete count,
+    // so they are the one worth keeping whole; along a line there is nothing to
+    // keep. Line doubling is already in outputHeight_ and multiplying doubled
+    // rows by a whole number keeps them equal, so it needs no special case. A
+    // quarter turn does: it puts the lines on the other axis.
+    const bool turned =
+        image.rotation == Rotation::Cw90 || image.rotation == Rotation::Ccw90;
+    const int lines = turned ? srcW : srcH;
+    // Largest factor that still leaves both directions inside the window.
+    const double byLines =
+        turned ? (double)winW / (double)lines : (double)winH / (double)lines;
+    const double byOther = turned ? (double)winH * target / (double)lines
+                                  : (double)winW / ((double)lines * target);
+    const int scale = (int)std::floor(std::min(byLines, byOther));
+    if (scale >= 1) {
+      int w, h;
+      if (turned) {
+        w = lines * scale;
+        h = (int)std::lround((double)w / target);
+      } else {
+        h = lines * scale;
+        w = (int)std::lround((double)h * target);
+      }
+      w = std::max(1, std::min(w, winW));
+      h = std::max(1, std::min(h, winH));
+      const int ix = (winW - w) / 2;
+      const int iy = (winH - h) / 2;
+      videoRect_ = RECT{ix, iy, ix + w, iy + h};
+      return;
+    }
+    // Window too small for even one line per pixel -- fall through to the
+    // ordinary fit below, otherwise nothing would be visible at all.
+  }
 
   int w = winW;
   int h = (int)std::lround(winW / target);

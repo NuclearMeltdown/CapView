@@ -379,14 +379,16 @@ const char* ScaleFilterHelp(int i) {
       "Weich und neutral. Standard für moderne Quellen.",
       "Catmull-Rom. Schärfer als bilinear, leichte Überschwinger an Kanten.",
       "Schärfste Wahl. Gut für HD, erzeugt bei Pixelgrafik Halos.",
-      "Wie Nearest, aber ohne ungleich breite Pixel bei krummen Faktoren.",
+      "Wie Nearest, aber ohne ungleich breite Pixel bei krummen Faktoren. Mit "
+      "Quelle die Integer-Optik, bis zum Fensterrand.",
   };
   static const char* en[5] = {
       "Hard pixel edges. For retro consoles, paired with integer scaling.",
       "Soft and neutral. The default for modern sources.",
       "Catmull-Rom. Sharper than bilinear, slight overshoot at edges.",
       "Sharpest option. Good for HD, produces halos on pixel art.",
-      "Like nearest, but without unevenly wide pixels at odd scale factors.",
+      "Like nearest, but without unevenly wide pixels at odd scale factors. "
+      "With Source, the integer look all the way to the window edge.",
   };
   i = Pick(i, 5);
   return T(de[i], en[i]);
@@ -447,14 +449,18 @@ const char* AspectHelp(int i) {
       "Unabhängig von der Auflösung der Quelle.",
       "Für alte Konsolen, die 4:3 in einem 16:9-Signal liefern.",
       "Füllt das Fenster, verzerrt das Bild.",
-      "Nur ganzzahlige Faktoren. Mit Nearest sind alle Pixel gleich groß.",
+      "Ganzzahliger Faktor auf die Zeilen, Breite aus dem Seitenverhältnis. "
+      "Alle Zeilen gleich hoch, dafür bleibt Rand. Randfüllend: Quelle mit "
+      "Sharp-Bilinear.",
   };
   static const char* en[5] = {
       "Whatever the card reports.",
       "Regardless of the source resolution.",
       "For old consoles that put 4:3 inside a 16:9 signal.",
       "Fills the window, distorts the picture.",
-      "Whole-number factors only. With nearest, every pixel is the same size.",
+      "Whole-number factor on the lines, width from the aspect. Every line the "
+      "same height, at the cost of a border. Edge to edge: Source with "
+      "sharp-bilinear.",
   };
   i = Pick(i, 5);
   return T(de[i], en[i]);
