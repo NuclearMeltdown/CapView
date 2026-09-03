@@ -230,8 +230,9 @@ More: [Automatic video standard](../../wiki/Automatic-video-standard).
 ### Picture
 
 Nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear scaling; contrast
-adaptive sharpening; aspect override and integer scaling; rotation in quarter
-turns; line doubling for 240p and 288p sources.
+adaptive sharpening; aspect override, integer scaling and a square-pixel mode
+that takes its shape from the console's own grid; rotation in quarter turns;
+line doubling for 240p and 288p sources.
 
 Crop is dragged on the picture, or found by **Detect** — in the settings, in the
 right-click menu, or on **F8** — which measures the black border as a union

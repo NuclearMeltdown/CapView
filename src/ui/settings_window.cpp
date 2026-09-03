@@ -1364,7 +1364,8 @@ void SettingsWindow::DrawImageTab() {
 
   int aspect = (int)img.aspect;
   ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Seitenverhältnis", "Aspect ratio"), &aspect, 5, AspectName, AspectHelp)) {
+  if (ComboEnum(T("Seitenverhältnis", "Aspect ratio"), &aspect, kAspectModeCount, AspectName,
+                AspectHelp)) {
     img.aspect = (AspectMode)aspect;
   }
   ImGui::SameLine();
@@ -1625,9 +1626,14 @@ void SettingsWindow::DrawImageTab() {
   // Die Konsole steht in der Liste selbst, nicht nur im Tooltip: wer hier
   // vorbeikommt, weiß was er angeschlossen hat und sucht die Zahl dazu -- nicht
   // umgekehrt.
+  //
+  // Der erste Eintrag hiess bis 3.6.2 "aus", und das stimmt seit dem
+  // Seitenverhaeltnis "Quadratische Pixel" nicht mehr: die Zahl schaltet dort
+  // nichts ab, sie fehlt nur, und das Bild bekommt ersatzweise die Proben der
+  // Karte. "Keine Angabe" sagt beides auf einmal.
   static const int kNativePresets[] = {0, 256, 320, 384, 512, 640};
   const char* kNativeWho[] = {
-      T("aus", "off"),
+      T("keine Angabe", "not specified"),
       "256  ·  SNES, NES, PS1",
       T("320  ·  Mega Drive, PS1", "320  ·  Mega Drive, PS1"),
       T("384  ·  Amiga, PS1 breit", "384  ·  Amiga, PS1 wide"),
@@ -1653,13 +1659,17 @@ void SettingsWindow::DrawImageTab() {
                "Proben. Ist die Zahl bekannt, wird jedes Ausgabepixel dem richtigen "
                "Konsolenpixel zugeordnet statt irgendwo dazwischen.\n\n"
                "Ersetzt den Filter oben, weil die Zuordnung selbst schon die Entscheidung "
-               "ist. Am besten mit Integer-Skalierung.",
+               "ist. Am besten mit Integer-Skalierung.\n\n"
+               "Das Seitenverhältnis „Quadratische Pixel“ nimmt dieselbe Zahl: dort bestimmt "
+               "sie die Form des Bildes, hier die Lage der Kanten.",
                "How many pixels the console really draws across. The card samples at a "
                "fixed rate, usually 720 -- so one SNES pixel lands on about 2.8 samples. "
                "Given the real number, every output pixel resolves to the console's pixel "
                "instead of somewhere between two of them.\n\n"
                "Replaces the filter above, because the mapping is the decision. Best with "
-               "integer scaling."));
+               "integer scaling.\n\n"
+               "The \"Square pixels\" aspect ratio uses the same number: there it sets the "
+               "shape of the picture, here the position of the edges."));
 
   }  // natives Pixelraster, nur analog
 

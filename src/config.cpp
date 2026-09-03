@@ -288,10 +288,13 @@ VideoRegion ResolveVideoRegion(VideoRegion region) {
 }
 
 const char* AspectName(int i) {
-  static const char* de[5] = {"Quelle", "16:9 erzwingen", "4:3 erzwingen", "Strecken",
-                              "Integer-Skalierung"};
-  static const char* en[5] = {"Source", "Force 16:9", "Force 4:3", "Stretch", "Integer scaling"};
-  i = Pick(i, 5);
+  static const char* de[kAspectModeCount] = {"Quelle",   "16:9 erzwingen",
+                                             "4:3 erzwingen", "Strecken",
+                                             "Integer-Skalierung", "Quadratische Pixel"};
+  static const char* en[kAspectModeCount] = {"Source",          "Force 16:9",
+                                             "Force 4:3",       "Stretch",
+                                             "Integer scaling", "Square pixels"};
+  i = Pick(i, kAspectModeCount);
   return T(de[i], en[i]);
 }
 
@@ -444,7 +447,7 @@ const char* MaskHelp(int i) {
 }
 
 const char* AspectHelp(int i) {
-  static const char* de[5] = {
+  static const char* de[kAspectModeCount] = {
       "So wie die Karte es liefert.",
       "Unabhängig von der Auflösung der Quelle.",
       "Für alte Konsolen, die 4:3 in einem 16:9-Signal liefern.",
@@ -452,8 +455,10 @@ const char* AspectHelp(int i) {
       "Ganzzahliger Faktor auf die Zeilen, Breite aus dem Seitenverhältnis. "
       "Alle Zeilen gleich hoch, dafür bleibt Rand. Randfüllend: Quelle mit "
       "Sharp-Bilinear.",
+      "Jeder Konsolenpixel so breit wie hoch, aus der Breite der Quelle weiter "
+      "unten. Ohne Angabe zählen die Proben der Karte.",
   };
-  static const char* en[5] = {
+  static const char* en[kAspectModeCount] = {
       "Whatever the card reports.",
       "Regardless of the source resolution.",
       "For old consoles that put 4:3 inside a 16:9 signal.",
@@ -461,8 +466,10 @@ const char* AspectHelp(int i) {
       "Whole-number factor on the lines, width from the aspect. Every line the "
       "same height, at the cost of a border. Edge to edge: Source with "
       "sharp-bilinear.",
+      "Every console pixel as wide as it is tall, from the source width below. "
+      "With none given, the card's samples count instead.",
   };
-  i = Pick(i, 5);
+  i = Pick(i, kAspectModeCount);
   return T(de[i], en[i]);
 }
 
@@ -685,7 +692,7 @@ Profile ReadProfile(const json::Value& v) {
   p.image.motionCompensate = i["motionCompensate"].AsBool(false);
   p.image.bandwidthRestore = (float)Clamp(i["bandwidthRestore"].AsNumber(0.0), 0.0, 1.0);
   p.image.adaptiveChroma = i["adaptiveChroma"].AsBool(false);
-  p.image.aspect = ReadEnum<AspectMode>(i, "aspect", 5, AspectMode::Source);
+  p.image.aspect = ReadEnum<AspectMode>(i, "aspect", kAspectModeCount, AspectMode::Source);
   p.image.squarePixelOutput = i["squarePixelOutput"].AsBool(true);
   p.image.cropLeft = Clamp(i["cropLeft"].AsInt(0), 0, 16384);
   p.image.cropRight = Clamp(i["cropRight"].AsInt(0), 0, 16384);
