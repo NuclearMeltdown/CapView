@@ -2567,6 +2567,36 @@ double VideoRenderer::TargetAspect(const ImageSettings& image) const {
   if (image.aspect == AspectMode::Force16x9) return turned ? 9.0 / 16.0 : 16.0 / 9.0;
   if (image.aspect == AspectMode::Force4x3) return turned ? 3.0 / 4.0 : 4.0 / 3.0;
 
+  // Quadratische Pixel: die Form kommt nicht aus der Norm, sondern aus dem
+  // Raster, das die Konsole gezeichnet hat -- so breit wie hoch, jeder Punkt
+  // einzeln. Fuer 4:3 muesste ein SNES-Pixel 8:7 sein, und wer das nicht will,
+  // will das hier.
+  //
+  // Die Zeilen weiss das Programm, die Spalten nicht: ueber die Leitung kam ein
+  // Spannungsverlauf, und wie oft die Konsole ihn umgeschaltet hat, steht
+  // nirgends darin -- deshalb kommt die Zahl aus "Breite der Quelle". Die zaehlt
+  // ueber die ganze aktive Zeile, hier zaehlt aber der Ausschnitt, also muss sie
+  // im selben Verhaeltnis mitgehen. Ohne diesen Schritt kaeme ein GameCube auf
+  // 640/448 = 1,43 heraus statt auf die 1,33, die jeder andere Modus zeigt.
+  //
+  // Steht dort keine Angabe, bleiben nur die Proben der Karte. Sie als
+  // quadratisch zu nehmen ist keine Notloesung, sondern genau die Frage, die
+  // der Modus stellt -- und 668 Proben auf 448 Zeilen sind 1,49.
+  if (image.aspect == AspectMode::SquarePixels) {
+    // Halbhoch verpackt heisst: die Karte hat jede Zeile doppelt abgelegt, die
+    // Quelle hat halb so viele. Die Zeilenverdopplung dagegen steckt in
+    // outputHeight_, nicht in croppedHeight_, und geht hier nichts an.
+    const double lines = coSitedFields_ ? (double)h * 0.5 : (double)h;
+    double cols = (double)w;
+    if (image.nativeWidth > 0 && source_.width > 0) {
+      cols = (double)image.nativeWidth * (double)w / (double)source_.width;
+    }
+    if (lines > 0.0 && cols > 0.0) {
+      const double dar = cols / lines;
+      return turned ? 1.0 / dar : dar;
+    }
+  }
+
   double dar = (double)w / (double)h;
   if (source_.aspectX > 0 && source_.aspectY > 0 && source_.width > 0 &&
       source_.height > 0) {

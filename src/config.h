@@ -40,7 +40,11 @@ inline bool DeinterlaceNeedsHistory(Deinterlace d) { return d == Deinterlace::Ya
 enum class Rotation { None, Cw90, Half, Ccw90 };
 const int kRotationCount = 4;
 
-enum class AspectMode { Source, Force16x9, Force4x3, Stretch, Integer };
+// Angehaengt wird hier, nie eingefuegt: der Wert steht als Zahl in der
+// CapView.json, und ein Einschub verschoebe stillschweigend jede gespeicherte
+// Einstellung um eins.
+enum class AspectMode { Source, Force16x9, Force4x3, Stretch, Integer, SquarePixels };
+const int kAspectModeCount = 6;
 
 enum class ColorRange { Auto, Limited, Full };
 
