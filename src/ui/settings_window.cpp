@@ -2466,9 +2466,19 @@ void SettingsWindow::DrawDisplayTab() {
 
   ImGui::Spacing();
   ImGui::SeparatorText(T("Darstellung", "Appearance"));
-  int theme = (int)app.theme;
+  // Eigene Reihenfolge wie bei der Sprache: oben steht, womit das Programm ohne
+  // Einstellung hochkommt. Die Aufzaehlung selbst darf nicht umsortiert werden,
+  // sie wandert als Zahl in die Konfigurationsdatei.
+  static const Theme kThemeOrder[] = {Theme::System, Theme::Dark, Theme::Light};
   ImGui::SetNextItemWidth(-260.0f);
-  if (ComboEnum(T("Design", "Theme"), &theme, 3, ThemeName)) app.theme = (Theme)theme;
+  if (ImGui::BeginCombo(T("Design", "Theme"), ThemeName((int)app.theme))) {
+    for (Theme option : kThemeOrder) {
+      const bool selected = app.theme == option;
+      if (ImGui::Selectable(ThemeName((int)option), selected)) app.theme = option;
+      if (selected) ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
 
   // Accent presets as a row of swatches, plus a free colour picker. The whole
   // palette including the window background is derived from this.

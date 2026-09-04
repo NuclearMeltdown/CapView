@@ -853,7 +853,7 @@ bool Config::Load(std::string* error) {
   }
 
   const json::Value& a = root["app"];
-  app.theme = ReadEnum<Theme>(a, "theme", 3, Theme::Dark);
+  app.theme = ReadEnum<Theme>(a, "theme", 3, Theme::System);
   // Englisch, wie in AppSettings. Stand hier auf Deutsch und war damit ein
   // stiller Widerspruch: eine frische Installation kam auf Englisch hoch, eine
   // Konfiguration ohne diesen Schlüssel auf Deutsch.
