@@ -82,9 +82,7 @@ square-pixel mode that takes its shape from the console's own grid; rotation in
 quarter turns; line doubling for 240p and 288p sources. A **native pixel grid**
 setting resolves every output pixel to the console's own rather than to a
 fraction of one — a card samples the line 720 times where a SNES drew 256.
-Optional scanlines and shadow mask, off by default, display only, each
-compensating its own brightness. [Scaling and
-sharpening](../../wiki/Scaling-and-sharpening)
+[Scaling and sharpening](../../wiki/Scaling-and-sharpening)
 
 **Crop and colour range.** The crop is dragged on the picture or found by
 **Detect** (**F8**), which measures the black border as a union across about two
@@ -131,6 +129,22 @@ PAL N alike and at any source width. SECAM is approximated.
 ![Left: a GameCube over composite with the filter off, dot crawl beading along every letter edge and across the colour bars. Right: the same frame under the four-frame average, clean](docs/composite-before-after.png)
 
 More: [The composite filter](../../wiki/The-composite-filter).
+
+**Cathode ray tube.** Scanlines and a phosphor mask, at the bottom of *Settings →
+Picture* for sources of 576 lines or fewer. Off by default and display only: a
+recording, a screenshot and the virtual camera all take the picture from upstream
+of this pass, because gaps baked in at source resolution land in the wrong places
+for whoever plays the file back. The gaps follow the **source's** line grid
+rather than the screen's, fade in across 2× to 3× the source height and are
+absent below twice it, where a line and its gap fall inside the same output pixel
+and what comes out is moiré rather than scanlines. The mask is an aperture grille
+— vertical stripes, the way a Trinitron worked — or a shadow mask, whose triads
+step sideways every other line. Both darken by construction and both put the
+brightness back afterwards, so the control changes structure and not exposure;
+both stop at half strength, because past that the compensation has to lift the
+peak far enough to clip the channels apart from one another and what arrives is a
+colour cast rather than a stronger effect. [Scanlines and the
+mask](../../wiki/Scaling-and-sharpening#scanlines-and-the-mask)
 
 **High dynamic range.** P010 and P016 sources are read against PQ (ST 2084) or
 HLG (BT.2100). An ordinary screen gets BT.2390 tone mapping, an HDR screen
