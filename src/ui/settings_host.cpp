@@ -18,11 +18,6 @@ namespace {
 
 const wchar_t kClassName[] = L"CapViewSettingsWindow";
 
-void ApplyDarkTitleBar(HWND hwnd, bool dark) {
-  const BOOL value = dark ? TRUE : FALSE;
-  ::DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &value, sizeof(value));
-}
-
 }  // namespace
 
 SettingsHost::~SettingsHost() { Destroy(); }
@@ -389,7 +384,7 @@ void SettingsHost::ApplyTheme(bool darkMode, unsigned accentColor) {
   ApplyImGuiTheme(darkMode, accentColor);
   ImGui::GetStyle().ScaleAllSizes(uiScale_);
   ImGui::SetCurrentContext(previous);
-  ApplyDarkTitleBar(hwnd_, darkMode);
+  ApplyWindowDarkMode(hwnd_, darkMode);
   themeApplied_ = true;
 }
 
