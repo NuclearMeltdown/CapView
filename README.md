@@ -110,7 +110,7 @@ believed. Vertical movement between consecutive frames, on a 480i console:
 | Edge directed | 0.69 | follows edges; meant for pixel art |
 | YADIF | **0.002** | best quality; keeps one frame in memory |
 
-![Left: a 480i GameCube frame woven, with combing across the moving item boxes. Right: the same source through YADIF, clean](docs/deinterlace-before-after.png)
+![Left: a kart driving past a 480i barrier, woven, the chevrons torn into interlacing combs. Right: the same moment through YADIF, clean](docs/deinterlace-before-after.png)
 
 More: [Deinterlacing](../../wiki/Deinterlacing).
 
