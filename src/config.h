@@ -583,7 +583,11 @@ struct Profile {
 };
 
 struct AppSettings {
-  Theme theme = Theme::Dark;
+  // Follows Windows unless told otherwise. Only a first run reaches this --
+  // anyone with a configuration file has their own answer written down -- and on
+  // a first run the program has nothing better to go on than what the rest of
+  // the desktop is already doing.
+  Theme theme = Theme::System;
   Language language = Language::English;
   // In welchem Land der Nutzer wohnt. Bestimmt, in welcher Reihenfolge die
   // automatische Normerkennung die analogen Videonormen durchprobiert -- siehe
