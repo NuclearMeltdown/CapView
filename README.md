@@ -128,7 +128,7 @@ of it is derived while the shader runs from a single number, the subcarrier
 period in samples, so it is right for PAL, PAL 60, NTSC, NTSC 4.43, PAL M and
 PAL N alike and at any source width. SECAM is approximated.
 
-![Left: a GameCube over composite with the filter off, dot crawl speckling the gold laurel and the chequered flag. Right: the same frame with the filter on](docs/composite-before-after.png)
+![Left: a GameCube over composite with the filter off, dot crawl beading along every letter edge and across the colour bars. Right: the same frame under the four-frame average, clean](docs/composite-before-after.png)
 
 More: [The composite filter](../../wiki/The-composite-filter).
 
