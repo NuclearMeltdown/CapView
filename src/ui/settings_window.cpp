@@ -1619,7 +1619,14 @@ void SettingsWindow::DrawImageTab() {
   // Und es ist rein analog. Es rechnet zurück, was das Abtasten einer analogen
   // Zeile mit fester Rate angerichtet hat -- ein digitaler Eingang überträgt
   // die Bildpunkte bereits einzeln, da gibt es kein Raster wiederzufinden.
-  if (analogueSource_) {
+  //
+  // Die Zeilenzahl steht daneben, weil "analog" allein nicht genügt. Hängt ein
+  // Dongle davor, das ein 480i-Signal auf 1080 hochrechnet, ist die Quelle
+  // weiterhin analog, aber die 720 Proben je Zeile, auf die diese Zahl
+  // zurückrechnet, sind längst durch einen Skalierer gegangen. Die Zuordnung
+  // greift dann ins Leere und kostet genau das Detail, das sie retten soll --
+  // gemeldet in Ausgabe 1.
+  if (analogueSource_ && (sourceHeight_ == 0 || sourceHeight_ <= kStandardLines)) {
   ImGui::Spacing();
   ImGui::SeparatorText(T("Natives Pixelraster", "Native pixel grid"));
 
@@ -1671,7 +1678,7 @@ void SettingsWindow::DrawImageTab() {
                "The \"Square pixels\" aspect ratio uses the same number: there it sets the "
                "shape of the picture, here the position of the edges."));
 
-  }  // natives Pixelraster, nur analog
+  }  // natives Pixelraster, nur analog und nur im Standardraster
 
   if (analogueSource_) {
     // Vier der sechs Regler hier gibt es nur, weil Composite Helligkeit und
@@ -2027,7 +2034,7 @@ void SettingsWindow::DrawImageTab() {
   // Besitzer will Zeilenluecken. Umgekehrt greifen sie bei 720p und darueber
   // ohnehin nicht -- der Shader schaltet unterhalb der doppelten Quellhoehe ab,
   // weil dort keine Luecke mehr hinpasst.
-  if (sourceHeight_ == 0 || sourceHeight_ <= 576) {
+  if (sourceHeight_ == 0 || sourceHeight_ <= kStandardLines) {
   ImGui::Spacing();
   ImGui::SeparatorText(T("Bildröhre", "Cathode ray tube"));
   ImGui::TextDisabled(

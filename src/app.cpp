@@ -4309,9 +4309,16 @@ ImageSettings App::EffectiveImage(const Profile& profile) const {
 
   // Bildroehreneffekte nach der Zeilenzahl, nicht nach analog nur digital: ein
   // RetroTINK mit 480p ueber HDMI soll sie behalten duerfen.
-  if (fmt.valid() && fmt.height > 576) {
+  if (fmt.valid() && fmt.height > kStandardLines) {
     img.scanlines = 0.0f;
     img.mask = 0;
+    // Und das native Raster mit ihnen, aus dem umgekehrten Grund: es rechnet in
+    // Proben einer analogen Zeile, und ueber 576 Zeilen hat etwas dazwischen
+    // hochgerechnet -- ein Dongle, ein Skalierer, die Karte selbst. Die Kanten
+    // liegen dann nicht mehr dort, wo diese Zahl sie sucht, und das Zuordnen
+    // nimmt Detail weg statt welches zurueckzugeben. Der Regler ist dabei schon
+    // ausgeblendet; ein gespeicherter Wert wirkte ohne diese Zeile weiter.
+    img.nativeWidth = 0;
   }
 
   // Halbbilder: hat die Quelle keine, darf ein von Hand gewaehlter Deinterlacer

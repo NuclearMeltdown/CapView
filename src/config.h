@@ -333,6 +333,12 @@ struct CaptureSettings {
 // hat seine Zeilen schon.
 inline constexpr int kHalfHeightLines = 288;
 
+// Die groesste Zeilenzahl, die noch aus einem Standardraster stammen kann: 576
+// ist PAL, 480 ist NTSC. Darueber hat entweder die Quelle wirklich mehr Zeilen,
+// oder die Karte hat hochgerechnet -- und alles, was in Bildpunkten der Quelle
+// rechnet, findet dann ein Raster vor, das es so nie gab.
+inline constexpr int kStandardLines = 576;
+
 // Ein Zuschnitt, der zu einer bestimmten Quellgroesse gehoert.
 //
 // Die Groesse ist der Schluessel und nicht die Videonorm: gemessen werden
