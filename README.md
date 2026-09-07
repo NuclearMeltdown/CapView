@@ -334,8 +334,11 @@ at work and including making money with it — what the licence asks is that if
 you pass CapView on, modified or not, it goes on under the same terms and with
 the source. Nobody gets to close it and sell it as their own.
 
-Versions up to and including 3.7 were released under the MIT licence, and
-copies obtained under those terms keep them.
+Versions up to and including 3.7 were originally released under the MIT licence.
+Every tag in this repository now carries GPLv3, so there is no version of CapView
+left here to obtain under any other terms; copies that were actually taken while
+MIT applied keep MIT for those copies, and that is the one thing relicensing
+cannot reach.
 
 Dear ImGui is MIT and stays MIT; the components and their terms are listed in
 [THIRD-PARTY.md](THIRD-PARTY.md).
