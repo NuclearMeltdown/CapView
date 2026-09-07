@@ -625,14 +625,22 @@ void App::ReinitialiseCard() {
   CaptureSettings& c = config_.active().capture;
   const bool hadStandard = c.videoStandard > 0;
   const std::string keptSubtype = c.format.subtype;
+  // Dieselbe Unterscheidung wie in ReleaseStandardBoundFormat: eine Zahl haengt
+  // an dem Format, das gerade weggeworfen wird, eine Betriebsart nicht. "Die des
+  // Signals" ist keine Messung, die neu gemacht werden muesste, sondern die
+  // Anweisung, wie nach dem Neueinlesen zu antworten ist -- und die soll das
+  // Neueinlesen nicht loeschen. Sonst steht hinterher wieder "hoechste
+  // verfuegbare" da, obwohl niemand das ausgesucht hat.
+  const double keptFps = c.format.fps <= 0.0 ? c.format.fps : kFpsHighest;
   c.videoStandard = -1;  // wieder suchen lassen
 
-  // Aufloesung und Bildrate wieder suchen lassen, das Pixelformat nicht. Eine
-  // Karte, die eben noch RGB32 konnte, kann es nach dem Neueinlesen immer
-  // noch, und wer es ausgewaehlt hat, will es nicht jedes Mal neu auswaehlen.
-  // Kann sie es wirklich nicht mehr, faellt die Auswahl beim Start zurueck.
+  // Aufloesung wieder suchen lassen, das Pixelformat nicht. Eine Karte, die eben
+  // noch RGB32 konnte, kann es nach dem Neueinlesen immer noch, und wer es
+  // ausgewaehlt hat, will es nicht jedes Mal neu auswaehlen. Kann sie es
+  // wirklich nicht mehr, faellt die Auswahl beim Start zurueck.
   c.format = FormatSel{};
   c.format.subtype = keptSubtype;
+  c.format.fps = keptFps;
 
   // Die Geraeteliste ebenfalls, denn eine umgesteckte Karte kann unter einem
   // anderen Pfad auftauchen als der, den wir uns gemerkt haben.
