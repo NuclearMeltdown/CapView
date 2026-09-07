@@ -2,11 +2,15 @@
 
 // Fetches a static ffmpeg build on request and puts ffmpeg.exe next to CapView.
 //
-// Downloaded from the upstream, never redistributed by us: the usual Windows
-// builds contain x264 and x265 and are therefore GPL, and whoever hands them on
-// owes the source with them. Pressing a button that fetches from gyan.dev is not
-// distribution, and calling ffmpeg as a child process is not linking, so the
-// two stay separate programs.
+// Downloaded from the upstream, never shipped alongside us -- and the licence is
+// not why. Whether a second executable lands on the machine is the user's
+// decision, and without it CapView is a single file of about 2 MB. That reason
+// holds regardless of what either program is licensed under.
+//
+// The licence only agrees. The usual Windows builds carry x264 and x265 and are
+// therefore GPL, and whoever hands them on owes the source with them; fetching
+// from gyan.dev on a button press is not distribution, and calling ffmpeg as a
+// child process is not linking, so the two stay separate programs.
 
 #include <atomic>
 #include <mutex>

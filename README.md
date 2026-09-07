@@ -271,6 +271,10 @@ Two things require `ffmpeg.exe`, and nothing else does: **recording**, whichever
 encoder is used, and **HDR screenshots in AVIF**. The preview, the composite
 filters, deinterlacing, the virtual camera and SDR screenshots run without it.
 
+It is not bundled, and that is not a licence question: whether a second
+executable lands on the machine is the user's decision, and without it CapView
+stays one file of about 2 MB.
+
 *Settings → Encoder* downloads a static build, verifies its published SHA-256
 and extracts only the executable; `CapView.exe --fetch-ffmpeg` does the same
 from the command line. Available encoders are determined by test-encoding two
@@ -311,12 +315,31 @@ Foundation enumerates three.
 
 ## Licence
 
-CapView is [GPLv3](LICENSE) licensed. Dear ImGui is MIT; the components and their
-terms are listed in [THIRD-PARTY.md](THIRD-PARTY.md).
+```
+CapView — a low-latency viewer and recorder for DirectShow capture cards
+Copyright (C) 2026 NuclearMeltdown
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+```
+
+The full text is in [LICENSE](LICENSE). Use it for whatever you like, including
+at work and including making money with it — what the licence asks is that if
+you pass CapView on, modified or not, it goes on under the same terms and with
+the source. Nobody gets to close it and sell it as their own.
+
+Versions up to and including 3.7 were released under the MIT licence, and
+copies obtained under those terms keep them.
+
+Dear ImGui is MIT and stays MIT; the components and their terms are listed in
+[THIRD-PARTY.md](THIRD-PARTY.md).
 
 ffmpeg is a separate program, downloaded from upstream and executed as a child
-process. The usual Windows builds are GPL licensed, and invoking a program is
-not linking against it — but redistributing CapView together with an ffmpeg
-build is a different matter, and the GPL then applies to what is distributed.
+process, not linked into CapView. Invoking a program is not linking against it,
+so the two remain separate works.
 
 Written with the help of [Claude](https://claude.ai).
