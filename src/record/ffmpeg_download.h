@@ -4,8 +4,10 @@
 //
 // Downloaded from the upstream, never shipped alongside us -- and the licence is
 // not why. Whether a second executable lands on the machine is the user's
-// decision, and without it CapView is a single file of about 2 MB. That reason
-// holds regardless of what either program is licensed under.
+// decision; without it CapView is a single file of about 2 MB; and what is
+// fetched here is whatever the current release build is, where a copy in the
+// repository would sit at the version somebody last committed. Those reasons
+// hold regardless of what either program is licensed under.
 //
 // The licence only agrees. The usual Windows builds carry x264 and x265 and are
 // therefore GPL, and whoever hands them on owes the source with them; fetching

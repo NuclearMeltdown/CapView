@@ -272,8 +272,10 @@ encoder is used, and **HDR screenshots in AVIF**. The preview, the composite
 filters, deinterlacing, the virtual camera and SDR screenshots run without it.
 
 It is not bundled, and that is not a licence question: whether a second
-executable lands on the machine is the user's decision, and without it CapView
-stays one file of about 2 MB.
+executable lands on the machine is the user's decision, without it CapView stays
+one file of about 2 MB, and a copy in the repository would be frozen at the day
+it was committed. The download always takes the current release build, which is
+the only way ffmpeg stays current without CapView carrying its own build of it.
 
 *Settings → Encoder* downloads a static build, verifies its published SHA-256
 and extracts only the executable; `CapView.exe --fetch-ffmpeg` does the same
