@@ -267,12 +267,32 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
 
 <section class="reveal">
   <div class="wrap">
-    <h2><span class="num">05</span>Everything else</h2>
+    <h2><span class="num">05</span>And it can put the cathode ray tube back</h2>
+    <p class="lead">240p artwork was drawn for a display that had gaps between its lines and a coloured mask over its phosphors. On a flat panel the absence of both is itself a distortion. Off by default, and display only &mdash; a recording takes the picture from upstream of this pass.</p>
+    <figure>
+      <img src="crt-scanlines.png" alt="Left: the Super Mario World title screen at 240p, magnified six times. Right: the same picture with scanlines at 0.35, a dark gap between each pair of picture lines">
+      <figcaption>A 240p console in a window six times its height. The gaps follow the <em>source's</em> line grid, not the screen's, and the brightness lost to them is put back &mdash; the slider changes structure, not exposure. Below twice the source height there is nowhere to put a gap, and rather than doing nothing quietly the control says so, with the figure it is working from.</figcaption>
+    </figure>
+    <div class="grid">
+      <div class="card"><h3>Say what the console draws</h3><p>A card that starts at 720p, or a dongle with a scaler of its own, hands over 1080 lines from a console that drew 480 &mdash; and nothing in the picture says reliably which number is real. <em>Source lines</em> is where you say it: 240 and 288 for a 60 or 50&nbsp;Hz SNES, Mega Drive, PS1 or N64, 480 and 576 for a GameCube, PS2, Dreamcast or Wii. PAL&nbsp;60 is the odd one &mdash; NTSC's raster at PAL's colour.</p></div>
+      <div class="card"><h3>Then the gaps land where they belong</h3><p>The declared count becomes the number of output rows per real picture line, which is where a scaled capture stops being a problem: 1080 lines from a 480-line console is 2.25 rows each, and the scanlines sit on the lines the console actually drew rather than on the ones the scaler invented.</p></div>
+      <div class="card"><h3>Nothing is hidden from you</h3><p>The section used to disappear above 576 lines, and someone on a 720p card asked twice whether the feature existed. It stays put now. The mask never depended on the source in the first place &mdash; it counts output pixels &mdash; and the scanlines were never really gated on 576 but on whether the window has the room. A 4K screen has it at 720p.</p></div>
+    </div>
+    <figure>
+      <img src="crt-mask.png" alt="Three panels magnified to the pixel: mask off, an aperture grille with its vertical stripes, and a shadow mask whose triads step sideways every other row">
+      <figcaption>Magnified to the pixel, because a triad is three of them. An aperture grille is vertical stripes, the way a Trinitron worked; a shadow mask steps its triads sideways every other line. Both stop at half strength &mdash; past that the brightness compensation has to lift the peak far enough to clip the channels apart from one another, and what arrives is a colour cast rather than a stronger effect.</figcaption>
+    </figure>
+    <div class="note">Both pictures were made by running the shader's own <code>Scanline()</code> and <code>Mask()</code> over a still, rather than photographed off the screen: the effects are display-only by design, so a screenshot taken inside CapView does not contain them.</div>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="wrap">
+    <h2><span class="num">06</span>Everything else</h2>
     <div class="grid">
       <div class="card"><h3>Recording</h3><p>H.264, H.265 or AV1 through NVENC, Quick Sync, AMF, x264 or x265. The audio is the master clock, so the output is constant frame rate and does not drift — measured at 1&nbsp;ms over 15&nbsp;seconds.</p></div>
       <div class="card"><h3>Encoder controls</h3><p>Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass, under one set of names translated into each vendor's own.</p></div>
       <div class="card"><h3>Virtual camera</h3><p>Offer the picture to OBS, Discord or a browser at the source's own resolution and frame rate &mdash; and to anything that cannot take that, at whatever it asks for instead.</p></div>
-      <div class="card"><h3>Scanlines and a mask</h3><p>What a cathode ray tube added, put back for the 240p artwork that was drawn for one: line gaps that follow the <em>source's</em> grid rather than the screen's, and an aperture grille or shadow mask over the phosphors. Off by default, display only, and both put their own brightness back so the sliders change structure and not exposure.</p></div>
       <div class="card"><h3>High dynamic range</h3><p>PQ and HLG are decoded to linear light, tone mapped with BT.2390 for an ordinary screen or passed through as scRGB for an HDR one.</p></div>
       <div class="card"><h3>Screenshots</h3><p>PNG or JPEG at source resolution through Windows Imaging Component, so no ffmpeg is needed. JPEG&nbsp;XR keeps the HDR range and needs none either; AVIF does. A switch grabs the finished window instead, interface and all.</p></div>
       <div class="card"><h3>Colour range, measured</h3><p>Full or limited is read off the picture rather than inferred from the pixel format, and the numbers behind the verdict are on show: lowest and highest sample, and how much of the picture sits below 16. It holds until the format changes &mdash; and <strong>F6</strong> measures it again for the one thing that changes without touching the format, an option in the card's own driver.</p></div>
@@ -283,7 +303,7 @@ footer .row{display:flex;gap:26px;flex-wrap:wrap;justify-content:space-between;a
 
 <section class="reveal">
   <div class="wrap">
-    <h2><span class="num">06</span>What it is not</h2>
+    <h2><span class="num">07</span>What it is not</h2>
     <p class="lead">Scenes, overlays, compositing and streaming are not here and are not planned. For those, use OBS — and note that a card grants its capture pin to one process at a time, so the two cannot hold the same card at once.</p>
     <table>
       <tr><th>Requirement</th><th></th></tr>

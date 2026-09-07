@@ -131,20 +131,36 @@ PAL N alike and at any source width. SECAM is approximated.
 More: [The composite filter](../../wiki/The-composite-filter).
 
 **Cathode ray tube.** Scanlines and a phosphor mask, at the bottom of *Settings →
-Picture* for sources of 576 lines or fewer. Off by default and display only: a
-recording, a screenshot and the virtual camera all take the picture from upstream
-of this pass, because gaps baked in at source resolution land in the wrong places
-for whoever plays the file back. The gaps follow the **source's** line grid
-rather than the screen's, fade in across 2× to 3× the source height and are
-absent below twice it, where a line and its gap fall inside the same output pixel
-and what comes out is moiré rather than scanlines. The mask is an aperture grille
-— vertical stripes, the way a Trinitron worked — or a shadow mask, whose triads
-step sideways every other line. Both darken by construction and both put the
-brightness back afterwards, so the control changes structure and not exposure;
-both stop at half strength, because past that the compensation has to lift the
-peak far enough to clip the channels apart from one another and what arrives is a
-colour cast rather than a stronger effect. [Scanlines and the
-mask](../../wiki/Scaling-and-sharpening#scanlines-and-the-mask)
+Picture*. Off by default and display only: a recording, a screenshot and the
+virtual camera all take the picture from upstream of this pass, because gaps
+baked in at source resolution land in the wrong places for whoever plays the file
+back. The gaps follow the **source's** line grid rather than the screen's, fade
+in across 2× to 3× the source height and are absent below twice it, where a line
+and its gap fall inside the same output pixel and what comes out is moiré rather
+than scanlines. Where there is no room the control says so, with the figure it is
+working from, instead of doing nothing quietly.
+
+![Left: the Super Mario World title screen at 240p, magnified. Right: the same picture with scanlines at 0.35, a dark gap between each pair of picture lines](docs/crt-scanlines.png)
+
+**Say what the console draws.** A card that starts at 720p, or a dongle with a
+scaler of its own, hands over 1080 lines from a console that drew 480, and
+nothing in the picture says reliably which number is real. *Source lines* is
+where you say it — 240 and 288 for a 60 or 50 Hz SNES, Mega Drive, PS1 or N64,
+480 and 576 for a GameCube, PS2, Dreamcast or Wii, with PAL 60 drawing the NTSC
+raster at PAL colour. The scanlines then land on the lines the console actually
+drew rather than on the ones the scaler invented.
+
+**The mask** is an aperture grille — vertical stripes, the way a Trinitron worked
+— or a shadow mask, whose triads step sideways every other line. Both darken by
+construction and both put the brightness back afterwards, so the control changes
+structure and not exposure; both stop at half strength, because past that the
+compensation has to lift the peak far enough to clip the channels apart from one
+another and what arrives is a colour cast rather than a stronger effect.
+
+![Three panels magnified to the pixel: mask off, aperture grille with its vertical stripes, and a shadow mask whose triads step sideways every other row](docs/crt-mask.png)
+
+More: [Scanlines and the
+mask](../../wiki/Scaling-and-sharpening#scanlines-and-the-mask).
 
 **High dynamic range.** P010 and P016 sources are read against PQ (ST 2084) or
 HLG (BT.2100). An ordinary screen gets BT.2390 tone mapping, an HDR screen
