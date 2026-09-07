@@ -318,3 +318,5 @@ ffmpeg is a separate program, downloaded from upstream and executed as a child
 process. The usual Windows builds are GPL licensed, and invoking a program is
 not linking against it — but redistributing CapView together with an ffmpeg
 build is a different matter, and the GPL then applies to what is distributed.
+
+Written with the help of [Claude](https://claude.ai).
