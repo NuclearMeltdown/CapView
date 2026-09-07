@@ -3035,11 +3035,34 @@ void VideoRenderer::Draw(const ImageSettings& image, int fieldIndex) {
   // a quarter turn puts the lines along the other axis entirely, and rather
   // than draw them sideways the effect simply stands down.
   float pitch = 1.0f;
+  // Zuerst die Verdopplung, denn sie steckt schon in outputHeight_ und ist
+  // unabhaengig davon, wie viele Zeilen die Karte hergegeben hat.
   if (image.lineDouble) pitch *= 2.0f;
-  if (coSitedFields_) pitch *= 2.0f;
+  // Eine angesagte Zeilenzahl sticht die Messung. Sie beantwortet dieselbe
+  // Frage -- wie viele gelieferte Zeilen auf eine echte kommen -- nur eben mit
+  // Wissen statt mit einem Verdacht, und sie kann Faktoren wie 1080/480 = 2,25
+  // ausdruecken, die keine Messung je vorschlagen wuerde.
+  if (image.sourceLines > 0 && source_.height > 0 &&
+      image.sourceLines <= source_.height) {
+    pitch *= (float)source_.height / (float)image.sourceLines;
+  } else if (coSitedFields_) {
+    pitch *= 2.0f;
+  }
   const bool turned =
       image.rotation == Rotation::Cw90 || image.rotation == Rotation::Ccw90;
   sc.linePitch = turned ? 0.0f : pitch;
+
+  // Dieselbe Rechnung, die der Shader gleich anstellt, hier einmal aufgehoben:
+  // wie viele Ausgabezeilen auf eine Bildzeile kommen. Unter zwei kann er keine
+  // Luecke zeichnen, und dann soll der Regler dazu sagen koennen, warum er
+  // nichts tut -- eine Zahl im Fenster ist eine Erklaerung, ein wirkungsloser
+  // Schieber ist ein Raetsel.
+  if (turned || pitch <= 0.0f || outputHeight_ <= 0) {
+    scanlineRoom_ = 0.0f;
+  } else {
+    const float lines = (float)outputHeight_ / pitch;
+    scanlineRoom_ = lines > 0.0f ? (float)dstH / lines : 0.0f;
+  }
   sc.transfer = (int32_t)hdrTransfer_;
   sc.outputHdr = hdrOutput_ ? 1 : 0;
   sc.paperWhite = paperWhiteNits_;

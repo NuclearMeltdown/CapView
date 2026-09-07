@@ -4307,19 +4307,26 @@ ImageSettings App::EffectiveImage(const Profile& profile) const {
     img.lineDouble = false;
   }
 
-  // Bildroehreneffekte nach der Zeilenzahl, nicht nach analog nur digital: ein
-  // RetroTINK mit 480p ueber HDMI soll sie behalten duerfen.
+  // Das native Raster faellt ueber dem Standardraster weg. Es rechnet in Proben
+  // einer analogen Zeile, und oberhalb von 576 Zeilen hat etwas dazwischen
+  // hochgerechnet -- ein Dongle, ein Skalierer, die Karte selbst. Die Kanten
+  // liegen dann nicht mehr dort, wo diese Zahl sie sucht, und das Zuordnen nimmt
+  // Detail weg statt welches zurueckzugeben. Der Regler ist dabei schon
+  // ausgeblendet; ein gespeicherter Wert wirkte ohne diese Zeile weiter.
+  //
+  // Die Zeilenzahl der Quelle hilft hier ausdruecklich *nicht* nach. Sie sagt
+  // etwas ueber senkrecht, und dieses Raster liegt waagerecht: dass jemand weiss,
+  // wie viele Zeilen seine Konsole zeichnet, macht die 720 Proben je Zeile nicht
+  // wieder zu denen, die die Karte einmal genommen hat.
   if (fmt.valid() && fmt.height > kStandardLines) {
-    img.scanlines = 0.0f;
-    img.mask = 0;
-    // Und das native Raster mit ihnen, aus dem umgekehrten Grund: es rechnet in
-    // Proben einer analogen Zeile, und ueber 576 Zeilen hat etwas dazwischen
-    // hochgerechnet -- ein Dongle, ein Skalierer, die Karte selbst. Die Kanten
-    // liegen dann nicht mehr dort, wo diese Zahl sie sucht, und das Zuordnen
-    // nimmt Detail weg statt welches zurueckzugeben. Der Regler ist dabei schon
-    // ausgeblendet; ein gespeicherter Wert wirkte ohne diese Zeile weiter.
     img.nativeWidth = 0;
   }
+
+  // Bildroehreneffekte werden hier nicht mehr abgeschaltet, und das ist der
+  // Unterschied zu vorher. Sie versteckten sich frueher ueber 576 Zeilen, also
+  // mussten sie hier mit weg; jetzt bleiben sie stehen und sagen selbst, wenn
+  // kein Platz ist. Die Maske braucht ohnehin nur das Fenster, und die
+  // Zeilenluecken lehnen im Shader von allein ab, wo sie nur aliasen wuerden.
 
   // Halbbilder: hat die Quelle keine, darf ein von Hand gewaehlter Deinterlacer
   // nicht trotzdem laufen. Nicht abschalten, sondern auf "nur bei interlaced"
@@ -5522,6 +5529,7 @@ void App::DrawUi() {
   settings_.SetSourceInterlaced(
       renderer_.sourceFormat().interlaced ||
       renderer_.detectedInterlace() == VideoRenderer::InterlaceVerdict::Interlaced);
+  settings_.SetScanlineRoom(renderer_.scanlineRoom());
   settings_.SetLevels(audio_.inputPeak(), mic_.peak(), mic_.running());
   if (settings_.takeCropPickRequest()) BeginCropPick();
   if (settings_.takeDeviceConfigRequest()) OpenDeviceConfig();

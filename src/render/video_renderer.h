@@ -158,6 +158,13 @@ class VideoRenderer {
   int outputWidth() const { return deliveryWidth_ > 0 ? deliveryWidth_ : outputWidth_; }
   int outputHeight() const { return deliveryHeight_ > 0 ? deliveryHeight_ : outputHeight_; }
 
+  // Ausgabezeilen je echter Bildzeile, wie sie beim letzten Zeichnen anlagen.
+  // Zwei ist die Grenze, unter der keine Zeilenluecke mehr hineinpasst; 0 heisst
+  // gedreht oder noch nichts gezeichnet. Steht hier, weil die Zahl aus dem
+  // Fenster, dem Zuschnitt und der angesagten Zeilenzahl zugleich kommt und
+  // sonst niemand alle drei beisammen hat.
+  float scanlineRoom() const { return scanlineRoom_; }
+
   // ---- readback for recording ----
   //
   // Hands out the intermediate image -- cropped, deinterlaced, colour corrected,
@@ -572,6 +579,7 @@ class VideoRenderer {
   // the readback and the stills run outside it and read these.
   int deliveryWidth_ = 0;
   int deliveryHeight_ = 0;
+  float scanlineRoom_ = 0.0f;
   int deliveryFilter_ = 0;
   // The picture controls, cached from the same place and for the same reason.
   // Kept in radians already, because the shader wants them that way and Draw is

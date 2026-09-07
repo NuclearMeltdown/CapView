@@ -119,6 +119,9 @@ class SettingsWindow {
   // Abschnitte im Reiter Bild ueberhaupt erscheinen -- siehe DrawImageTab.
   void SetSourceHeight(int lines) { sourceHeight_ = lines; }
   void SetSourceInterlaced(bool on) { sourceInterlaced_ = on; }
+  // Ausgabezeilen je Bildzeile, siehe VideoRenderer::scanlineRoom. Unter zwei
+  // sagt der Regler fuer die Zeilenluecken selbst, dass nichts zu holen ist.
+  void SetScanlineRoom(float rows) { scanlineRoom_ = rows; }
 
   // Current input levels, 0..1, for the meters on the audio tab.
   void SetLevels(float input, float mic, bool micRunning) {
@@ -313,6 +316,7 @@ class SettingsWindow {
   double sourceFps_ = 0.0;
   int sourceHeight_ = 0;  // 0 = noch nichts gemessen
   bool sourceInterlaced_ = false;
+  float scanlineRoom_ = 0.0f;
   float inputPeak_ = 0.0f;
   float micPeak_ = 0.0f;
   bool micRunning_ = false;

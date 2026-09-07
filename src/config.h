@@ -388,6 +388,18 @@ struct ImageSettings {
   // What the source really has across, when the card is sampling it at some
   // other rate. 0 leaves it alone. Display only, like the two below it.
   int nativeWidth = 0;
+  // Wie viele Bildzeilen die Quelle wirklich hat, wenn mehr ankommen als sie
+  // gezeichnet hat. 0 heisst: selbst herausfinden, so wie es immer war.
+  //
+  // Die Zahl gibt es, weil sie sich nicht immer messen laesst. Eine Karte, die
+  // erst bei 720p anfaengt, oder ein Dongle mit eigenem Skalierer liefert 1080
+  // Zeilen von einer Konsole, die 480 gezeichnet hat -- und nichts im Bild sagt
+  // zuverlaessig, welche der beiden Zahlen die echte ist. Der Mensch davor weiss
+  // es, weil er die Konsole angesteckt hat.
+  //
+  // Waagerecht gilt sie ausdruecklich nicht; dafuer gibt es nativeWidth, und die
+  // beiden haben verschiedene Voraussetzungen. Siehe dort.
+  int sourceLines = 0;
   float scanlines = 0.0f;   // 0..1, how dark the gaps between source lines go
   int mask = 0;             // 0 off, 1 aperture grille, 2 shadow mask
   float maskStrength = 0.35f;

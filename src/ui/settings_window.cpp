@@ -2028,18 +2028,80 @@ void SettingsWindow::DrawImageTab() {
   // einer Aufnahme noch in einem Screenshot, und anders als der Filter direkt
   // darüber stellen sie nichts wieder her, sondern legen etwas obendrauf.
   //
-  // Gezeigt wird das nach der Zeilenzahl der Quelle, nicht danach, ob sie
-  // analog ist. Der Grund ist ein Geraet, das es wirklich gibt: ein RetroTINK
-  // oder ein MiSTer haengt mit 480p an HDMI, ist also digital, und genau dessen
-  // Besitzer will Zeilenluecken. Umgekehrt greifen sie bei 720p und darueber
-  // ohnehin nicht -- der Shader schaltet unterhalb der doppelten Quellhoehe ab,
-  // weil dort keine Luecke mehr hinpasst.
-  if (sourceHeight_ == 0 || sourceHeight_ <= kStandardLines) {
+  // Ohne Bedingung sichtbar, und das ist seit 3.7 so.
+  //
+  // Vorher verschwand der ganze Abschnitt oberhalb von 576 Zeilen, wortlos. Das
+  // hat in Ausgabe 1 einen Nutzer zweimal nachfragen lassen, ob es die Funktion
+  // ueberhaupt gibt -- seine Karte lief auf 720p, und damit war sie weg. Die
+  // Begruendung dafuer stimmte ausserdem nur halb: die Maske rechnet in
+  // Ausgabepixeln und ist von der Quelle voellig unabhaengig, und die
+  // Zeilenluecken haengen nicht an 576, sondern daran, ob das Fenster zwei
+  // Zeilen je Bildzeile hergibt. Auf einem 4K-Schirm tut es das auch bei 720p.
+  //
+  // Also stehen lassen und sagen, wenn nichts zu holen ist. Ein Regler, der
+  // erklaert, warum er gerade nichts tut, ist besser als einer, der fehlt.
   ImGui::Spacing();
   ImGui::SeparatorText(T("Bildröhre", "Cathode ray tube"));
   ImGui::TextDisabled(
       "%s", T("Setzt zurück, was ein Röhrenmonitor hinzugefügt hat. Nur für die Anzeige.",
               "Puts back what a CRT added. Display only."));
+
+  // Die Zeilenzahl steht vor den Reglern, weil sie darueber entscheidet, ob sie
+  // wirken. Sie ist eine Angabe ueber die Quelle und keine Einstellung am Bild:
+  // wer sie braucht, hat eine Karte oder ein Dongle, das mehr Zeilen liefert als
+  // die Konsole gezeichnet hat, und nur er selbst weiss, welche Zahl stimmt.
+  static const int kLinePresets[] = {0, 240, 288, 480, 576, 720, 1080};
+  const char* kLineWho[] = {
+      T("automatisch", "automatic"),
+      T("240  ·  NTSC 240p — SNES, Mega Drive, PS1, N64",
+        "240  ·  NTSC 240p — SNES, Mega Drive, PS1, N64"),
+      T("288  ·  PAL 288p — dieselben in 50 Hz", "288  ·  PAL 288p — the same in 50 Hz"),
+      T("480  ·  NTSC 480i/p — GameCube, PS2, Dreamcast, Wii",
+        "480  ·  NTSC 480i/p — GameCube, PS2, Dreamcast, Wii"),
+      T("576  ·  PAL 576i — dieselben in 50 Hz", "576  ·  PAL 576i — the same in 50 Hz"),
+      T("720  ·  720p", "720  ·  720p"),
+      T("1080  ·  1080i/p", "1080  ·  1080i/p"),
+  };
+  constexpr int kLineCount = (int)(sizeof(kLinePresets) / sizeof(kLinePresets[0]));
+  int lineIdx = 0;
+  for (int k = 0; k < kLineCount; ++k) {
+    if (img.sourceLines == kLinePresets[k]) lineIdx = k;
+  }
+  ImGui::SetNextItemWidth(-260.0f);
+  if (ImGui::BeginCombo(T("Zeilen der Quelle", "Source lines"), kLineWho[lineIdx])) {
+    for (int k = 0; k < kLineCount; ++k) {
+      const bool chosen = lineIdx == k;
+      if (ImGui::Selectable(kLineWho[k], chosen)) img.sourceLines = kLinePresets[k];
+      if (chosen) ImGui::SetItemDefaultFocus();
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SameLine();
+  HelpMarker(T("Wie viele Bildzeilen die Konsole wirklich zeichnet. Nötig, sobald mehr "
+               "ankommen: eine Karte, die erst bei 720p anfängt, oder ein Dongle mit "
+               "eigenem Skalierer liefert 1080 Zeilen von einer Konsole, die 480 gezeichnet "
+               "hat. Ohne die Angabe rechnet CapView mit den Zeilen, die ankommen, und die "
+               "Lücken sitzen zu dicht oder fallen ganz aus.\n\n"
+               "PAL hat mehr Zeilen als NTSC — 576 gegen 480, halbhoch 288 gegen 240. "
+               "Dieselbe Konsole liefert je nach Region eine andere Zahl.\n\n"
+               "PAL60 ist die Ausnahme: eine PAL-Konsole im 60-Hz-Modus zeichnet das "
+               "NTSC-Raster, also 240 oder 480. Die Farbe bleibt PAL, die Zeilen nicht.\n\n"
+               "Automatisch nimmt, was die Karte meldet. Wo sie die echte Auflösung "
+               "liefert, ist das richtig — die Angabe ist für die Fälle, wo sie es nicht "
+               "kann.\n\n"
+               "Gilt nur senkrecht. Waagerecht ist es „Breite der Quelle“ beim Zuschnitt.",
+               "How many picture lines the console really draws. Needed as soon as more "
+               "arrive: a card that starts at 720p, or a dongle with a scaler of its own, "
+               "hands over 1080 lines from a console that drew 480. Without the number "
+               "CapView counts the lines it receives, and the gaps land too close together "
+               "or not at all.\n\n"
+               "PAL has more lines than NTSC — 576 against 480, half height 288 against "
+               "240. The same console gives a different number by region.\n\n"
+               "PAL60 is the exception: a PAL console in 60 Hz mode draws the NTSC raster, "
+               "so 240 or 480. The colour stays PAL, the lines do not.\n\n"
+               "Automatic takes what the card reports. Where it delivers the real "
+               "resolution that is correct -- this is for the cases where it cannot.\n\n"
+               "Vertical only. Horizontally it is \"Source width\" over at the crop."));
 
   ImGui::SetNextItemWidth(-260.0f);
   ImGui::SliderFloat(T("Zeilenlücken", "Scanlines"), &img.scanlines, 0.0f, 0.5f, "%.2f");
@@ -2050,6 +2112,21 @@ void SettingsWindow::DrawImageTab() {
                "Darkens the gaps between the source's own lines. Stays off below twice the "
                "height in the window, or there would be moiré instead of lines. Brightness "
                "is compensated."));
+
+  // Der Satz, der frueher gefehlt hat. Er steht auch bei Reglerstellung null da:
+  // wer sich fragt, ob es sich lohnt, den Schieber anzufassen, bekommt die
+  // Antwort, bevor er es tut.
+  if (img.rotation == Rotation::Cw90 || img.rotation == Rotation::Ccw90) {
+    ImGui::TextDisabled("%s", T("Gedreht — Zeilenlücken bleiben aus, sie lägen quer.",
+                                "Rotated — scanlines stay off, they would run sideways."));
+  } else if (scanlineRoom_ > 0.0f && scanlineRoom_ < 2.0f) {
+    ImGui::TextDisabled(
+        T("Kein Platz: das Fenster zeigt %.1f Zeilen je Bildzeile, nötig sind 2. Fenster "
+          "vergrößern — oder stimmt die Zeilenzahl oben?",
+          "No room: the window shows %.1f rows per picture line, 2 are needed. Make the "
+          "window bigger -- or is the line count above right?"),
+        scanlineRoom_);
+  }
 
   int mask = Clamp(img.mask, 0, 2);
   ImGui::SetNextItemWidth(-260.0f);
@@ -2065,7 +2142,6 @@ void SettingsWindow::DrawImageTab() {
                  "wirken.",
                  "Needs a high output resolution to read as a mask rather than as a tint."));
   }
-  }  // Bildröhre, nur bei standardaufloesenden Quellen
 
   ImGui::Spacing();
   ImGui::SeparatorText(T("Farbe", "Colour"));
