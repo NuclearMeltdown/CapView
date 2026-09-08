@@ -44,9 +44,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
       g_answer = StartupAnswer::Postpone;
       g_done = true;
       return 0;
-    case WM_DESTROY:
-      ::PostQuitMessage(0);
-      return 0;
+    // No WM_DESTROY handler, and deliberately none. The usual PostQuitMessage
+    // belongs to a window that *is* the program; this one is asked before the
+    // program exists and hands control back to a caller that still has work to
+    // do. A WM_QUIT posted here outlives the window -- the message queue is the
+    // thread's, not the window's -- and the main loop would find it waiting on
+    // its very first pass and shut down without ever drawing a frame. The loop
+    // below ends on g_done, which is what the buttons and WM_CLOSE set.
   }
   return ::DefWindowProcW(hwnd, msg, wparam, lparam);
 }
@@ -244,6 +248,14 @@ StartupAnswer AskAtStartup(HINSTANCE instance, const StartupQuestion& question) 
   d3d.Shutdown();
   ::DestroyWindow(hwnd);
   ::UnregisterClassW(className.c_str(), instance);
+
+  // Nothing of this window may be left in the queue when the program starts.
+  // The handler above no longer posts a quit, but ImGui's backend and the
+  // shutdown of a swap chain both dispatch through the same queue, and the
+  // caller's loop treats any WM_QUIT it finds as its own.
+  MSG stray;
+  while (::PeekMessageW(&stray, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) {
+  }
   return ready ? g_answer : StartupAnswer::Postpone;
 }
 
