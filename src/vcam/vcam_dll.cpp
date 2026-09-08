@@ -79,6 +79,21 @@ void RemoveLegacyRegistration() {
   }
 }
 
+// The entries a former name left in the device list.
+//
+// The class id never changed, only the wording, so an entry made under an older
+// name still resolves -- to this very DLL -- and would go on offering a camera
+// under a name nothing else in the system uses any more. RegisterFilter makes
+// one moniker per filter *name*, so registering under the new one does not
+// replace the old one; it has to be taken out by name.
+void RemoveFormerNames(IFilterMapper2* mapper) {
+  for (size_t i = 0; i < cap::kFormerAppNameCount; ++i) {
+    const std::wstring name = std::wstring(cap::kFormerAppNames[i]) + L" Virtual Camera";
+    mapper->UnregisterFilter(&CLSID_VideoInputDeviceCategory, name.c_str(),
+                             cap::vcam::CLSID_qBlankFilter);
+  }
+}
+
 // Registers or removes the entry the device enumerator reads.
 HRESULT MapFilter(bool add) {
   IFilterMapper2* mapper = nullptr;
@@ -89,6 +104,7 @@ HRESULT MapFilter(bool add) {
   if (!add) {
     hr = mapper->UnregisterFilter(&CLSID_VideoInputDeviceCategory, cap::vcam::kFilterName,
                                   cap::vcam::CLSID_qBlankFilter);
+    RemoveFormerNames(mapper);
     mapper->Release();
     return hr;
   }
@@ -123,6 +139,7 @@ HRESULT MapFilter(bool add) {
 
   hr = mapper->RegisterFilter(cap::vcam::CLSID_qBlankFilter, cap::vcam::kFilterName, nullptr,
                               &CLSID_VideoInputDeviceCategory, cap::vcam::kFilterName, &filter);
+  if (SUCCEEDED(hr)) RemoveFormerNames(mapper);
   mapper->Release();
   return hr;
 }
