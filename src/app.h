@@ -261,8 +261,12 @@ class App {
   // Runs every frame because both ends can change underneath it: a console
   // switches to HDR, or the window is dragged onto another screen.
   void UpdateHdr();
-  // Opens the release page for a tag in the browser. Empty tag opens the list.
-  void OpenReleasePage(const std::string& tag);
+  // Opens the release in the browser, at the address the server gave for it --
+  // which stays right even after the project has been renamed. Falls back to
+  // the built-in one when there is no answer to take an address from.
+  void OpenReleasePage(const UpdateStatus& status);
+  // Same, for the website.
+  void OpenWebsite();
 
   void Toast(const std::string& text);
   void UpdatePowerRequest();

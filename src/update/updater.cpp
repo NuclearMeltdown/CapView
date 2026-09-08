@@ -7,129 +7,38 @@
 #include <shellapi.h>
 #include <winhttp.h>
 
-#include <cstdlib>
 #include <vector>
 
+#include "app_identity.h"
 #include "i18n.h"
-#include "json.h"
+#include "update/release_source.h"
 
 namespace cap {
 namespace {
 
-const wchar_t kApiHost[] = L"api.github.com";
-const wchar_t kApiPath[] = L"/repos/NuclearMeltdown/CapView/releases/latest";
-const char kAssetName[] = "CapView.exe";
+// Where a release lives and which file in it is the program are questions with
+// answers that outlive any name -- see src/update/release_source.h. Nothing in
+// this file spells out a repository, a file name or a version scheme.
 
-struct Handles {
-  HINTERNET session = nullptr;
-  HINTERNET connect = nullptr;
-  HINTERNET request = nullptr;
-  ~Handles() {
-    if (request) ::WinHttpCloseHandle(request);
-    if (connect) ::WinHttpCloseHandle(connect);
-    if (session) ::WinHttpCloseHandle(session);
+UpdateError Translate(FetchError error) {
+  switch (error) {
+    case FetchError::NoNetwork:
+      return UpdateError::NoNetwork;
+    case FetchError::NoServer:
+      return UpdateError::NoServer;
+    case FetchError::NoRequest:
+      return UpdateError::NoRequest;
+    case FetchError::NoAnswer:
+      return UpdateError::NoAnswer;
+    case FetchError::HttpStatus:
+      return UpdateError::HttpStatus;
+    case FetchError::Transfer:
+      return UpdateError::Transfer;
+    case FetchError::Unreadable:
+      return UpdateError::Unreadable;
+    default:
+      return UpdateError::None;
   }
-};
-
-// GitHub refuses requests without a user agent, and the API wants to be told
-// which version of itself to speak.
-bool Fetch(const std::wstring& host, const std::wstring& path, bool api,
-           std::string* out, UpdateError* error, int* httpStatus) {
-  Handles h;
-  h.session = ::WinHttpOpen(L"CapView-Updater", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
-                            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-  if (!h.session) {
-    if (error) *error = UpdateError::NoNetwork;
-    return false;
-  }
-  const DWORD timeout = 20000;
-  ::WinHttpSetTimeouts(h.session, timeout, timeout, timeout, timeout);
-
-  h.connect = ::WinHttpConnect(h.session, host.c_str(), INTERNET_DEFAULT_HTTPS_PORT, 0);
-  if (!h.connect) {
-    if (error) *error = UpdateError::NoServer;
-    return false;
-  }
-  h.request = ::WinHttpOpenRequest(h.connect, L"GET", path.c_str(), nullptr, WINHTTP_NO_REFERER,
-                                   WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
-  if (!h.request) {
-    if (error) *error = UpdateError::NoRequest;
-    return false;
-  }
-  const wchar_t* headers = api ? L"Accept: application/vnd.github+json\r\n"
-                               : L"Accept: application/octet-stream\r\n";
-  if (!::WinHttpSendRequest(h.request, headers, (DWORD)-1, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
-      !::WinHttpReceiveResponse(h.request, nullptr)) {
-    if (error) *error = UpdateError::NoAnswer;
-    return false;
-  }
-
-  DWORD status = 0, size = sizeof(status);
-  ::WinHttpQueryHeaders(h.request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                        WINHTTP_HEADER_NAME_BY_INDEX, &status, &size, WINHTTP_NO_HEADER_INDEX);
-  if (status != 200) {
-    if (error) *error = UpdateError::HttpStatus;
-    if (httpStatus) *httpStatus = (int)status;
-    return false;
-  }
-
-  out->clear();
-  for (;;) {
-    DWORD available = 0;
-    if (!::WinHttpQueryDataAvailable(h.request, &available) || available == 0) break;
-    const size_t offset = out->size();
-    out->resize(offset + available);
-    DWORD read = 0;
-    if (!::WinHttpReadData(h.request, out->data() + offset, available, &read)) {
-      if (error) *error = UpdateError::Transfer;
-      return false;
-    }
-    out->resize(offset + read);
-    if (read == 0) break;
-  }
-  return true;
-}
-
-// "v1.2.3" against "1.2" and so on. Missing parts count as zero, so v1.1 is
-// newer than v1 and the same as v1.1.0.
-std::vector<int> Parts(const std::string& text) {
-  std::vector<int> parts;
-  size_t i = 0;
-  while (i < text.size() && !isdigit((unsigned char)text[i])) ++i;
-  int value = 0;
-  bool any = false;
-  for (; i < text.size(); ++i) {
-    if (isdigit((unsigned char)text[i])) {
-      value = value * 10 + (text[i] - '0');
-      any = true;
-    } else if (text[i] == '.') {
-      parts.push_back(value);
-      value = 0;
-      any = false;
-    } else {
-      break;
-    }
-  }
-  if (any) parts.push_back(value);
-  return parts;
-}
-
-bool IsNewer(const std::string& candidate, const std::string& current) {
-  const std::vector<int> a = Parts(candidate);
-  const std::vector<int> b = Parts(current);
-  if (a.empty()) return false;
-  for (size_t i = 0; i < a.size() || i < b.size(); ++i) {
-    const int x = i < a.size() ? a[i] : 0;
-    const int y = i < b.size() ? b[i] : 0;
-    if (x != y) return x > y;
-  }
-  return false;
-}
-
-std::wstring ExePath() {
-  wchar_t path[MAX_PATH] = {};
-  const DWORD n = ::GetModuleFileNameW(nullptr, path, MAX_PATH);
-  return std::wstring(path, n);
 }
 
 bool SplitUrl(const std::string& url, std::wstring* host, std::wstring* path) {
@@ -168,8 +77,8 @@ std::string UpdateErrorText(const UpdateStatus& status) {
     case UpdateError::Unreadable:
       return T("Die Antwort war nicht lesbar.", "The answer could not be read.");
     case UpdateError::NoAsset:
-      return T("Die neue Version enthält keine CapView.exe zum Herunterladen.",
-               "That release carries no CapView.exe to download.");
+      return T("Die neue Version enthält kein Programm zum Herunterladen.",
+               "That release carries no program to download.");
     case UpdateError::NoUrl:
       return T("Keine Download-Adresse.", "No download address.");
     case UpdateError::NotAProgram:
@@ -188,6 +97,14 @@ std::string UpdateErrorText(const UpdateStatus& status) {
       return "";
   }
 }
+
+std::string ReleasePageUrl(const UpdateStatus& status) {
+  // The address the API handed back is right even after the project has been
+  // renamed; the built-in one is for when there was no answer to hand one back.
+  return status.pageUrl.empty() ? Releases().releasePage : status.pageUrl;
+}
+
+std::string WebsiteUrl() { return Releases().website; }
 
 const char* Updater::currentVersion() { return kAppVersion; }
 
@@ -236,42 +153,31 @@ void Updater::Run(bool install) {
     s.announce = announceNext_;
     SetStatus(s);
 
-    std::string body;
-    UpdateError error = UpdateError::None;
-    if (!Fetch(kApiHost, kApiPath, true, &body, &error, &s.httpStatus)) {
+    Release release;
+    FetchError error = FetchError::None;
+    if (!FetchLatestRelease(&release, &error, &s.httpStatus)) {
       s.state = UpdateStatus::State::Failed;
-      s.error = error;
+      s.error = Translate(error);
       SetStatus(s);
       busy_.store(false, std::memory_order_release);
       return;
     }
 
-    std::string parseError;
-    const json::Value root = json::Parse(body, &parseError);
-    if (!root.IsObject()) {
-      s.state = UpdateStatus::State::Failed;
-      s.error = UpdateError::Unreadable;
-      SetStatus(s);
-      busy_.store(false, std::memory_order_release);
-      return;
-    }
-
-    s.latestVersion = root["tag_name"].AsString();
-    s.notes = root["body"].AsString();
+    s.latestVersion = release.tag;
+    s.pageUrl = release.pageUrl;
+    s.notes = release.notes;
     if (s.notes.size() > 1200) s.notes = s.notes.substr(0, 1200) + " ...";
 
     // The asset carrying the program itself. A release without one is a release
     // this cannot install, and saying so beats pretending otherwise.
     downloadUrl_.clear();
-    const json::Value& assets = root["assets"];
-    for (size_t i = 0; i < assets.Size(); ++i) {
-      if (assets.At(i)["name"].AsString() == kAssetName) {
-        downloadUrl_ = assets.At(i)["browser_download_url"].AsString();
-        break;
-      }
+    if (const ReleaseAsset* program = PickProgram(release)) {
+      downloadUrl_ = program->url;
+      CAP_LOG("Update-Asset: %s (%s)", program->name.c_str(),
+              program->label.empty() ? "ohne Etikett" : program->label.c_str());
     }
 
-    const bool newer = IsNewer(s.latestVersion, currentVersion());
+    const bool newer = IsNewerRelease(release, currentVersion());
     s.state = newer ? UpdateStatus::State::Available : UpdateStatus::State::UpToDate;
     if (newer && downloadUrl_.empty()) {
       s.state = UpdateStatus::State::Failed;
@@ -300,10 +206,10 @@ void Updater::Run(bool install) {
   }
 
   std::string data;
-  UpdateError error = UpdateError::None;
-  if (!Fetch(host, path, false, &data, &error, &s.httpStatus)) {
+  FetchError error = FetchError::None;
+  if (!HttpGet(host, path, false, &data, &error, &s.httpStatus)) {
     s.state = UpdateStatus::State::Failed;
-    s.error = error;
+    s.error = Translate(error);
     SetStatus(s);
     busy_.store(false, std::memory_order_release);
     return;
@@ -351,6 +257,10 @@ void Updater::Run(bool install) {
   // The running image cannot be overwritten, but it can be renamed out of the
   // way -- and if the second step fails, the first is put back, so a failed
   // update leaves the program exactly as it was rather than gone.
+  //
+  // The new build takes the old file's name, whatever that name is. If the
+  // program has been renamed since, the build that just arrived notices at its
+  // next start and corrects its own name -- see AdoptOwnName in app_identity.h.
   ::DeleteFileW(old.c_str());
   if (!::MoveFileExW(exe.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING)) {
     ::DeleteFileW(fresh.c_str());

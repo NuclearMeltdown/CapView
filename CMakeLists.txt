@@ -81,6 +81,7 @@ add_executable(CapView WIN32
   src/ui/file_dialog.cpp
   src/ui/toolbar.cpp
   src/ui/theme.cpp
+  src/update/release_source.cpp
   src/update/updater.cpp
   src/vcam/virtual_camera.cpp
   src/ui/settings_host.cpp

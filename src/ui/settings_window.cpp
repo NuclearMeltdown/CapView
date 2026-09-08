@@ -670,6 +670,29 @@ void SettingsWindow::DrawUpdatesTab() {
       break;
   }
 
+  // Whatever went wrong -- no network, no answer, a release with nothing in it
+  // to install -- the way out is the same one, and it is worth putting on the
+  // screen rather than describing. The addresses come from the answer where
+  // there was one, so they are right even after the project has been renamed;
+  // the built-in ones are for the case where there was no answer at all.
+  if (st.state == UpdateStatus::State::Failed) {
+    ImGui::Spacing();
+    ImGui::TextWrapped("%s",
+                       T("Von Hand geht es weiterhin: die aktuelle Version liegt auf der "
+                         "Release-Seite und auf der Website.",
+                         "By hand still works: the current build is on the release page and "
+                         "on the website."));
+    if (ImGui::Button(T("Releases öffnen", "Open releases"))) {
+      ::ShellExecuteW(nullptr, L"open", ToWide(ReleasePageUrl(st)).c_str(), nullptr, nullptr,
+                      SW_SHOWNORMAL);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(T("Website öffnen", "Open website"))) {
+      ::ShellExecuteW(nullptr, L"open", ToWide(WebsiteUrl()).c_str(), nullptr, nullptr,
+                      SW_SHOWNORMAL);
+    }
+  }
+
   if (st.state == UpdateStatus::State::Available) {
     ImGui::Spacing();
     ImGui::BeginDisabled(busy);

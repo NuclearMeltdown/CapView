@@ -51,6 +51,7 @@ struct UpdateStatus {
   State state = State::Idle;
   std::string latestVersion;  // as the tag names it, e.g. "v1.1"
   std::string notes;          // the release text, trimmed to something readable
+  std::string pageUrl;        // where that release is on the web, as it said itself
   UpdateError error = UpdateError::None;
   int httpStatus = 0;  // only with UpdateError::HttpStatus
   int percent = 0;     // download progress
@@ -63,6 +64,12 @@ struct UpdateStatus {
 // What to put on the screen for a failed status, in the language selected right
 // now -- which is why it is worked out here and not where the failure happened.
 std::string UpdateErrorText(const UpdateStatus& status);
+
+// Where to send somebody who has to fetch a build by hand. The release page
+// comes from the answer the server gave, so it stays right across a rename; the
+// built-in address is only used when there was no answer at all.
+std::string ReleasePageUrl(const UpdateStatus& status);
+std::string WebsiteUrl();
 
 class Updater {
  public:

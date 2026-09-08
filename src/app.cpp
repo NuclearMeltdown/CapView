@@ -3745,9 +3745,13 @@ void App::DrawSettingsWindowed() {
   if (result == SettingsWindow::Result::Close) settings_.Close();
 }
 
-void App::OpenReleasePage(const std::string& tag) {
-  std::wstring url = L"https://github.com/NuclearMeltdown/CapView/releases";
-  if (!tag.empty()) url += L"/tag/" + ToWide(tag);
+void App::OpenReleasePage(const UpdateStatus& status) {
+  const std::wstring url = ToWide(ReleasePageUrl(status));
+  ::ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void App::OpenWebsite() {
+  const std::wstring url = ToWide(WebsiteUrl());
   ::ShellExecuteW(nullptr, L"open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
@@ -3895,7 +3899,7 @@ void App::DrawUpdatePrompt() {
     // The release page, not the Updates tab. The tab shows the notes trimmed to
     // something that fits; the page has the whole of them, the file, and the
     // history above it.
-    OpenReleasePage(st.latestVersion);
+    OpenReleasePage(st);
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
