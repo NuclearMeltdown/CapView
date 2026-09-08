@@ -145,6 +145,52 @@ set_source_files_properties("${CMAKE_BINARY_DIR}/vcam_resource.rc"
 target_sources(CapView PRIVATE "${CMAKE_BINARY_DIR}/vcam_resource.rc")
 add_dependencies(CapView capview_vcam)
 
+# The bridge out of the old name -- see src/migrate/migrator.cpp.
+#
+# Built under the file name the program had before the rename, because that is
+# how it is found: the updater in CapView 3.7 looks for a release asset called
+# exactly "CapView.exe" and starts what it downloads. So this one is uploaded
+# under that name, in every release from now on, and the same binary is dragged
+# from release to release without being touched -- it takes the new name from
+# the release itself and never has to be told one.
+#
+# Its own output directory, because the name collides with the program's.
+#
+# One thing 3.7 does check is the size: anything under 256 KB is rejected as
+# not-a-program, the guard that stops it writing an error page over itself. This
+# target links the static runtime and comes out at roughly two and a half times
+# that on its own, so nothing has to be padded -- but the floor is real, and a
+# future attempt to make this file small would walk straight into it.
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/res/migrator.rc.in"
+               "${CMAKE_BINARY_DIR}/migrator.rc" @ONLY)
+
+add_executable(CapViewMigrator WIN32
+  src/migrate/migrator.cpp
+  src/app_identity.cpp
+  src/i18n.cpp
+  src/json.cpp
+  src/update/release_source.cpp
+  "${CMAKE_BINARY_DIR}/migrator.rc"
+)
+target_include_directories(CapViewMigrator PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_CURRENT_SOURCE_DIR}/res")
+target_compile_definitions(CapViewMigrator PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+target_link_libraries(CapViewMigrator PRIVATE
+  winhttp ole32 oleaut32 uuid shell32 shlwapi dwmapi uxtheme user32 gdi32 advapi32)
+if(MSVC)
+  target_compile_options(CapViewMigrator PRIVATE /W3 /permissive- /Zc:__cplusplus /utf-8 /MP)
+  set_property(TARGET CapViewMigrator PROPERTY MSVC_RUNTIME_LIBRARY
+               "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  target_link_options(CapViewMigrator PRIVATE "/MANIFESTUAC:level='asInvoker' uiAccess='false'")
+endif()
+set_target_properties(CapViewMigrator PROPERTIES
+  OUTPUT_NAME "CapView"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/migrator"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/migrator"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/migrator"
+)
+
 # Diagnostic console tool: prints the devices, formats and inputs CapView sees.
 add_executable(capview_probe
   src/tools/probe_main.cpp
