@@ -6,7 +6,10 @@
 #include "resource.h"
 #include <windows.h>
 
-IDI_CAPVIEW ICON "capview.ico"
+// The icon is the current one: this window belongs to the program that is
+// arriving, not to the one it replaces. Only the strings below stay old, and
+// they stay old because Windows shows them for the file being replaced.
+IDI_QBLANK ICON "qblank.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION @PROJECT_VERSION_MAJOR@, @PROJECT_VERSION_MINOR@, @PROJECT_VERSION_PATCH@, 0

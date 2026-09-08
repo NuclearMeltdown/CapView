@@ -1,7 +1,7 @@
 @echo off
-rem Baut CapView.
+rem Baut qBlank.
 rem
-rem   build.bat            Release, raeumt danach auf: es bleibt nur CapView.exe
+rem   build.bat            Release, raeumt danach auf: es bleibt nur qBlank.exe
 rem   build.bat keep       Release, behaelt den build-Ordner fuer schnelle Neubauten
 rem   build.bat debug      Debug-Build, behaelt den build-Ordner
 setlocal
@@ -32,14 +32,23 @@ echo === Baue ===
 "%VSCMAKE%" --build "%ROOT%\build" --parallel
 if errorlevel 1 exit /b 1
 
-if not exist "%ROOT%\build\bin\CapView.exe" goto :missing
+if not exist "%ROOT%\build\bin\qBlank.exe" goto :missing
 
-copy /y "%ROOT%\build\bin\CapView.exe" "%ROOT%\CapView.exe" >nul
+copy /y "%ROOT%\build\bin\qBlank.exe" "%ROOT%\qBlank.exe" >nul
 if errorlevel 1 exit /b 1
 
 rem Die Medienquelle wird nicht mehr danebengelegt: sie steckt als Ressource in
 rem der exe und wird beim Installieren der Kamera von dort herausgeschrieben.
-rem Ein Release ist damit wieder eine einzige Datei.
+rem Ein Release ist damit wieder eine einzige Datei -- plus den Migrator.
+rem
+rem Der liegt im Build in einem eigenen Ordner, weil er CapView.exe heisst: der
+rem Updater in CapView 3.7 laedt das Asset mit genau diesem Namen. Ein Release
+rem besteht aus beiden Dateien, und der Migrator wandert unveraendert von
+rem Release zu Release mit.
+if not exist "%ROOT%\build\bin\migrator\CapView.exe" goto :nomigrator
+copy /y "%ROOT%\build\bin\migrator\CapView.exe" "%ROOT%\CapView.exe" >nul
+if errorlevel 1 exit /b 1
+:nomigrator
 
 if "%CLEAN%"=="0" goto :kept
 
@@ -50,24 +59,25 @@ if exist "%ROOT%\ffmpeg" goto :noffmpeg
 echo === Verschiebe ffmpeg neben die exe ===
 move "%ROOT%\build\bin\ffmpeg" "%ROOT%\ffmpeg" >nul
 :noffmpeg
-if not exist "%ROOT%\build\bin\CapView.json" goto :nojson
-if exist "%ROOT%\CapView.json" goto :nojson
-move "%ROOT%\build\bin\CapView.json" "%ROOT%\CapView.json" >nul
+if not exist "%ROOT%\build\bin\qBlank.json" goto :nojson
+if exist "%ROOT%\qBlank.json" goto :nojson
+move "%ROOT%\build\bin\qBlank.json" "%ROOT%\qBlank.json" >nul
 :nojson
 
 echo === Raeume auf ===
 rmdir /s /q "%ROOT%\build"
 
 echo.
-echo === Fertig: %ROOT%\CapView.exe ===
-echo Einstellungen landen in CapView.json daneben. Sonst wird nichts angelegt.
+echo === Fertig: %ROOT%\qBlank.exe ===
+echo Daneben CapView.exe: der Migrator, gehoert mit ins Release.
+echo Einstellungen landen in qBlank.json daneben. Sonst wird nichts angelegt.
 exit /b 0
 
 :kept
 echo.
-echo === Fertig: %ROOT%\CapView.exe   build-Ordner behalten ===
+echo === Fertig: %ROOT%\qBlank.exe   build-Ordner behalten ===
 exit /b 0
 
 :missing
-echo FEHLER: CapView.exe wurde nicht erzeugt.
+echo FEHLER: qBlank.exe wurde nicht erzeugt.
 exit /b 1

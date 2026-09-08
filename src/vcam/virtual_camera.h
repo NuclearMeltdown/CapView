@@ -1,6 +1,6 @@
 #pragma once
 
-// CapView's end of the virtual camera.
+// qBlank's end of the virtual camera.
 //
 // Two things live here that are easy to confuse. Installing puts the DirectShow
 // filter's DLL into the registry, needs administrator rights, and is done once.
@@ -72,7 +72,7 @@ class VirtualCamera {
   void SetWideOffered(bool offered);
   bool wantsWide() const { return wantsWide_.load(std::memory_order_relaxed); }
 
-  // What the camera would publish right now: the size CapView is showing, the
+  // What the camera would publish right now: the size qBlank is showing, the
   // rate the source runs at, and whether the picture would be the ten bit one.
   //
   // Called whether or not anybody is watching, and that is the point. A
@@ -97,7 +97,7 @@ class VirtualCamera {
   bool consumed() const { return consumed_.load(std::memory_order_relaxed); }
 
   // Hands over one displayed frame, RGBA8, top row first, at whatever size
-  // CapView is showing. Returns immediately: the copy is cheap and the
+  // qBlank is showing. Returns immediately: the copy is cheap and the
   // conversion happens on a thread of its own.
   void PushFrame(const uint8_t* rgba, int stride, int width, int height);
 

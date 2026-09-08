@@ -12,7 +12,7 @@ namespace {
 // The pages the filter offers. Asking the capture pin as well is tempting --
 // it has a stream format page -- but handing a frame two objects means every
 // page gets both, and this card's vendor page faults on being given a pin.
-// CapView picks the capture format itself anyway, so that page has nothing to
+// qBlank picks the capture format itself anyway, so that page has nothing to
 // add that is not already in the Source tab.
 void CollectPages(IUnknown* object, std::vector<GUID>* pages) {
   if (!object) return;

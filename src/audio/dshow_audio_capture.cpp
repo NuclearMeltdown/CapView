@@ -10,7 +10,7 @@ namespace cap {
 namespace {
 
 // {C1F0B8A4-2E77-4B3D-9C51-7A6E0D42F118}
-const GUID CLSID_CapViewAudioSink = {
+const GUID CLSID_qBlankAudioSink = {
     0xc1f0b8a4, 0x2e77, 0x4b3d, {0x9c, 0x51, 0x7a, 0x6e, 0x0d, 0x42, 0xf1, 0x18}};
 
 const wchar_t kPinId[] = L"In";
@@ -134,7 +134,7 @@ class AudioSinkFilter final : public IBaseFilter, public IAMFilterMiscFlags {
 
   HRESULT STDMETHODCALLTYPE GetClassID(CLSID* clsid) override {
     if (!clsid) return E_POINTER;
-    *clsid = CLSID_CapViewAudioSink;
+    *clsid = CLSID_qBlankAudioSink;
     return S_OK;
   }
   HRESULT STDMETHODCALLTYPE Stop() override {
@@ -177,7 +177,7 @@ class AudioSinkFilter final : public IBaseFilter, public IAMFilterMiscFlags {
   }
   HRESULT STDMETHODCALLTYPE QueryFilterInfo(FILTER_INFO* info) override {
     if (!info) return E_POINTER;
-    wcscpy_s(info->achName, L"CapView Audio Sink");
+    wcscpy_s(info->achName, L"qBlank Audio Sink");
     info->pGraph = graph_;
     if (info->pGraph) info->pGraph->AddRef();
     return S_OK;
@@ -544,7 +544,7 @@ bool DShowAudioCapture::Start(const DeviceRef& device, AudioSinkFn sink, std::st
                   "The audio sink could not be created"));
   sinkFilter_.Attach(static_cast<IBaseFilter*>(sinkFilter));  // constructed with refcount 1
 
-  hr = graph_->AddFilter(sinkFilter_.Get(), L"CapView Audio Sink");
+  hr = graph_->AddFilter(sinkFilter_.Get(), L"qBlank Audio Sink");
   if (FAILED(hr))
     return fail(T("Audio-Sink konnte nicht eingefügt werden: ",
                   "The audio sink could not be added: ") +

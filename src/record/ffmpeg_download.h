@@ -1,10 +1,10 @@
 #pragma once
 
-// Fetches a static ffmpeg build on request and puts ffmpeg.exe next to CapView.
+// Fetches a static ffmpeg build on request and puts ffmpeg.exe next to qBlank.
 //
 // Downloaded from the upstream, never shipped alongside us -- and the licence is
 // not why. Whether a second executable lands on the machine is the user's
-// decision; without it CapView is a single file of about 2 MB; and what is
+// decision; without it qBlank is a single file of about 2 MB; and what is
 // fetched here is whatever the current release build is, where a copy in the
 // repository would sit at the version somebody last committed. Those reasons
 // hold regardless of what either program is licensed under.

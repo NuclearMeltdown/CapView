@@ -5,7 +5,7 @@
 // Two things make this less trivial than calling the API.
 //
 // The common item dialogs (IFileOpenDialog) need a single threaded apartment.
-// CapView initialises COM as MTA, because DirectShow and WASAPI both push from
+// qBlank initialises COM as MTA, because DirectShow and WASAPI both push from
 // their own threads and MTA keeps those calls free of apartment marshalling.
 // Creating the dialog on an MTA thread appears to work and then hangs.
 //

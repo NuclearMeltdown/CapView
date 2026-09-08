@@ -23,13 +23,14 @@ namespace cap {
 // The literal, for the handful of places that have to paste the name together
 // before there is a program to ask: a resource script, the camera's name in the
 // device list. Everywhere else uses kAppName.
-#define CAP_APP_NAME L"CapView"
+#define CAP_APP_NAME L"qBlank"
 
 inline const wchar_t kAppName[] = CAP_APP_NAME;
 
-// Oldest first. Empty until the first rename.
-inline const wchar_t* const kFormerAppNames[] = {nullptr};
-inline constexpr size_t kFormerAppNameCount = 0;
+// Oldest first. CapView is what this program was called up to and including
+// 3.7; 4.0 is that same program under the name it keeps.
+inline const wchar_t* const kFormerAppNames[] = {L"CapView"};
+inline constexpr size_t kFormerAppNameCount = 1;
 
 // The same name for the places that speak UTF-8 -- window titles drawn by the
 // interface, log lines, message text.
@@ -43,11 +44,11 @@ std::wstring WindowClassName(const wchar_t* suffix);
 std::wstring ExePath();
 std::wstring ExeDirectory();
 
-// "C:\...\CapView.exe" -> "CapView". Works on any path.
+// "C:\...\qBlank.exe" -> "qBlank". Works on any path.
 std::wstring FileStem(const std::wstring& path);
 
 // A file next to the executable, named after the program: AppFile(L"json")
-// gives "C:\...\CapView.json". The extension comes without its dot.
+// gives "C:\...\qBlank.json". The extension comes without its dot.
 std::wstring AppFile(const wchar_t* extension);
 
 // The same for a former name, by index into kFormerAppNames.

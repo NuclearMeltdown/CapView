@@ -17,7 +17,7 @@ namespace {
 //
 // This is not tidiness, it is the whole mechanism. Windows identifies a loaded
 // module inside a process by its *file name*, not by its path: an application
-// that has the camera open holds capview_vcam.dll mapped, and a later
+// that has the camera open holds qblank_vcam.dll mapped, and a later
 // LoadLibrary of a different file with that same name hands back the module
 // already loaded rather than reading the new one. Renaming the old file out of
 // the way does not help -- the module keeps its pages either way, which is
@@ -27,7 +27,18 @@ namespace {
 // A name that changes with the contents cannot be confused with anything. It
 // also means an install is idempotent: the file for this build either is
 // already there or is not.
-const wchar_t kDllPrefix[] = L"capview_vcam_";
+//
+// The program's name in front, lower-cased, so the prefix follows a rename --
+// and so the former names stay recognisable, which is what lets the sweep below
+// clear out what a build under an older name left in the folder.
+std::wstring DllPrefix(const wchar_t* appName) {
+  std::wstring prefix = appName;
+  for (wchar_t& c : prefix) {
+    if (c >= L'A' && c <= L'Z') c = (wchar_t)(c + (L'a' - L'A'));
+  }
+  return prefix + L"_vcam_";
+}
+
 const wchar_t kDllSuffix[] = L".dll";
 
 std::wstring ExeFolder() {
@@ -59,7 +70,8 @@ std::wstring DllFileName() {
       hash = (hash ^ data[i]) * 1099511628211ull;
     }
     wchar_t buffer[64] = {};
-    ::swprintf(buffer, 64, L"%s%016llx%s", kDllPrefix, (unsigned long long)hash, kDllSuffix);
+    ::swprintf(buffer, 64, L"%s%016llx%s", DllPrefix(kAppName).c_str(),
+               (unsigned long long)hash, kDllSuffix);
     return std::wstring(buffer);
   }();
   return name;
@@ -111,8 +123,8 @@ bool WriteFilterDll(std::string* error) {
   const uint8_t* data = FilterBytes(&bytes);
   if (!data || bytes == 0) {
     if (error) {
-      *error = T("Diese CapView-Fassung enthält keine Kameraquelle.",
-                 "This build of CapView carries no camera source.");
+      *error = T("Diese qBlank-Fassung enthält keine Kameraquelle.",
+                 "This build of qBlank carries no camera source.");
     }
     return false;
   }
@@ -149,8 +161,8 @@ bool RunRegsvr(bool remove, std::string* error) {
   const std::wstring dll = DllPath();
   if (!FileThere(dll)) {
     if (error) {
-      *error = T("capview_vcam.dll fehlt neben CapView.exe.",
-                 "capview_vcam.dll is missing next to CapView.exe.");
+      *error = T("qblank_vcam.dll fehlt neben qBlank.exe.",
+                 "qblank_vcam.dll is missing next to qBlank.exe.");
     }
     return false;
   }
@@ -211,7 +223,7 @@ bool RunRegsvr(bool remove, std::string* error) {
 //
 // Nothing is scaled and nothing is letterboxed here any more: that is the
 // filter's job now, once per consumer, in the consumer's own process. What
-// CapView publishes is what CapView is showing.
+// qBlank publishes is what qBlank is showing.
 //
 // BT.601 with limited range, which is what a consumer assumes of NV12 when it
 // is not told otherwise, and what the filter's media type declares.
@@ -343,18 +355,30 @@ void VirtualCamera::CleanUpOldSources() {
   // from older builds keep their own names, so they accumulate unless somebody
   // sweeps them; whatever is still mapped by a running consumer simply refuses
   // and gets another chance at some later start.
+  //
+  // Under the former names too, because a rename does not move those files: the
+  // program that wrote them is this one, and nothing else will ever come back
+  // for them.
+  std::vector<std::wstring> prefixes = {DllPrefix(kAppName)};
+  for (size_t i = 0; i < kFormerAppNameCount; ++i) {
+    prefixes.push_back(DllPrefix(kFormerAppNames[i]));
+  }
+
   const std::wstring folder = ExeFolder();
   const std::wstring keep = DllFileName();
-  WIN32_FIND_DATAW found = {};
-  HANDLE search = ::FindFirstFileW((folder + L"capview_vcam*").c_str(), &found);
-  if (search == INVALID_HANDLE_VALUE) return;
   int removed = 0;
-  do {
-    if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-    if (_wcsicmp(found.cFileName, keep.c_str()) == 0) continue;
-    if (::DeleteFileW((folder + found.cFileName).c_str())) ++removed;
-  } while (::FindNextFileW(search, &found));
-  ::FindClose(search);
+  for (const std::wstring& prefix : prefixes) {
+    WIN32_FIND_DATAW found = {};
+    HANDLE search = ::FindFirstFileW((folder + prefix.substr(0, prefix.size() - 1) + L"*").c_str(),
+                                     &found);
+    if (search == INVALID_HANDLE_VALUE) continue;
+    do {
+      if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+      if (_wcsicmp(found.cFileName, keep.c_str()) == 0) continue;
+      if (::DeleteFileW((folder + found.cFileName).c_str())) ++removed;
+    } while (::FindNextFileW(search, &found));
+    ::FindClose(search);
+  }
   if (removed > 0) CAP_LOG("Kameraquelle: %d alte Datei(en) entfernt", removed);
 }
 
@@ -479,7 +503,7 @@ bool VirtualCamera::CreateControl(std::string* error) {
                       cb->version == vcam::kVersion &&
                       cb->stateBytes == sizeof(vcam::ControlBlock);
   if (reused) {
-    // Somebody was here before -- almost always this CapView being restarted
+    // Somebody was here before -- almost always this qBlank being restarted
     // while a consumer kept the section alive. Those consumers are still valid
     // and still in the table, so it is left alone; only the producer's half is
     // taken over. Carrying the generation forward matters too: reusing a number
@@ -492,7 +516,7 @@ bool VirtualCamera::CreateControl(std::string* error) {
     cb->magic = vcam::kMagic;
     cb->version = vcam::kVersion;
     cb->stateBytes = sizeof(vcam::ControlBlock);
-    // Not from zero: a consumer that survived a CapView which did not get to
+    // Not from zero: a consumer that survived a qBlank which did not get to
     // clean up would otherwise be handed a generation it already has mapped.
     generation_ = ::GetTickCount() | 1u;
   }
@@ -809,7 +833,7 @@ void VirtualCamera::consumers(std::vector<Consumer>* out) const {
 // ------------------------------------------------------------------ worker
 
 void VirtualCamera::WorkerLoop() {
-  ::SetThreadDescription(::GetCurrentThread(), L"CapView vcam");
+  ::SetThreadDescription(::GetCurrentThread(), L"qBlank vcam");
 
   while (!quit_.load(std::memory_order_relaxed)) {
     ::WaitForSingleObject(wake_, 100);

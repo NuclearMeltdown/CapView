@@ -2,7 +2,7 @@
   <img src="docs/icon.png" width="112" alt="">
 </p>
 
-<h1 align="center">CapView</h1>
+<h1 align="center">qBlank</h1>
 
 <p align="center">
   A low-latency viewer and recorder for DirectShow capture cards on Windows.
@@ -10,7 +10,7 @@
 
 ![The viewer in fullscreen showing a console at 1080p60, with the statistics overlay reading a frame age of 1.2 ms](docs/viewer.jpg)
 
-CapView displays the output of a capture card with as little delay as the
+qBlank displays the output of a capture card with as little delay as the
 hardware allows, so the captured signal can be played on rather than only
 watched. Measured on a StarTech PEXHDCAP60L: **1080p60 sustained, around 1 ms
 from a frame arriving to the present that hands it to the compositor.**
@@ -22,6 +22,16 @@ compositing and streaming are not. For those, use OBS.
 > **The [wiki](../../wiki) is the documentation** — one page per feature,
 > covering what the code does, why it works that way, and what was measured to
 > arrive at it. This page is the short version.
+
+**This was CapView.** 4.0 is 3.7 under a different name and nothing else: no
+feature was added or taken away in the step. Settings, profiles and the log
+carry over by themselves — a `CapView.json` found next to the program is adopted
+rather than replaced, and if a `qBlank.json` is there as well, the program asks
+which one it should keep. A release contains two files: `qBlank.exe`, and a
+`CapView.exe` that exists so the updater in 3.7 finds something under the name
+it is looking for. Installing that one fetches the real program, points the
+shortcuts at it and starts it. It is shipped with every release from now on and
+never needs to change.
 
 ## Latency
 
@@ -73,7 +83,7 @@ standard to a confirmed right one takes 1.7 to 2.4 seconds on the hardware this
 was built against. A round that ran on a still-black or moving picture is
 refused rather than believed, and **F7** asks for a search by hand — the one
 case measurement does not cover is colour that is wrong rather than missing.
-Every step is written to `CapView.log` with what was measured.
+Every step is written to `qBlank.log` with what was measured.
 [Automatic video standard](../../wiki/Automatic-video-standard)
 
 **Picture.** Nearest, bilinear, Catmull-Rom, Lanczos3 and sharp-bilinear
@@ -197,7 +207,7 @@ which needs ffmpeg and is read by every browser.
 [Screenshots](../../wiki/Screenshots)
 
 **Virtual camera.** The picture is offered to other programs as a webcam called
-**CapView Virtual Camera**, at the source's own resolution and rate rather than
+**qBlank Virtual Camera**, at the source's own resolution and rate rather than
 from a list of sizes: a 240p SNES goes out as 240p, a 1080p60 Switch as 1080p60.
 Programs that cannot take that get one of the ordinary sizes below it, scaled
 and letterboxed in their own process. Nothing above the source is offered, since
@@ -219,7 +229,7 @@ the search then picks the profile: the same cable, two consoles, and no
 keystroke at all.
 
 **Updates.** *Settings → Updates* compares the build against the newest release
-on GitHub. Installing replaces `CapView.exe` by renaming rather than
+on GitHub. Installing replaces `qBlank.exe` by renaming rather than
 overwriting, so a failed update leaves the program as it was.
 [Updates](../../wiki/Updates)
 
@@ -257,11 +267,11 @@ no external dependencies; Dear ImGui is vendored in `third_party/`.
 build.bat
 ```
 
-The result is `CapView.exe` in the repository root, about 2 MB, linked against
+The result is `qBlank.exe` in the repository root, about 2 MB, linked against
 the static CRT. `build.bat keep` retains the build tree for incremental
 rebuilds, `build.bat debug` produces a debug configuration.
 
-Settings are stored in `CapView.json` beside the executable; nothing is written
+Settings are stored in `qBlank.json` beside the executable; nothing is written
 to the registry. Prebuilt executables are attached to each
 [release](../../releases). More: [Building](../../wiki/Building).
 
@@ -272,13 +282,13 @@ encoder is used, and **HDR screenshots in AVIF**. The preview, the composite
 filters, deinterlacing, the virtual camera and SDR screenshots run without it.
 
 It is not bundled, and that is not a licence question: whether a second
-executable lands on the machine is the user's decision, without it CapView stays
+executable lands on the machine is the user's decision, without it qBlank stays
 one file of about 2 MB, and a copy in the repository would be frozen at the day
 it was committed. The download always takes the current release build, which is
-the only way ffmpeg stays current without CapView carrying its own build of it.
+the only way ffmpeg stays current without qBlank carrying its own build of it.
 
 *Settings → Encoder* downloads a static build, verifies its published SHA-256
-and extracts only the executable; `CapView.exe --fetch-ffmpeg` does the same
+and extracts only the executable; `qBlank.exe --fetch-ffmpeg` does the same
 from the command line. Available encoders are determined by test-encoding two
 frames with each candidate, rather than by reading `ffmpeg -encoders`, which
 lists what the build was compiled with rather than what the hardware supports.
@@ -288,7 +298,7 @@ More: [ffmpeg](../../wiki/ffmpeg).
 ## Limitations
 
 - **A card grants its capture pin to one process at a time.** If OBS holds it,
-  CapView cannot open it, and the other way round.
+  qBlank cannot open it, and the other way round.
 - **The virtual camera is not visible to packaged apps.** Its shared memory
   lives in the session namespace, which an app container cannot see — so the
   Windows Camera app and Store builds of Teams do not find it. Everything that
@@ -302,7 +312,7 @@ More: [ffmpeg](../../wiki/ffmpeg).
   checked against the standards and the tone mapped path is verified; the scRGB
   output has never been run against an HDR monitor.
 - **SECAM is approximated.** It carries colour as frequency modulation on two
-  alternating subcarriers, at 4.250 and 4.40625 MHz, and CapView works from a
+  alternating subcarriers, at 4.250 and 4.40625 MHz, and qBlank works from a
   single figure of 4.43362 MHz. The demodulator does not handle SECAM at all;
   the four-frame average, the noise filter and the bandwidth restore do, and it
   has not been measured against a SECAM source.
@@ -318,7 +328,7 @@ Foundation enumerates three.
 ## Licence
 
 ```
-CapView — a low-latency viewer and recorder for DirectShow capture cards
+qBlank — a low-latency viewer and recorder for DirectShow capture cards
 Copyright (C) 2026 NuclearMeltdown
 
 This program is free software: you can redistribute it and/or modify it under
@@ -331,11 +341,11 @@ A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
 The full text is in [LICENSE](LICENSE). Use it for whatever you like, including
 at work and including making money with it — what the licence asks is that if
-you pass CapView on, modified or not, it goes on under the same terms and with
+you pass qBlank on, modified or not, it goes on under the same terms and with
 the source. Nobody gets to close it and sell it as their own.
 
 Versions up to and including 3.7 were originally released under the MIT licence.
-Every tag in this repository now carries GPLv3, so there is no version of CapView
+Every tag in this repository now carries GPLv3, so there is no version of qBlank
 left here to obtain under any other terms; copies that were actually taken while
 MIT applied keep MIT for those copies, and that is the one thing relicensing
 cannot reach.
@@ -344,7 +354,7 @@ Dear ImGui is MIT and stays MIT; the components and their terms are listed in
 [THIRD-PARTY.md](THIRD-PARTY.md).
 
 ffmpeg is a separate program, downloaded from upstream and executed as a child
-process, not linked into CapView. Invoking a program is not linking against it,
+process, not linked into qBlank. Invoking a program is not linking against it,
 so the two remain separate works.
 
 Written with the help of [Claude](https://claude.ai).

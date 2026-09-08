@@ -5,11 +5,11 @@
 namespace cap {
 namespace vcam {
 
-// The picture the camera shows while nothing is feeding it: the CapView mark
-// over a dark ground, with "CapView is not running" underneath.
+// The picture the camera shows while nothing is feeding it: the qBlank mark
+// over a dark ground, with "qBlank is not running" underneath.
 //
 // This exists because the filter is registered machine-wide and therefore sits
-// in every device list from the moment it is installed, whether CapView is
+// in every device list from the moment it is installed, whether qBlank is
 // running or not -- the same as OBS's virtual camera. A camera that is always
 // listed and shows black when idle is indistinguishable from a broken one.
 //

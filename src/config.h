@@ -41,7 +41,7 @@ enum class Rotation { None, Cw90, Half, Ccw90 };
 const int kRotationCount = 4;
 
 // Angehaengt wird hier, nie eingefuegt: der Wert steht als Zahl in der
-// CapView.json, und ein Einschub verschoebe stillschweigend jede gespeicherte
+// qBlank.json, und ein Einschub verschoebe stillschweigend jede gespeicherte
 // Einstellung um eins.
 enum class AspectMode { Source, Force16x9, Force4x3, Stretch, Integer, SquarePixels };
 const int kAspectModeCount = 6;
@@ -182,7 +182,7 @@ enum class ScreenshotFormat { Png, Jpeg };
 // What an HDR screenshot comes out as. JPEG XR needs nothing: Windows ships the
 // encoder, and the Photos app reads it. AVIF is read by every browser and by
 // most things that are not Windows -- but it goes through ffmpeg, and
-// screenshots are otherwise the one part of CapView that never needs it.
+// screenshots are otherwise the one part of qBlank that never needs it.
 enum class HdrShotFormat { Jxr, Avif };
 inline constexpr int kHdrShotFormatCount = 2;
 
@@ -288,7 +288,7 @@ struct DeviceRef {
 // offen ist. Eine Zahl, die heute stimmt, ist falsch, sobald die Konsole den
 // Modus wechselt -- deshalb steht sie gar nicht erst in der Konfiguration.
 //
-// Ein aelteres CapView liest beide als "hoechste verfuegbare", weil es nur auf
+// Ein aelteres qBlank liest beide als "hoechste verfuegbare", weil es nur auf
 // `fps <= 0` prueft. Das ist genau das alte Verhalten und damit in Ordnung.
 inline constexpr double kFpsHighest = 0.0;  // was die Karte hergibt
 inline constexpr double kFpsNative = -1.0;  // was die Norm des Signals vorgibt
@@ -319,7 +319,7 @@ struct CaptureSettings {
   DeviceRef audio;         // only used when audioSource == Manual
   int crossbarInput = -1;  // index into the enumerated crossbar inputs, -1 = leave alone
   // Analogue video standard. 0 leaves whatever the card was set to alone, which
-  // is what it did before this existed; -1 lets CapView find it by watching
+  // is what it did before this existed; -1 lets qBlank find it by watching
   // whether the decoder locks; anything else is an AnalogVideo_* bitmask.
   long videoStandard = 0;
   SignalKind signalKind = SignalKind::Auto;
@@ -525,7 +525,7 @@ struct AudioSettings {
 // source resolution, and the only knobs are the ones that change the result in
 // a way a preset cannot guess.
 struct RecordSettings {
-  std::string outputFolder;  // empty = Videos\CapView
+  std::string outputFolder;  // empty = Videos\qBlank
   RecordContainer container = RecordContainer::Mkv;
   RecordEncoder encoder = RecordEncoder::Auto;
   RecordSpeed speed = RecordSpeed::VeryFast;  // software encoder only
@@ -552,7 +552,7 @@ struct RecordSettings {
   // Off by default: only FAT32 needs it, NTFS does not.
   bool splitFiles = false;
   int splitSizeMb = 4000;
-  // Path to ffmpeg.exe. Empty means: look next to CapView, then on PATH.
+  // Path to ffmpeg.exe. Empty means: look next to qBlank, then on PATH.
   std::string ffmpegPath;
 
   // Result of the encoder test, kept so the list is filled on the next start
@@ -562,7 +562,7 @@ struct RecordSettings {
   std::string encoderProbeSignature;
   std::vector<int> encodersAvailable;  // RecordEncoder values that worked
 
-  // Stills. Empty folder = Pictures\CapView. Screenshots go somewhere separate
+  // Stills. Empty folder = Pictures\qBlank. Screenshots go somewhere separate
   // from the recordings on purpose: a folder holding both a handful of videos
   // and four hundred stills is a folder nobody can find anything in.
   std::string screenshotFolder;
@@ -656,7 +656,7 @@ struct AppSettings {
   // download is a separate, explicit action.
   bool checkUpdatesOnStart = true;
   // Offer the picture to other programs as a webcam. Remembered, so it comes
-  // back with CapView -- the camera itself only exists while CapView runs.
+  // back with qBlank -- the camera itself only exists while qBlank runs.
   bool virtualCamera = false;
 
   // ---- high dynamic range ----
@@ -718,7 +718,7 @@ struct Config {
   const Profile& active() const;
   void SetActiveProfile(int index);
 
-  // CapView.json next to the executable -- portable, no registry.
+  // qBlank.json next to the executable -- portable, no registry.
   static std::wstring FilePath();
 
   // Returns false when the file is missing or unreadable; defaults are kept in

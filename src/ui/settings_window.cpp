@@ -361,7 +361,7 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
     // acts on the result either way.
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(viewport->WorkSize);
-    opened = ImGui::Begin("###capview_settings_host", nullptr,
+    opened = ImGui::Begin("###qblank_settings_host", nullptr,
                           ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                               ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                               ImGuiWindowFlags_NoBringToFrontOnFocus |
@@ -413,7 +413,7 @@ SettingsWindow::Result SettingsWindow::Draw(const DeviceProbeResult* liveCaps,
     // Without this the window is a different window in each language: ImGui keys
     // position, size and the selected tab off the name, so switching language
     // moved the dialog, resized it and threw you back to the first tab.
-    opened = ImGui::Begin(T("Einstellungen###capview_settings", "Settings###capview_settings"),
+    opened = ImGui::Begin(T("Einstellungen###qblank_settings", "Settings###qblank_settings"),
                           &stayOpen, ImGuiWindowFlags_NoCollapse);
   }
   if (!fillsWindow_ && opened) {
@@ -1235,7 +1235,7 @@ void SettingsWindow::DrawSourceTab(const DeviceProbeResult& caps) {
       // The ends are the longest edge D3D11 can address and a rate no display
       // hardware reaches, not a judgement about what is sensible. This is the
       // box for forcing something the driver never mentioned; the point of it
-      // is that CapView does not argue.
+      // is that qBlank does not argue.
       fmt.width = Clamp(customWidth_, 16, 16384);
       fmt.height = Clamp(customHeight_, 16, 16384);
       fmt.fps = Clamp(customFps_, 1.0, 1000.0);
@@ -2217,7 +2217,7 @@ void SettingsWindow::DrawImageTab() {
       ImGui::TextDisabled("%s", rangeNumbers_->c_str());
     }
   }
-  // Ausserhalb des Automatik-Zweigs, weil der Hinweis nichts ueber CapViews
+  // Ausserhalb des Automatik-Zweigs, weil der Hinweis nichts ueber qBlanks
   // Einstellung sagt, sondern ueber das, was ankommt: er gilt genauso, wenn der
   // Wertebereich hier von Hand steht. Und in einer Zeile plus Fragezeichen,
   // nicht als Absatz: an einer analogen Karte, die streckt, steht er dauerhaft
@@ -3281,7 +3281,7 @@ void SettingsWindow::DrawEncoderBlock(const EncoderInfo* encoder) {
 
   // Which of these mean anything depends on the encoder. Showing the rest
   // greyed out says more than hiding them: it is the difference between "your
-  // card cannot" and "CapView cannot".
+  // card cannot" and "qBlank cannot".
   const Recorder::Family family =
       encoder ? Recorder::FamilyOf(encoder->ffmpegName) : Recorder::Family::Software;
   const bool nvenc = family == Recorder::Family::Nvenc;

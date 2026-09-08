@@ -401,7 +401,7 @@ class VideoRenderer {
   void ResetAnalysis();
 
   // Nur den Wertebereich. Das ist die eine Messung, die man von Hand wiederholen
-  // will: sie haengt an Einstellungen ausserhalb von CapView -- Treiberoption,
+  // will: sie haengt an Einstellungen ausserhalb von qBlank -- Treiberoption,
   // Quellgeraet -- die sich aendern koennen, ohne dass am Format etwas
   // passiert. Die Verschraenkung und die Bildgrenzen davon mitzureissen waere
   // nur schaedlich, denn beide zu verlieren sieht man sofort.

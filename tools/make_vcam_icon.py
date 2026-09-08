@@ -1,7 +1,7 @@
-"""Generates res/vcam_icon.bin from res/capview.ico.
+"""Generates res/vcam_icon.bin from res/qblank.ico.
 
-The virtual camera's filter DLL draws the mark on its "CapView is not running"
-picture, and that DLL is carried inside CapView.exe as a resource -- so every
+The virtual camera's filter DLL draws the mark on its "qBlank is not running"
+picture, and that DLL is carried inside qBlank.exe as a resource -- so every
 byte it costs is paid twice. The 256x256 image out of the .ico is 256 KiB raw,
 which is a lot to spend on a placeholder.
 
@@ -34,7 +34,7 @@ MAX_RUN = 0xFFFF
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-SOURCE = os.path.join(ROOT, "res", "capview.ico")
+SOURCE = os.path.join(ROOT, "res", "qblank.ico")
 TARGET = os.path.join(ROOT, "res", "vcam_icon.bin")
 
 

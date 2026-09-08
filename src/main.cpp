@@ -138,7 +138,7 @@ int FetchFfmpeg() {
   // surviving, so the log file is the dependable record of what happened.
   cap::LogInit(true);
   cap::LogWrite("INFO", "--fetch-ffmpeg gestartet");
-  std::printf("\nCapView: hole ffmpeg ...\n");
+  std::printf("\nqBlank: hole ffmpeg ...\n");
 
   cap::FfmpegDownloader downloader;
   if (!downloader.Start(cap::ExeDirectory() + L"ffmpeg")) {

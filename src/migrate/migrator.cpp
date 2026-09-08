@@ -862,7 +862,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
   wc.hInstance = instance;
   wc.hCursor = ::LoadCursorW(nullptr, IDC_ARROW);
   wc.lpszClassName = className.c_str();
-  wc.hIcon = ::LoadIconW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW));
+  wc.hIcon = ::LoadIconW(instance, MAKEINTRESOURCEW(IDI_QBLANK));
   wc.hIconSm = wc.hIcon;
   ::RegisterClassExW(&wc);
 

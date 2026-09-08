@@ -171,7 +171,7 @@ class FrameSink final : public IBaseFilter, public IAMFilterMiscFlags {
   std::atomic<bool> ended_{false};
 
   IFilterGraph* graph_ = nullptr;  // weak, per DirectShow rules
-  std::wstring name_ = L"CapView Frame Sink";
+  std::wstring name_ = L"qBlank Frame Sink";
   ComPtr<IReferenceClock> clock_;
 
   mutable std::mutex mutex_;

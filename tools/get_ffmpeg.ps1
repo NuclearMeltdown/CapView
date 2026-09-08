@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Holt ein statisches ffmpeg-Build und legt nur ffmpeg.exe neben CapView ab.
+  Holt ein statisches ffmpeg-Build und legt nur ffmpeg.exe neben qBlank ab.
 
 .DESCRIPTION
-  Genau die Schritte, die der Knopf in den CapView-Einstellungen ausfuehrt:
+  Genau die Schritte, die der Knopf in den qBlank-Einstellungen ausfuehrt:
   Archiv herunterladen, pruefen, eine einzige Datei herausziehen, Archiv
   loeschen, Ergebnis verifizieren.
 
@@ -38,7 +38,7 @@ $ErrorActionPreference = 'Stop'
 # Gegen die Alternative BtbN win64-gpl gemessen: 106 statt 163 MB Archiv, 98
 # statt 139 MB entpackt, und beide enthalten dieselben Encoder. In essentials
 # sind h264/hevc/av1 fuer NVENC, QuickSync und AMF einkompiliert, dazu x264 und
-# x265. "full" bringt nur weitere externe Bibliotheken, die CapView nicht nutzt.
+# x265. "full" bringt nur weitere externe Bibliotheken, die qBlank nicht nutzt.
 $Url = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
 
 if (-not $Target) {
@@ -92,7 +92,7 @@ Write-Host "  $Url"
 Write-Host "  Ziel: $exePath"
 
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
-$archive = Join-Path ([System.IO.Path]::GetTempPath()) 'capview_ffmpeg.zip'
+$archive = Join-Path ([System.IO.Path]::GetTempPath()) 'qblank_ffmpeg.zip'
 
 Write-Host "`n=== 2/5  Herunterladen ==="
 # Fortschrittsanzeige aus: Invoke-WebRequest wird damit um ein Vielfaches
@@ -162,4 +162,4 @@ $output = & $exePath -hide_banner -version 2>&1
 if ($LASTEXITCODE -ne 0) { throw "ffmpeg.exe laesst sich nicht ausfuehren." }
 Write-Host "  $(@($output)[0])"
 Write-Host ("  {0:N1} MB auf der Platte" -f ((Get-Item $exePath).Length / 1MB))
-Write-Host "`nFertig. CapView findet das jetzt von allein."
+Write-Host "`nFertig. qBlank findet das jetzt von allein."

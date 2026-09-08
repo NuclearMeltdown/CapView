@@ -88,13 +88,13 @@ HRESULT MapFilter(bool add) {
 
   if (!add) {
     hr = mapper->UnregisterFilter(&CLSID_VideoInputDeviceCategory, cap::vcam::kFilterName,
-                                  cap::vcam::CLSID_CapViewFilter);
+                                  cap::vcam::CLSID_qBlankFilter);
     mapper->Release();
     return hr;
   }
 
   // The subtype is left open. What the pin actually offers depends on what
-  // CapView has in front of it right now, and pinning a list here would be a
+  // qBlank has in front of it right now, and pinning a list here would be a
   // second, staler answer to a question the pin already answers properly.
   REGPINTYPES types = {};
   types.clsMajorType = &MEDIATYPE_Video;
@@ -121,7 +121,7 @@ HRESULT MapFilter(bool add) {
   filter.cPins = 1;
   filter.rgPins = &pins;
 
-  hr = mapper->RegisterFilter(cap::vcam::CLSID_CapViewFilter, cap::vcam::kFilterName, nullptr,
+  hr = mapper->RegisterFilter(cap::vcam::CLSID_qBlankFilter, cap::vcam::kFilterName, nullptr,
                               &CLSID_VideoInputDeviceCategory, cap::vcam::kFilterName, &filter);
   mapper->Release();
   return hr;
@@ -140,7 +140,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID) {
 STDAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void** out) {
   if (!out) return E_POINTER;
   *out = nullptr;
-  if (clsid != cap::vcam::CLSID_CapViewFilter) return CLASS_E_CLASSNOTAVAILABLE;
+  if (clsid != cap::vcam::CLSID_qBlankFilter) return CLASS_E_CLASSNOTAVAILABLE;
   return cap::vcam::CreateFilterClassFactory(riid, out);
 }
 
@@ -166,7 +166,7 @@ STDAPI DllRegisterServer() {
   if (status != ERROR_SUCCESS) return SELFREG_E_CLASS;
 
   // regsvr32 has already initialised COM for this thread, but the camera is
-  // also installed from CapView's own elevated helper, so this does not assume.
+  // also installed from qBlank's own elevated helper, so this does not assume.
   const HRESULT initialised = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   const HRESULT hr = MapFilter(true);
   if (SUCCEEDED(hr)) RemoveLegacyRegistration();

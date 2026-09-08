@@ -86,7 +86,7 @@ LRESULT CALLBACK SettingsHost::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 // One frame from inside the modal loop.
 //
 // Dragging a window puts Windows into a loop of its own that does not return
-// until the mouse is released, so CapView's own loop stops running and the
+// until the mouse is released, so qBlank's own loop stops running and the
 // preview stops with it. The only way back in is from a message this window
 // receives while that loop is running.
 // Kein Takt mehr an dieser Stelle -- und das ist der dritte Anlauf.
@@ -168,10 +168,10 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   wc.hCursor = ::LoadCursorW(nullptr, IDC_ARROW);
   // The same icon as the preview. Without it the taskbar button this window now
   // has -- and its Alt+Tab entry -- would show the generic placeholder.
-  wc.hIcon = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON,
+  wc.hIcon = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_QBLANK), IMAGE_ICON,
                                  ::GetSystemMetrics(SM_CXICON), ::GetSystemMetrics(SM_CYICON),
                                  LR_DEFAULTCOLOR);
-  wc.hIconSm = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON,
+  wc.hIconSm = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_QBLANK), IMAGE_ICON,
                                    ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON),
                                    LR_DEFAULTCOLOR);
   wc.lpszClassName = kClassName.c_str();

@@ -191,7 +191,7 @@ void DrawStatsPanel(const OverlayStats& s) {
     //
     // Sie heisst nicht mehr Bildalter, weil sie es nie war. Sie misst die
     // Strecke von der Ankunft eines Bildes bis zu dem Augenblick, in dem es
-    // CapView verlaesst -- und nur die. Was die Karte davor gebraucht hat und
+    // qBlank verlaesst -- und nur die. Was die Karte davor gebraucht hat und
     // was der Schirm danach noch tut, kann von hier aus niemand messen.
     if (s.frameAge.valid) {
       std::string age = Decimal(s.frameAge.average, 1) + " ms";

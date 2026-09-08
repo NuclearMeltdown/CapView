@@ -9,16 +9,16 @@
 // It loads the DLL by path rather than by CLSID on purpose. Testing must not
 // depend on an installation, and an installation needs administrator rights.
 //
-//   capview_vcam_test.exe [--size WxH] [--fps N] [--p010] [--seconds N]
+//   qblank_vcam_test.exe [--size WxH] [--fps N] [--p010] [--seconds N]
 //                         [--dump file.nv12] [--caps-only]
-//   capview_vcam_test.exe --produce [--size WxH] [--fps N] [--p010] [--seconds N]
+//   qblank_vcam_test.exe --produce [--size WxH] [--fps N] [--p010] [--seconds N]
 //
 // Without --size it connects to whatever the filter offers first, which is the
 // source's own shape -- the same path OBS takes.
 //
-// --produce stands in for CapView: it publishes a moving pattern into the same
-// shared section CapView publishes into, so the reading half can be exercised
-// without a capture card, without an installed camera, and without CapView
+// --produce stands in for qBlank: it publishes a moving pattern into the same
+// shared section qBlank publishes into, so the reading half can be exercised
+// without a capture card, without an installed camera, and without qBlank
 // running at all. It is written straight against vcam_shared.h rather than
 // against VirtualCamera on purpose -- an independent second implementation of
 // the same contract. Where the two agree, the contract is unambiguous.
@@ -388,7 +388,7 @@ bool BuildRequest(AM_MEDIA_TYPE* mt, bool wide, int width, int height, double fp
 
 // ------------------------------------------------------------- the producer
 
-// CapView's half of the contract, written again from the header alone.
+// qBlank's half of the contract, written again from the header alone.
 int RunProducer(int width, int height, double fps, bool wide, int seconds) {
   namespace vc = cap::vcam;
 
@@ -598,7 +598,7 @@ int wmain(int argc, wchar_t** argv) {
 
   ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
-  const std::wstring dll = ExeFolder() + L"capview_vcam.dll";
+  const std::wstring dll = ExeFolder() + L"qblank_vcam.dll";
   IBaseFilter* filter = CreateFilter(dll.c_str());
   if (!filter) return 1;
 
@@ -707,7 +707,7 @@ int wmain(int argc, wchar_t** argv) {
   ::printf("%ld samples in %.3f s of stream time (%.4g fps)\n", sink->received(), span,
            span > 0.0 ? sink->received() / span : 0.0);
   ::printf("luma %u..%u, mean %u -- %s\n", sink->lumaLow(), sink->lumaHigh(), sink->lumaMean(),
-           sink->moving() > 0 ? "a picture" : "flat (blank, or CapView is not publishing)");
+           sink->moving() > 0 ? "a picture" : "flat (blank, or qBlank is not publishing)");
 
   pin->Disconnect();
   sink->Release();

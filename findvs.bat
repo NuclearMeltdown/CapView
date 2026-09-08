@@ -8,7 +8,7 @@ if not exist "%VSWHERE%" (
   exit /b 1
 )
 
-set "VSLIST=%TEMP%\capview_vspath.txt"
+set "VSLIST=%TEMP%\qblank_vspath.txt"
 "%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath > "%VSLIST%"
 
 set "VSPATH="

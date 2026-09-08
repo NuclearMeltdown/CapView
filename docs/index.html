@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CapView — low-latency capture card viewer for Windows</title>
+<title>qBlank — low-latency capture card viewer for Windows</title>
 <meta name="description" content="A low-latency viewer and recorder for DirectShow capture cards on Windows. Play on your capture card instead of only watching it.">
 <link rel="icon" href="icon.png">
-<meta property="og:title" content="CapView">
+<meta property="og:title" content="qBlank">
 <meta property="og:description" content="Play on your capture card, don't just watch it. 1080p60 at about one millisecond.">
-<meta property="og:image" content="https://nuclearmeltdown.github.io/CapView/viewer.jpg">
+<meta property="og:image" content="https://nuclearmeltdown.github.io/qBlank/viewer.jpg">
 <style>
 :root{
   color-scheme:dark;
@@ -167,7 +167,7 @@ footer .made{margin-top:18px}
 // of the other theme.
 (function(){
   try {
-    var t = localStorage.getItem('capview-theme');
+    var t = localStorage.getItem('qblank-theme');
     if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
   } catch (e) {}
 })();
@@ -182,12 +182,12 @@ footer .made{margin-top:18px}
 <header>
   <div class="wrap">
     <img class="logo" src="icon.png" alt="">
-    <h1>CapView</h1>
+    <h1>qBlank</h1>
     <p class="tag">A low-latency viewer and recorder for DirectShow capture cards on&nbsp;Windows. Built to be <em>played on</em>, not just watched.</p>
     <div class="cta">
-      <a class="btn btn-main" id="dl" href="https://github.com/NuclearMeltdown/CapView/releases/latest">Download the latest release</a>
-      <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/CapView">Source on GitHub</a>
-      <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/CapView/wiki">Documentation</a>
+      <a class="btn btn-main" id="dl" href="https://github.com/NuclearMeltdown/qBlank/releases/latest">Download the latest release</a>
+      <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/qBlank">Source on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/NuclearMeltdown/qBlank/wiki">Documentation</a>
     </div>
     <p class="sub">One file, about 2&nbsp;MB. No installer, nothing written to the registry.</p>
   </div>
@@ -196,13 +196,13 @@ footer .made{margin-top:18px}
 <section class="reveal">
   <div class="wrap">
     <div class="metric">
-      <div><b>~1 ms</b><span>through CapView, arrival to present</span></div>
+      <div><b>~1 ms</b><span>through qBlank, arrival to present</span></div>
       <div><b>1 file</b><span>no installer, no dependencies</span></div>
       <div><b>GPLv3</b><span>free and open source</span></div>
     </div>
     <figure>
-      <img src="viewer.jpg" alt="CapView in fullscreen showing a console at 1080p60, with the statistics overlay reading a frame age of 1.2 ms">
-      <figcaption>The viewer in fullscreen. The overlay is not a mock-up — it is CapView's own statistics panel reporting the source format, the measured rate and, at the bottom, the time a frame spends inside CapView.</figcaption>
+      <img src="viewer.jpg" alt="qBlank in fullscreen showing a console at 1080p60, with the statistics overlay reading a frame age of 1.2 ms">
+      <figcaption>The viewer in fullscreen. The overlay is not a mock-up — it is qBlank's own statistics panel reporting the source format, the measured rate and, at the bottom, the time a frame spends inside qBlank.</figcaption>
     </figure>
   </div>
 </section>
@@ -210,13 +210,13 @@ footer .made{margin-top:18px}
 <section class="reveal">
   <div class="wrap">
     <h2><span class="num">01</span>Why it exists</h2>
-    <p class="lead">A capture card's picture normally arrives too late to play on. CapView takes the queue out of the path so the console on your desk behaves like a console on a television — while still recording, screenshotting and feeding a virtual camera.</p>
+    <p class="lead">A capture card's picture normally arrives too late to play on. qBlank takes the queue out of the path so the console on your desk behaves like a console on a television — while still recording, screenshotting and feeding a virtual camera.</p>
     <div class="grid">
       <div class="card"><h3>No queue in the capture path</h3><p>Frames are copied into a triple buffer and the filter returns at once. Anything arriving faster than it can be shown is dropped, never buffered, so delay cannot accumulate.</p></div>
       <div class="card"><h3>No graph clock</h3><p>The DirectShow graph runs without a reference clock, so nothing is held back waiting for a presentation time.</p></div>
       <div class="card"><h3>Tearing allowed</h3><p>A flip-model swap chain with one frame of queue and VSync off by default — the single biggest lever there is.</p></div>
       <div class="card"><h3>Conversion on the GPU</h3><p>YUY2, UYVY, NV12, planar 4:2:0, RGB and P010 are unpacked in a pixel shader. Nothing touches the CPU between arrival and drawing.</p></div>
-      <div class="card"><h3>And it shows you the bill</h3><p>The overlay times the one stretch CapView is answerable for: from a frame arriving to the present that hands it over. Upload, deinterlacing, filters, scaling and the wait for the flip are all inside that number. What the card did before, and what the panel does after, is nobody's to measure from in here &mdash; so it is not quietly folded in.</p></div>
+      <div class="card"><h3>And it shows you the bill</h3><p>The overlay times the one stretch qBlank is answerable for: from a frame arriving to the present that hands it over. Upload, deinterlacing, filters, scaling and the wait for the flip are all inside that number. What the card did before, and what the panel does after, is nobody's to measure from in here &mdash; so it is not quietly folded in.</p></div>
     </div>
   </div>
 </section>
@@ -224,7 +224,7 @@ footer .made{margin-top:18px}
 <section class="reveal">
   <div class="wrap">
     <h2><span class="num">02</span>It cleans up composite</h2>
-    <p class="lead">Composite carries colour and brightness on one wire and they leak into each other. Most viewers leave that alone. CapView removes it in real time, and the numbers behind every setting were measured on real hardware rather than guessed.</p>
+    <p class="lead">Composite carries colour and brightness on one wire and they leak into each other. Most viewers leave that alone. qBlank removes it in real time, and the numbers behind every setting were measured on real hardware rather than guessed.</p>
     <figure>
       <img src="composite-before-after.png" alt="The same GameCube frame over composite: filter off on the left, dot crawl beading along every letter edge and across the colour bars, the four-frame average on and clean on the right">
       <figcaption>A GameCube over composite at 576i, filter off and on. The crop was not chosen by eye — it is where the measured difference between the two frames is largest across the parts of the picture that stand still.</figcaption>
@@ -252,13 +252,13 @@ footer .made{margin-top:18px}
 <section class="reveal">
   <div class="wrap">
     <h2><span class="num">04</span>It works out the video standard on its own</h2>
-    <p class="lead">An analogue decoder has to be told whether it is looking at PAL, NTSC or SECAM, and getting it wrong costs you either the picture or the colour. Leave it on automatic and CapView finds it &mdash; and keeps finding it, so switching a console between 50 and 60&nbsp;Hz needs nothing from you.</p>
+    <p class="lead">An analogue decoder has to be told whether it is looking at PAL, NTSC or SECAM, and getting it wrong costs you either the picture or the colour. Leave it on automatic and qBlank finds it &mdash; and keeps finding it, so switching a console between 50 and 60&nbsp;Hz needs nothing from you.</p>
     <div class="grid">
       <div class="card"><h3>The card is only half the answer</h3><p>All a decoder reports is whether it has locked, and that is about line frequency. PAL&nbsp;60, NTSC&nbsp;M, PAL&nbsp;M and NTSC&nbsp;4.43 all lock on the same 525 lines, and it reports the wrong one just as confidently.</p></div>
       <div class="card"><h3>So the picture decides</h3><p>The candidates are compared on what they actually produce: how much colour there is, and whether black stays black. Decoding PAL as SECAM does not give a grey picture &mdash; it gives a bright red one where black should be, and that is what the second measurement catches.</p></div>
       <div class="card"><h3>Two seconds, from wrong to confirmed</h3><p>Measured against a GameCube at 60&nbsp;Hz, starting from a deliberately wrong standard: 1.7 to 2.4&nbsp;seconds, where the same path used to take six. The lock costs a third of a second, and every candidate after it is measured for only as long as its reading takes to stand still &mdash; instead of all of them waiting out whatever the slowest one needs.</p></div>
       <div class="card"><h3>It does not sit out the wrong ones</h3><p>A standard with the wrong line count never locks; it only uses up its deadline. So the list is walked quickly first and patiently only if that finds nothing &mdash; nothing is ruled out for good, and the common case, a console switched between 50 and 60&nbsp;Hz, is over in a fraction of the time.</p></div>
-      <div class="card"><h3>Two standards on one carrier</h3><p>PAL&nbsp;60 and NTSC&nbsp;4.43 carry colour at the same frequency and differ only in that PAL reverses the phase every other line. The wrong one of the pair does not decode nonsense &mdash; it decodes <em>less</em>, so counting colour rewards it for the omission. CapView measures the reversal itself instead, and drops the standard that fights the signal.</p></div>
+      <div class="card"><h3>Two standards on one carrier</h3><p>PAL&nbsp;60 and NTSC&nbsp;4.43 carry colour at the same frequency and differ only in that PAL reverses the phase every other line. The wrong one of the pair does not decode nonsense &mdash; it decodes <em>less</em>, so counting colour rewards it for the omission. qBlank measures the reversal itself instead, and drops the standard that fights the signal.</p></div>
       <div class="card"><h3>Or ask it yourself</h3><p>F7 runs both stages again on the picture in front of you &mdash; the one case the automatic search cannot see, because colour that is <em>wrong</em> is still colour. It takes under two seconds, and it tells you what it found either way.</p></div>
       <div class="card"><h3>And the format follows from it</h3><p>A card advertises the same list whatever is plugged into it &mdash; this one offers everything up to 1920&times;1080 at 60&nbsp;Hz with a PAL composite cable in front of it. Once the standard is known the raster is too, so the resolution offered by default is capped to what is really arriving instead of upscaling a console to 1080p inside the card. The rate list gains a mode to match: <em>the signal's rate</em>, 50 under PAL, 59.94 under NTSC, a flat 60 under PAL&nbsp;60 &mdash; worked out afresh every time the card is opened rather than written down as a number that the next mode change makes wrong.</p></div>
       <div class="card"><h3>It knows when not to guess</h3><p>A comparison needs a picture to compare on. If the scene moves during the round, or the screen is essentially black, the round is thrown out rather than believed &mdash; a wrong answer held confidently is worse than waiting a moment.</p></div>
@@ -283,7 +283,7 @@ footer .made{margin-top:18px}
       <img src="crt-mask.png" alt="Three panels magnified to the pixel: mask off, an aperture grille with its vertical stripes, and a shadow mask whose triads step sideways every other row">
       <figcaption>Magnified to the pixel, because a triad is three of them. An aperture grille is vertical stripes, the way a Trinitron worked; a shadow mask steps its triads sideways every other line. Both stop at half strength &mdash; past that the brightness compensation has to lift the peak far enough to clip the channels apart from one another, and what arrives is a colour cast rather than a stronger effect.</figcaption>
     </figure>
-    <div class="note">Both pictures were made by running the shader's own <code>Scanline()</code> and <code>Mask()</code> over a still, rather than photographed off the screen: the effects are display-only by design, so a screenshot taken inside CapView does not contain them.</div>
+    <div class="note">Both pictures were made by running the shader's own <code>Scanline()</code> and <code>Mask()</code> over a still, rather than photographed off the screen: the effects are display-only by design, so a screenshot taken inside qBlank does not contain them.</div>
   </div>
 </section>
 
@@ -318,7 +318,7 @@ footer .made{margin-top:18px}
 <footer>
   <div class="wrap row">
     <div>GPLv3 licensed · Dear ImGui is MIT · ffmpeg is fetched from upstream and run as a child process</div>
-    <div><a href="https://github.com/NuclearMeltdown/CapView">GitHub</a> · <a href="https://github.com/NuclearMeltdown/CapView/wiki">Wiki</a> · <a href="https://github.com/NuclearMeltdown/CapView/releases">Releases</a></div>
+    <div><a href="https://github.com/NuclearMeltdown/qBlank">GitHub</a> · <a href="https://github.com/NuclearMeltdown/qBlank/wiki">Wiki</a> · <a href="https://github.com/NuclearMeltdown/qBlank/releases">Releases</a></div>
   </div>
   <div class="wrap made">Written with the help of <a href="https://claude.ai">Claude</a>.</div>
 </footer>
@@ -352,7 +352,7 @@ footer .made{margin-top:18px}
   btn.addEventListener('click', function(){
     var next = current() === 'dark' ? 'light' : 'dark';
     root.setAttribute('data-theme', next);
-    try { localStorage.setItem('capview-theme', next); } catch (e) {}
+    try { localStorage.setItem('qblank-theme', next); } catch (e) {}
     paint();
   });
   if (light.addEventListener) light.addEventListener('change', paint);
@@ -376,7 +376,7 @@ footer .made{margin-top:18px}
 
 // Name the newest release on the download button, so it says what you get.
 // Falls back silently to the generic /releases/latest link.
-fetch('https://api.github.com/repos/NuclearMeltdown/CapView/releases/latest')
+fetch('https://api.github.com/repos/NuclearMeltdown/qBlank/releases/latest')
   .then(function(r){ return r.ok ? r.json() : null; })
   .then(function(j){
     if (!j) return;

@@ -288,10 +288,10 @@ bool App::CreateMainWindow(HINSTANCE instance, int showCmd) {
   wc.hbrBackground = nullptr;  // we paint every pixel ourselves
   wc.lpszClassName = kWindowClass.c_str();
   // Large icon for Alt+Tab, small one for the title bar and taskbar.
-  wc.hIcon = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON,
+  wc.hIcon = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_QBLANK), IMAGE_ICON,
                                  ::GetSystemMetrics(SM_CXICON),
                                  ::GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
-  wc.hIconSm = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON,
+  wc.hIconSm = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_QBLANK), IMAGE_ICON,
                                    ::GetSystemMetrics(SM_CXSMICON),
                                    ::GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
   if (!wc.hIcon) wc.hIcon = ::LoadIconW(nullptr, IDI_APPLICATION);
@@ -642,7 +642,7 @@ bool App::ReleaseStandardBoundFormat(int newLines) {
 // anderes anliegt.
 //
 // Geraet und Eingang bleiben stehen. Die hat jemand ausgesucht; Norm und Format
-// hat CapView gemessen oder geraten, und Gemessenes darf weg.
+// hat qBlank gemessen oder geraten, und Gemessenes darf weg.
 void App::ReinitialiseCard() {
   StopCapture();
 
@@ -2206,7 +2206,7 @@ void App::UpdateVideoStandard() {
     // selbst. Ein PAL-60-GameCube wurde so zuverlaessig als NTSC 4.43 erkannt.
     // Die Pause dauert laenger als eine Runde, das traf also die Mehrzahl der
     // Faelle -- und zwar genau den haeufigsten Ablauf ueberhaupt, naemlich
-    // CapView zuerst starten und die Konsole danach.
+    // qBlank zuerst starten und die Konsole danach.
     //
     // Der erste Kandidat ist bauartbedingt die beste Vermutung: der Partner der
     // zuletzt eingerasteten Norm, sonst die haeufigste ueberhaupt. Ein Irrtum
@@ -2457,7 +2457,7 @@ void App::VerifyStandardColour(int64_t now) {
   // Um wie viel mehr Farbe der Kandidat mit den schmutzigeren Tiefen haben
   // muss, damit die Tiefenregel darueber nicht mehr entscheidet.
   //
-  // Die Messreihe oben hat einen blinden Fleck, und der hat CapView zwei
+  // Die Messreihe oben hat einen blinden Fleck, und der hat qBlank zwei
   // Rundgaenge lang die falsche Norm eingestellt. Sie besteht ganz aus
   // SECAM B gegen PAL B -- ein falscher Traeger, der Farbe *erfindet*: mehr
   // Farbe als die richtige Norm und dazu eingefaerbte Tiefen. Gegen den ist
@@ -3441,7 +3441,7 @@ void App::LoadIdleIcon() {
   if (idleIcon_ || !d3d_.device()) return;
 
   const int want = 256;
-  HICON icon = (HICON)::LoadImageW(instance_, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON, want,
+  HICON icon = (HICON)::LoadImageW(instance_, MAKEINTRESOURCEW(IDI_QBLANK), IMAGE_ICON, want,
                                    want, LR_DEFAULTCOLOR);
   if (!icon) return;
 
@@ -4153,7 +4153,7 @@ void App::UpdateCropForFormat() {
 // zwar von etwas, das der Nutzer nicht angefasst hat.
 //
 // Die Schleife ist die eigentliche Gefahr: schaltet Profil A nach B und B nach
-// A, wechselt CapView im Sekundentakt zwischen zwei Graphen. Drei Bedingungen
+// A, wechselt qBlank im Sekundentakt zwischen zwei Graphen. Drei Bedingungen
 // schliessen sie aus. Passt die Regel des *aktiven* Profils schon, geschieht
 // nichts -- dann ist das Ziel erreicht, ganz gleich, wie viele andere Profile
 // dieselbe Norm beanspruchen. Ein Ziel mit fester Norm scheidet aus, weil dort
@@ -4228,11 +4228,11 @@ bool App::SourceIsAnalogue() const {
 // Die Karte weiss es, wo sie ihre Eingaenge ueberhaupt offenlegt:
 // `EnumerateCrossbarInputs` liest den physischen Typ jedes Eingangs mit aus --
 // aus dem Crossbar, wo es einen gibt, sonst aus dem privaten Selektor des
-// Herstellers, wenn CapView ihn kennt (die SA7160 hat so einen).
+// Herstellers, wenn qBlank ihn kennt (die SA7160 hat so einen).
 //
 // Gefragt wird zuerst nach dem eingestellten Eingang und, wo keiner eingestellt
 // ist, nach dem, auf dem die Karte tatsaechlich steht. Das ist nicht dasselbe:
-// "Nicht aendern" heisst, dass CapView den Selektor in Ruhe laesst, nicht dass
+// "Nicht aendern" heisst, dass qBlank den Selektor in Ruhe laesst, nicht dass
 // niemand wuesste, wo er steht. Nur wenn beides nichts hergibt, bleibt die
 // Annahme.
 //
@@ -5173,7 +5173,7 @@ void App::RenderFrame() {
   d3d_.EndFrame(config_.app.vsync);
 
   // ---- Durchlaufzeit ----
-  // Erst hier, weil erst hier feststeht, wann das Bild CapView verlaesst.
+  // Erst hier, weil erst hier feststeht, wann das Bild qBlank verlaesst.
   // Gemessen wird die Strecke, fuer die dieses Programm geradesteht: von der
   // Ankunft in der Senke bis zu dem Augenblick, in dem Present zurueckkehrt und
   // das Bild dem Compositor gehoert. Alles dazwischen zaehlt mit -- das
@@ -5184,7 +5184,7 @@ void App::RenderFrame() {
   // Was davor liegt (Halbbildaufnahme, Karte, Treiber, Transport) und was
   // danach kommt (Compositor, Kabel, die Elektronik des Schirms), ist von hier
   // aus nicht messbar und deshalb auch nicht enthalten. Die Zahl ist der
-  // Beitrag von CapView, nicht das Alter des Lichts.
+  // Beitrag von qBlank, nicht das Alter des Lichts.
   //
   // Vorher stand hier die Ankunftszeit gegen den Zeichenbeginn, und weil die
   // Schleife auf das Bildereignis wartet, war das fast immer dieselbe Zehntel
@@ -5579,7 +5579,7 @@ void App::DrawUi() {
   // context's NewFrame and Render, and presenting a second swapchain in the
   // middle of another window's frame flushes every bit of GPU work already
   // queued for it -- sixty times a second, while the preview runs at twice that
-  // or more. That was not merely CapView stuttering; it was enough to make the
+  // or more. That was not merely qBlank stuttering; it was enough to make the
   // desktop's own cursor stutter. It happens after the present instead.
   if (!settingsAreWindowed()) {
     settings_.SetFillsWindow(false);
@@ -5607,7 +5607,7 @@ void App::DrawUi() {
 }
 
 void App::DrawContextMenu() {
-  if (!ImGui::BeginPopupContextVoid("capview_context", ImGuiPopupFlags_MouseButtonRight)) return;
+  if (!ImGui::BeginPopupContextVoid("qblank_context", ImGuiPopupFlags_MouseButtonRight)) return;
 
   // Shortcut labels come from the live bindings, so rebinding a key is visible
   // here immediately instead of leaving the menu quietly lying about it. The
@@ -5789,7 +5789,7 @@ void App::DrawContextMenu() {
 
   // Und die dritte Messung derselben Art. Sie steht hier vor allem deshalb,
   // weil sie sonst nur im Einstellungsfenster zu erreichen waere -- und wer im
-  // Treiber der Karte etwas umstellt, hat CapView im Ruecken, nicht offen.
+  // Treiber der Karte etwas umstellt, hat qBlank im Ruecken, nicht offen.
   if (ImGui::MenuItem(T("Wertebereich neu messen", "Measure range again"),
                       sc(HotkeyAction::RemeasureRange))) {
     RemeasureRange();

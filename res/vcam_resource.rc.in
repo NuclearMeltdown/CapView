@@ -3,7 +3,7 @@
 //
 // The filter travels inside the executable. It is a separate DLL because
 // DirectShow loads it into whichever program opened the camera rather than into
-// CapView, but shipping it as a separate file made the two able to disagree --
+// qBlank, but shipping it as a separate file made the two able to disagree --
 // and they did: Windows keeps
 // the file locked while the camera is in use anywhere on the machine, so
 // replacing it quietly failed and a new executable ended up talking to an old

@@ -1,13 +1,13 @@
-// CapView's virtual camera, as a DirectShow source filter.
+// qBlank's virtual camera, as a DirectShow source filter.
 //
 // The shape of this file follows the shape of DirectShow: a filter that owns
 // one output pin, the pin that negotiates a format and pushes samples, and the
 // two enumerators the graph insists on. Everything else is the reader that
-// takes pictures out of CapView's shared section and the scaler that fits them
+// takes pictures out of qBlank's shared section and the scaler that fits them
 // to whatever the consumer asked for.
 //
 // The scaling happens here, in the consumer's process, and that is the point of
-// the whole exercise. CapView publishes the source once, at its own size and
+// the whole exercise. qBlank publishes the source once, at its own size and
 // rate, and each consumer is served from that: OBS takes it untouched, Discord
 // gets it fitted into 1280x720, and neither of them costs the other anything.
 
@@ -27,7 +27,7 @@ namespace cap {
 namespace vcam {
 
 // {A326E6EC-3F70-468B-A826-4F9D42CB5C8E}
-const CLSID CLSID_CapViewFilter = {
+const CLSID CLSID_qBlankFilter = {
     0xa326e6ec, 0x3f70, 0x468b, {0xa8, 0x26, 0x4f, 0x9d, 0x42, 0xcb, 0x5c, 0x8e}};
 
 namespace {
@@ -51,7 +51,7 @@ WORD BitsFor(uint32_t pixel) { return pixel == kPixelP010 ? 24 : 12; }
 
 // The fallback the camera stands in for when there is nothing to show: the
 // source's shape if we know it, otherwise a plain 720p frame. A consumer that
-// opens the camera before CapView is running still gets a working stream, which
+// opens the camera before qBlank is running still gets a working stream, which
 // is what every other virtual camera does and what applications expect.
 const uint32_t kIdleWidth = 1280;
 const uint32_t kIdleHeight = 720;
@@ -345,7 +345,7 @@ void FillPlane(S* dst, size_t dstStrideBytes, int w, int h, S value, int channel
 
 // --------------------------------------------------------------- pixel form
 //
-// CapView publishes one layout at a time -- whichever the source is -- and a
+// qBlank publishes one layout at a time -- whichever the source is -- and a
 // consumer negotiated its own before the source was necessarily known. Usually
 // they agree. When they do not, converting is the only thing that keeps a
 // picture on the screen, so it converts.
@@ -487,7 +487,7 @@ FitRect FitInto(uint32_t srcW, uint32_t srcH, uint32_t dstW, uint32_t dstH) {
 // ------------------------------------------------------------------- reader
 
 // The consumer's end of the shared section. One per filter instance, so no
-// locking against the other consumers -- the section is written by CapView and
+// locking against the other consumers -- the section is written by qBlank and
 // only ever read here.
 class FrameReader {
  public:
@@ -510,7 +510,7 @@ class FrameReader {
   ControlBlock* control() { return control_; }
 
   // Opens the control section if it is not open yet. Cheap to call often: when
-  // CapView is not running there is nothing to open and this is one failed
+  // qBlank is not running there is nothing to open and this is one failed
   // OpenFileMapping, which is why it is rate limited.
   bool EnsureControl() {
     if (control_) return true;
@@ -530,7 +530,7 @@ class FrameReader {
     }
     auto* cb = (ControlBlock*)controlView_;
     if (cb->magic != kMagic || cb->version != kVersion) {
-      // A CapView from a different build. Saying nothing and showing black is
+      // A qBlank from a different build. Saying nothing and showing black is
       // the one outcome worth avoiding, so the mapping is dropped and the
       // camera falls back to its idle picture, which at least moves.
       ::UnmapViewOfFile(controlView_);
@@ -667,7 +667,7 @@ class FrameReader {
     return true;
   }
 
-  // True while CapView is feeding the camera. What it separates is a picture
+  // True while qBlank is feeding the camera. What it separates is a picture
   // that is expected and momentarily missing -- a torn read, the moment before
   // the first frame -- from one that is not coming at all. The first deserves
   // black, because it lasts a frame or two. The second deserves an explanation.
@@ -888,9 +888,9 @@ class Filter : public IBaseFilter, public IAMFilterMiscFlags {
   IReferenceClock* clock() const { return clock_; }
   CRITICAL_SECTION* lock() { return &lock_; }
 
-  // The consumer table entry this instance owns, or null when CapView is not
+  // The consumer table entry this instance owns, or null when qBlank is not
   // running. Claimed lazily, because the filter is usually created before
-  // CapView has any idea anyone wants a picture.
+  // qBlank has any idea anyone wants a picture.
   ConsumerSlot* ClaimSlot(FrameReader* reader);
   void ReleaseSlot();
 
@@ -1079,7 +1079,7 @@ STDMETHODIMP Pin::QueryInterface(REFIID riid, void** out) {
 STDMETHODIMP_(ULONG) Pin::AddRef() { return owner_->AddRef(); }
 STDMETHODIMP_(ULONG) Pin::Release() { return owner_->Release(); }
 
-// What the source looks like right now, or the idle stand-in when CapView is
+// What the source looks like right now, or the idle stand-in when qBlank is
 // not running. Everything the pin offers is derived from this. `live` says
 // which of the two it was, because a real source and a stand-in are worth
 // offering differently: the first is a measurement, the second is a guess.
@@ -1143,9 +1143,9 @@ void Pin::BuildTypeList(std::vector<AM_MEDIA_TYPE>* out) {
   // the console had changed, because the list was not describing the source.
   // A camera that advertises only what it has cannot be pinned that way.
   //
-  // While CapView is not running there is no source to be smaller than, so the
+  // While qBlank is not running there is no source to be smaller than, so the
   // usual list is offered whole. A consumer that opens the camera before
-  // CapView starts should not be stuck at the stand-in's shape afterwards.
+  // qBlank starts should not be stuck at the stand-in's shape afterwards.
   const uint32_t ceilingW = live ? srcW : 1920;
   const uint32_t ceilingH = live ? srcH : 1080;
   for (const StdSize& s : kOfferedSizes) {
@@ -1690,7 +1690,7 @@ STDMETHODIMP_(ULONG) Filter::Release() {
 
 STDMETHODIMP Filter::GetClassID(CLSID* id) {
   if (!id) return E_POINTER;
-  *id = CLSID_CapViewFilter;
+  *id = CLSID_qBlankFilter;
   return S_OK;
 }
 

@@ -31,11 +31,11 @@ const COLORREF kGround = RGB(0x1A, 0x14, 0x2E);
 const COLORREF kTitleInk = RGB(0xEC, 0xE9, 0xF5);
 const COLORREF kSubtitleInk = RGB(0x9B, 0x93, 0xB0);
 
-// English only, deliberately. The language CapView is set to lives in CapView's
+// English only, deliberately. The language qBlank is set to lives in qBlank's
 // config, and the one thing that is certain when this picture is on screen is
-// that CapView is not there to be asked.
-const wchar_t kTitle[] = L"CapView is not running";
-const wchar_t kSubtitle[] = L"Start CapView and turn the virtual camera on";
+// that qBlank is not there to be asked.
+const wchar_t kTitle[] = L"qBlank is not running";
+const wchar_t kSubtitle[] = L"Start qBlank and turn the virtual camera on";
 
 // Something to take the address of, so the DLL can find its own module handle
 // without a global that DllMain has to set first.

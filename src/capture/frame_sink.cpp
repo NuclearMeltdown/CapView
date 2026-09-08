@@ -7,7 +7,7 @@ namespace cap {
 namespace {
 
 // {8E1C4A22-6B3F-4C1E-9E77-2F5B0A4D9C10}
-const GUID CLSID_CapViewFrameSink = {
+const GUID CLSID_qBlankFrameSink = {
     0x8e1c4a22, 0x6b3f, 0x4c1e, {0x9e, 0x77, 0x2f, 0x5b, 0x0a, 0x4d, 0x9c, 0x10}};
 
 const wchar_t kPinId[] = L"In";
@@ -370,7 +370,7 @@ ULONG FrameSink::Release() {
 
 HRESULT FrameSink::GetClassID(CLSID* clsid) {
   if (!clsid) return E_POINTER;
-  *clsid = CLSID_CapViewFrameSink;
+  *clsid = CLSID_qBlankFrameSink;
   return S_OK;
 }
 

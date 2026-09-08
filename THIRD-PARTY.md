@@ -1,6 +1,6 @@
 # Third-party components
 
-CapView itself is under the GNU General Public License, version 3 or later;
+qBlank itself is under the GNU General Public License, version 3 or later;
 see [LICENSE](LICENSE).
 
 ## Bundled in the source tree
@@ -17,10 +17,10 @@ into the executable beyond what Windows itself provides.
 ## Not bundled
 
 **ffmpeg** is not shipped and not linked. Where it is used — recording, and
-writing AVIF — CapView starts it as a separate process and talks to it over a
+writing AVIF — qBlank starts it as a separate process and talks to it over a
 pipe. It is fetched from upstream by the user, on the user's own terms, and it
 stays that way on purpose: having it at all is the user's decision, without it
-CapView is a single 2 MB file, and a bundled copy would age — the download
+qBlank is a single 2 MB file, and a bundled copy would age — the download
 fetches the current release build, a committed one would stay at the version it
 was committed at. Invoking a program is not linking against it, so the two
 remain separate works and neither licence reaches across.

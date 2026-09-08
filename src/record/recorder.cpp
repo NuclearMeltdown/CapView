@@ -370,14 +370,14 @@ bool Recorder::Start(const RecordSettings& settings, const FfmpegInfo& ffmpeg, i
   };
 
   if (audioRate_ > 0) {
-    audioPipe_ = makeAudioPipe(L"capview_audio_", &audioPipeName_);
+    audioPipe_ = makeAudioPipe(L"qblank_audio_", &audioPipeName_);
     if (!audioPipe_) {
       ::CloseHandle(videoRead);
       return fail(T("Audiopipe konnte nicht erstellt werden.", "Could not create the audio pipe."));
     }
   }
   if (micRate_ > 0) {
-    micPipe_ = makeAudioPipe(L"capview_mic_", &micPipeName_);
+    micPipe_ = makeAudioPipe(L"qblank_mic_", &micPipeName_);
     if (!micPipe_) {
       ::CloseHandle(videoRead);
       return fail(T("Mikrofonpipe konnte nicht erstellt werden.",

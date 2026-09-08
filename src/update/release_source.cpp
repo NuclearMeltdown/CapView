@@ -20,9 +20,9 @@ namespace {
 const ReleaseSource kSource = {
     L"api.github.com",
     L"/repositories/1340564357/releases/latest",
-    L"/repos/NuclearMeltdown/CapView/releases/latest",
-    "https://github.com/NuclearMeltdown/CapView/releases",
-    "https://nuclearmeltdown.github.io/CapView/",
+    L"/repos/NuclearMeltdown/qBlank/releases/latest",
+    "https://github.com/NuclearMeltdown/qBlank/releases",
+    "https://nuclearmeltdown.github.io/qBlank/",
 };
 
 // Named after the account rather than the program, because the account is the

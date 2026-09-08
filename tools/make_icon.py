@@ -1,9 +1,9 @@
-"""Generates res/capview.ico.
+"""Generates res/qblank.ico.
 
 The mark is a screen with a signal chevron inside it: two shapes, high
 contrast, no thin strokes. That is what survives being drawn at 16x16 in a
 taskbar, which is where this icon is seen most of the time. Deliberately not a
-record dot -- CapView does not record, and promising that in the icon would be
+record dot -- qBlank does not record, and promising that in the icon would be
 the first bug report.
 
 Pure standard library: writes uncompressed 32-bit BGRA icon images, which every
@@ -205,7 +205,7 @@ def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_dir = os.path.join(root, "res")
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "capview.ico")
+    out_path = os.path.join(out_dir, "qblank.ico")
 
     images = []
     largest = None

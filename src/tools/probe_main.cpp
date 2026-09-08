@@ -1,6 +1,6 @@
-// capview_probe: prints what CapView sees. Useful when a card behaves oddly --
+// qblank_probe: prints what qBlank sees. Useful when a card behaves oddly --
 // it lists every video device, the formats and inputs it reports, every audio
-// endpoint, and which audio endpoint CapView would pair with which card.
+// endpoint, and which audio endpoint qBlank would pair with which card.
 
 #include <mmdeviceapi.h>
 // Must come after mmdeviceapi.h: it needs the PROPERTYKEY macros pulled in there.
@@ -90,7 +90,7 @@ void PrintPropertyPages(const VideoDeviceInfo& info) {
 // queries the filter for an interface of its own, the proxy has no marshaller
 // for it, SetObjects returns an error and the frame comes up empty.
 //
-// Run with: capview_probe pages
+// Run with: qblank_probe pages
 void TestPropertyPages() {
   std::printf("========== Konfigurationsseiten im Detail ==========\n");
   for (const VideoDeviceInfo& d : EnumerateVideoDevices()) {
@@ -172,7 +172,7 @@ void TestPropertyPages() {
 // leaves the frame with its buttons and nothing in the middle, which is exactly
 // what "opens but is blank" looks like from the outside.
 //
-// Run with: capview_probe frame [ole|co] [pin]
+// Run with: qblank_probe frame [ole|co] [pin]
 struct FrameProbe {
   bool useOle = true;
   bool includePin = false;
@@ -264,7 +264,7 @@ void TestPropertyFrame(bool useOle, bool includePin) {
 // read-only values are the interesting part: whether it has locked onto a
 // signal, and how many lines it thinks it is receiving.
 //
-// Run with: capview_probe decoder
+// Run with: qblank_probe decoder
 void TestAnalogDecoder() {
   static const struct { long bit; const char* name; } kStandards[] = {
       {AnalogVideo_NTSC_M, "NTSC_M"},         {AnalogVideo_NTSC_M_J, "NTSC_M_J (Japan)"},
@@ -322,11 +322,11 @@ void TestAnalogDecoder() {
 }
 
 // Does get_NumberOfLines report the signal or merely echo the standard that was
-// set? That decides whether CapView can tell PAL from PAL-60 by itself or
+// set? That decides whether qBlank can tell PAL from PAL-60 by itself or
 // whether it has to be told. Sets two standards that cannot both be true of one
 // source and watches what comes back, then puts the card back as it was.
 //
-// Run with: capview_probe lines
+// Run with: qblank_probe lines
 void TestLineReporting() {
   for (const VideoDeviceInfo& d : EnumerateVideoDevices()) {
     ComPtr<IBaseFilter> filter = CreateFilterFromMoniker(d);
@@ -364,11 +364,11 @@ void TestLineReporting() {
 
 // Is the input selector reachable at all? IAMCrossbar is the documented way and
 // this card does not offer it, but a WDM driver can also carry the crossbar as a
-// KS property set on the filter itself. If that is there, CapView could list and
+// KS property set on the filter itself. If that is there, qBlank could list and
 // switch HDMI / component / composite by itself instead of sending people into
 // the vendor's dialog.
 //
-// Run with: capview_probe inputs
+// Run with: qblank_probe inputs
 void TestInputSelection() {
   for (const VideoDeviceInfo& d : EnumerateVideoDevices()) {
     ComPtr<IBaseFilter> filter = CreateFilterFromMoniker(d);
@@ -422,7 +422,7 @@ void TestInputSelection() {
   // ein eigener Filter in einer eigenen Kategorie, und ob der Graph-Builder ihn
   // von einem bestimmten Capture-Filter aus findet, ist eine andere Frage als
   // ob er ueberhaupt existiert. Ein Programm, das die Eingaenge einer Karte
-  // anzeigt, an der CapView "keine umschaltbaren Eingaenge" meldet, muss ihn
+  // anzeigt, an der qBlank "keine umschaltbaren Eingaenge" meldet, muss ihn
   // irgendwo herhaben.
   std::printf("\n================ Crossbar-Kategorie ================\n");
   const std::vector<VideoDeviceInfo> crossbars = EnumerateCrossbarDevices();
@@ -522,7 +522,7 @@ void PrintVideoDevices() {
                   e.granularityY);
     }
 
-    std::printf("    Auswahl, wie CapView sie anbietet:\n");
+    std::printf("    Auswahl, wie qBlank sie anbietet:\n");
     for (const std::string& sub : probed.caps.Subtypes()) {
       std::printf("      Format %s\n", sub.c_str());
       const std::vector<ResolutionOption> resolutions = probed.caps.Resolutions(sub);
@@ -554,7 +554,7 @@ void PrintVideoDevices() {
                   TransferFunctionName(colour.transferFunction),
                   colour.isHdrTransfer() ? "   <- HDR" : "");
     } else {
-      std::printf("    Farbbeschreibung: keine (CapView rät dann anhand der Bildhöhe)\n");
+      std::printf("    Farbbeschreibung: keine (qBlank rät dann anhand der Bildhöhe)\n");
     }
 
     FormatSel def = probed.caps.PickDefault();
@@ -594,7 +594,7 @@ const char* StateName(DWORD state) {
   }
 }
 
-// Raw dump straight from WASAPI, including endpoints CapView normally skips,
+// Raw dump straight from WASAPI, including endpoints qBlank normally skips,
 // so a card whose audio input is merely disabled is easy to spot.
 void PrintAllEndpoints(bool capture) {
   std::printf("================ WASAPI %s (alle Zustände) ================\n",
@@ -666,8 +666,8 @@ void PrintFfmpeg() {
   FfmpegInfo info = LocateFfmpeg({});
   if (!info.found) {
     std::printf("  nicht gefunden.\n");
-    std::printf("  Gesucht wurde: <CapView>\\ffmpeg\\bin, <CapView>\\ffmpeg,\n");
-    std::printf("                 <CapView>, dann PATH.\n");
+    std::printf("  Gesucht wurde: <qBlank>\\ffmpeg\\bin, <qBlank>\\ffmpeg,\n");
+    std::printf("                 <qBlank>, dann PATH.\n");
     std::printf("  Ohne ffmpeg ist die Aufnahme nicht verfügbar.\n\n");
     return;
   }
@@ -967,7 +967,7 @@ void WatchPropertySet(const std::string& guidText, const std::string& deviceMatc
 // own dialog just wrote, the driver keeps that value under the name
 // AnalogCrossbarVideoInputProperty, and AmaRecTV sets the same id on the same
 // set. What a read cannot answer is whether the driver accepts the write from
-// anyone other than its own property page, and CapView cannot offer an input
+// anyone other than its own property page, and qBlank cannot offer an input
 // list until it does. Reads the property, writes, reads it back.
 void SetOneProperty(const std::string& guidText, DWORD id, DWORD value,
                     const std::string& deviceMatch) {
@@ -1133,14 +1133,14 @@ LumaPlan PlanFor(const std::string& subtype) {
 // 16-235 to 0-255 afterwards. A stretch maps about 220 distinct inputs onto 256
 // outputs and leaves the other 36 codes unreachable, in a regular comb that
 // analogue noise does not fill; a gain change fills every bin. That difference
-// is visible here and nowhere else in CapView.
+// is visible here and nowhere else in qBlank.
 //
 // One way it can lie: a driver that dithers while stretching fills the gaps and
 // reads as a gain change.
 //
 // A screenshot cannot stand in for this. VideoRenderer's readback copies the
 // *rendered* picture -- after the shader, the range expansion and the
-// deinterlacer -- so it would show a comb CapView made rather than one the
+// deinterlacer -- so it would show a comb qBlank made rather than one the
 // driver made.
 void TestHistogram(const std::string& subtypeWanted, int framesWanted,
                    const std::string& nameWanted) {
@@ -1302,7 +1302,7 @@ void TestHistogram(const std::string& subtypeWanted, int framesWanted,
               occupied, gaps, highest - lowest + 1);
   std::printf("  unter 16: %.3f %%   über 235: %.3f %%\n", belowShare * 100.0,
               (double)above235 / (double)samples * 100.0);
-  std::printf("  CapViews Regel (>0,2 %% unter 16): %s\n",
+  std::printf("  qBlanks Regel (>0,2 %% unter 16): %s\n",
               belowShare > 0.002 ? "voll 0-255" : "begrenzt 16-235");
 
   if (borderSamples > 0) {
@@ -1426,7 +1426,7 @@ int main(int argc, char** argv) {
 
   if (argc > 1 && std::string(argv[1]) == "propsets") {
     if (argc < 3) {
-      std::printf("Aufruf: capview_probe propsets <Treiberdatei oder -ordner> [Gerätename]\n");
+      std::printf("Aufruf: qblank_probe propsets <Treiberdatei oder -ordner> [Gerätename]\n");
       return 1;
     }
     FindPrivatePropertySets(argv[2], argc > 3 ? argv[3] : "SA7160");
@@ -1435,7 +1435,7 @@ int main(int argc, char** argv) {
 
   if (argc > 1 && std::string(argv[1]) == "propget") {
     if (argc < 3) {
-      std::printf("Aufruf: capview_probe propget {GUID} [Gerätename]\n");
+      std::printf("Aufruf: qblank_probe propget {GUID} [Gerätename]\n");
       return 1;
     }
     DumpPropertySet(argv[2], argc > 3 ? argv[3] : "SA7160");
@@ -1444,7 +1444,7 @@ int main(int argc, char** argv) {
 
   if (argc > 1 && std::string(argv[1]) == "propwatch") {
     if (argc < 3) {
-      std::printf("Aufruf: capview_probe propwatch {GUID} [Gerätename]\n");
+      std::printf("Aufruf: qblank_probe propwatch {GUID} [Gerätename]\n");
       return 1;
     }
     WatchPropertySet(argv[2], argc > 3 ? argv[3] : "SA7160");
@@ -1453,7 +1453,7 @@ int main(int argc, char** argv) {
 
   if (argc > 1 && std::string(argv[1]) == "propset") {
     if (argc < 5) {
-      std::printf("Aufruf: capview_probe propset {GUID} <id> <wert> [Gerätename]\n");
+      std::printf("Aufruf: qblank_probe propset {GUID} <id> <wert> [Gerätename]\n");
       return 1;
     }
     SetOneProperty(argv[2], (DWORD)std::strtoul(argv[3], nullptr, 0),

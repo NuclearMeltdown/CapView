@@ -1,12 +1,12 @@
 #pragma once
 
-// The DirectShow source filter behind CapView's virtual camera.
+// The DirectShow source filter behind qBlank's virtual camera.
 //
-// This half does not run inside CapView. DirectShow creates it inside whichever
+// This half does not run inside qBlank. DirectShow creates it inside whichever
 // application opened the camera, so there is one of these per consumer, each
 // negotiating its own format and each living exactly as long as that
 // application keeps the camera open. It takes pictures out of the shared
-// section described in vcam_shared.h and knows nothing else about CapView.
+// section described in vcam_shared.h and knows nothing else about qBlank.
 //
 // Written against the raw interfaces rather than the DirectShow base classes.
 // Those ship as sample source rather than a library in current SDKs, and
@@ -21,7 +21,7 @@ namespace vcam {
 
 // The COM class DirectShow instantiates. Matches kFilterClsidString.
 // {A326E6EC-3F70-468B-A826-4F9D42CB5C8E}
-extern const CLSID CLSID_CapViewFilter;
+extern const CLSID CLSID_qBlankFilter;
 
 // Hands out Filter instances. Returned by DllGetClassObject.
 HRESULT CreateFilterClassFactory(REFIID riid, void** out);

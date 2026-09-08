@@ -1,13 +1,24 @@
 # Build output. Everyone builds their own with build.bat, or takes a release.
 build/
-/CapView.exe
-/capview_vcam.dll
+/qBlank.exe
+/qblank_vcam.dll
 # Written out of the exe when the camera is installed; the hash is per build.
-/capview_vcam_*.dll
-/capview_vcam.dll.old*
-/capview_probe.exe
+/qblank_vcam_*.dll
+/qblank_vcam.dll.old*
+/qblank_probe.exe
 
-# Settings are per machine and hold device names and paths.
+# What a build under the old name leaves behind, next to a working copy that has
+# already been renamed: the migrator's output, an executable this build renames
+# on its first start, the camera DLLs from before the prefix changed.
+/CapView.exe
+/CapView.exe.old*
+/capview_vcam*.dll*
+
+# Settings are per machine and hold device names and paths. Both names, because
+# a settings file written under the old one is adopted rather than replaced.
+qBlank.json
+qBlank.json.bak*
+qBlank.log
 CapView.json
 CapView.json.bak*
 CapView.log

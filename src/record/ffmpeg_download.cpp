@@ -269,7 +269,7 @@ void FfmpegDownloader::Run(std::wstring targetFolder, bool versionOnly) {
   SetMessage(T("Lade ffmpeg herunter ...", "Downloading ffmpeg ..."));
   wchar_t tempDir[MAX_PATH] = {};
   ::GetTempPathW(MAX_PATH, tempDir);
-  const std::wstring archive = std::wstring(tempDir) + L"capview_ffmpeg.zip";
+  const std::wstring archive = std::wstring(tempDir) + L"qblank_ffmpeg.zip";
 
   {
     WinHttpHandles h;

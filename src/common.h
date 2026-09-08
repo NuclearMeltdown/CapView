@@ -35,7 +35,7 @@ std::string Format(const char* fmt, ...);
 
 // ---------------------------------------------------------------------- logging
 
-// Writes to the debugger and, if enabled, to CapView.log next to the exe.
+// Writes to the debugger and, if enabled, to qBlank.log next to the exe.
 void LogInit(bool toFile);
 void LogWrite(const char* level, const char* fmt, ...);
 
@@ -59,14 +59,14 @@ std::string HrToString(HRESULT hr);
 // GitHub, so it has to line up with how those are named -- "v1.1" there against
 // "1.1" here.
 //
-// Set by CMake from project(CapView VERSION ...), which is also where the
+// Set by CMake from project(qBlank VERSION ...), which is also where the
 // version resource in the executable comes from. Deliberately no fallback: a
 // default here would be a second place the number can live, and the point is
 // that there is only one.
-#ifndef CAPVIEW_VERSION
-#error "CAPVIEW_VERSION comes from CMake -- configure the build rather than compiling by hand."
+#ifndef QBLANK_VERSION
+#error "QBLANK_VERSION comes from CMake -- configure the build rather than compiling by hand."
 #endif
-inline const char* kAppVersion = CAPVIEW_VERSION;
+inline const char* kAppVersion = QBLANK_VERSION;
 
 // Creates a directory and every missing parent. True when it exists afterwards.
 bool EnsureFolder(const std::wstring& path);

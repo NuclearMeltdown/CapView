@@ -256,7 +256,7 @@ std::vector<CrossbarInput> EnumerateCrossbarInputs(ICaptureGraphBuilder2* builde
 bool RouteCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilter, int index);
 
 // Which input the card is on right now, as an index into the list above, or -1
-// when it cannot be read. Not the same question as which input CapView chose:
+// when it cannot be read. Not the same question as which input qBlank chose:
 // the card keeps its own setting, and until something writes to it that setting
 // is whatever the vendor's property page or the last program left behind.
 int CurrentCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFilter);
@@ -265,7 +265,7 @@ int CurrentCrossbarInput(ICaptureGraphBuilder2* builder, IBaseFilter* captureFil
 // something hanging off a capture filter. A WDM crossbar is a filter in its own
 // right, in its own category, and a driver is free to register one without the
 // graph builder ever finding it from the capture filter. Diagnostic only --
-// nothing in CapView routes through this yet.
+// nothing in qBlank routes through this yet.
 std::vector<VideoDeviceInfo> EnumerateCrossbarDevices();
 
 // Everything registered in one device category, by its GUID. EnumerateVideoDevices
@@ -330,7 +330,7 @@ bool SetVideoStandard(IBaseFilter* filter, long standard);
 // us, so a decoder sitting on a lifted black level or a contrast boost means
 // there is no clean picture anywhere in the program to go back to -- and the
 // damage is the kind that cannot be undone afterwards, because it has already
-// clipped. CapView does these four in the shader instead, where the original is
+// clipped. qBlank does these four in the shader instead, where the original is
 // still there underneath and a recording can be made without them.
 //
 // Silent when the card has no such controls, which a pure HDMI input usually

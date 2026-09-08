@@ -1,6 +1,6 @@
 #pragma once
 
-// What CapView and the virtual camera's DirectShow filter agree on.
+// What qBlank and the virtual camera's DirectShow filter agree on.
 //
 // The two do not run in the same process, but from Windows' point of view they
 // are the same user in the same session: DirectShow instantiates the filter
@@ -9,7 +9,7 @@
 // difference from the Media Foundation source that used to sit here, which
 // Windows loaded into the Frame Server service in session 0. Everything under
 // Local\ follows from it: no SeCreateGlobalPrivilege, no service to restart,
-// and CapView creates the shared objects itself instead of waiting for a
+// and qBlank creates the shared objects itself instead of waiting for a
 // service to do it first.
 //
 // It also means there is one filter instance per consumer, each negotiating its
@@ -42,7 +42,7 @@ inline constexpr wchar_t kLegacySourceClsidString[] = L"{A1E4F2C7-6B3D-4A58-9E21
 // for the old wording to stay consistent with.
 inline constexpr wchar_t kFilterName[] = CAP_APP_NAME L" Virtual Camera";
 
-// The filter, carried inside CapView.exe as a plain binary resource and written
+// The filter, carried inside qBlank.exe as a plain binary resource and written
 // out when the camera is installed. One file ships; the DLL comes out of it.
 inline constexpr int kFilterResourceId = 101;
 
@@ -153,7 +153,7 @@ inline uint8_t* SlotData(void* base, uint64_t slotBytes, uint32_t slot) {
 // goes unnamed, not that it goes unserved.
 inline constexpr uint32_t kConsumerSlots = 8u;
 
-// How long a consumer's heartbeat may go quiet before CapView stops listing it.
+// How long a consumer's heartbeat may go quiet before qBlank stops listing it.
 // Generous on purpose: a filter that has been instantiated but not yet started
 // only touches this when its format is negotiated, and a consumer sitting in a
 // preview dialog can be slow about that.
@@ -185,7 +185,7 @@ struct ControlBlock {
   uint32_t version;
   uint32_t stateBytes;  // sizeof(ControlBlock) as the creator understood it
 
-  // CapView to the filters: what the source is right now. A filter reads these
+  // qBlank to the filters: what the source is right now. A filter reads these
   // to decide what to advertise, and re-reads them when the generation moves.
   volatile uint32_t sourceWidth;
   volatile uint32_t sourceHeight;

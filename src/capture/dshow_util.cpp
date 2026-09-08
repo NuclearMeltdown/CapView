@@ -799,7 +799,7 @@ void CapsModel::SetNativeStandard(long standard) {
 
 double CapsModel::NativeFps(const std::string& subtype, int width, int height) const {
   // Die Rate steht in der Normtabelle: 50 auf 625 Zeilen, 59,94 auf 525, 60 bei
-  // PAL 60. Gefragt ist die Halbbildrate, nicht die halbe -- CapView zeigt
+  // PAL 60. Gefragt ist die Halbbildrate, nicht die halbe -- qBlank zeigt
   // Halbbilder einzeln, und eine Karte, die 720x576 anbietet, nennt dieselbe 50
   // dazu.
   const double want = nativeFieldRate_;

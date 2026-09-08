@@ -2,7 +2,7 @@
 
 // Media Foundation device listing for the diagnostic tool.
 //
-// Purely a comparison against what DirectShow reports: CapView itself captures
+// Purely a comparison against what DirectShow reports: qBlank itself captures
 // through DirectShow, and this exists to answer "is there hardware the
 // DirectShow path cannot see?" with a list rather than a guess.
 

@@ -25,7 +25,7 @@ struct DeviceProbeResult {
   CapsModel caps;
   std::vector<CrossbarInput> crossbarInputs;
   // Which of them the card was found on, or -1 when that cannot be read. This
-  // is the card's own state, not CapView's setting: it holds whatever the last
+  // is the card's own state, not qBlank's setting: it holds whatever the last
   // program to touch it left behind, which is what makes it worth reading.
   int currentInput = -1;
   // What the analogue decoder offers, and what it is set to. Both zero when the

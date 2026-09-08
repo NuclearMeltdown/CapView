@@ -1,5 +1,5 @@
 // Generated from this template by CMake. The version lives in exactly one
-// place -- project(CapView VERSION ...) in CMakeLists.txt -- because it lived
+// place -- project(qBlank VERSION ...) in CMakeLists.txt -- because it lived
 // in two before, and the second one went stale: 3.5.1 shipped with an
 // executable that told Explorer it was 3.5.0.0.
 
@@ -7,7 +7,7 @@
 #include <windows.h>
 
 // Lowest id wins in Explorer, so this is the file icon as well as the window icon.
-IDI_CAPVIEW ICON "capview.ico"
+IDI_QBLANK ICON "qblank.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION @PROJECT_VERSION_MAJOR@, @PROJECT_VERSION_MINOR@, @PROJECT_VERSION_PATCH@, 0
@@ -22,11 +22,11 @@ BEGIN
     BEGIN
         BLOCK "040704b0"
         BEGIN
-            VALUE "FileDescription", "CapView"
+            VALUE "FileDescription", "qBlank"
             VALUE "FileVersion", "@PROJECT_VERSION@.0"
-            VALUE "InternalName", "CapView"
-            VALUE "OriginalFilename", "CapView.exe"
-            VALUE "ProductName", "CapView"
+            VALUE "InternalName", "qBlank"
+            VALUE "OriginalFilename", "qBlank.exe"
+            VALUE "ProductName", "qBlank"
             VALUE "ProductVersion", "@PROJECT_VERSION@.0"
         END
     END

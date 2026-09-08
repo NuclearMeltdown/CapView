@@ -51,7 +51,7 @@ struct FfmpegInfo {
 };
 
 // Looks in this order: the configured path, an "ffmpeg" folder next to
-// CapView.exe, next to CapView.exe itself, then PATH. Only fills in path and
+// qBlank.exe, next to qBlank.exe itself, then PATH. Only fills in path and
 // version -- the encoder probe is separate because it takes seconds.
 FfmpegInfo LocateFfmpeg(const std::string& configuredPath);
 

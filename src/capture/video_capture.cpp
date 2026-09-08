@@ -37,7 +37,7 @@ bool CreateGraph(ComPtr<IGraphBuilder>* graph, ComPtr<ICaptureGraphBuilder2>* bu
 // "this device does not like that format". KS drivers report a pin whose single
 // instance is already taken as ERROR_NO_SYSTEM_RESOURCES, which reads like a
 // memory problem but is not one -- it is the usual answer when a second program
-// (another CapView window, OBS, the vendor tool) is holding the card.
+// (another qBlank window, OBS, the vendor tool) is holding the card.
 bool IsDeviceBusyError(HRESULT hr) {
   return hr == HRESULT_FROM_WIN32(ERROR_NO_SYSTEM_RESOURCES) ||
          hr == HRESULT_FROM_WIN32(ERROR_BUSY) ||
@@ -50,10 +50,10 @@ std::string BusyMessage(const DeviceRef& device) {
   const std::string name = device.name.empty() ? device.id : device.name;
   return T("Das Gerät '", "Device '") + name +
          T("' wird bereits von einem anderen Programm benutzt. Die meisten Karten geben "
-           "ihren Videopin nur einmal her — schließe die andere CapView-Instanz, OBS oder "
-           "das Hersteller-Tool. CapView versucht es von allein weiter.",
+           "ihren Videopin nur einmal her — schließe die andere qBlank-Instanz, OBS oder "
+           "das Hersteller-Tool. qBlank versucht es von allein weiter.",
            "' is already in use by another program. Most cards hand out their video pin "
-           "only once, so close the other CapView window, OBS or the vendor tool. CapView "
+           "only once, so close the other qBlank window, OBS or the vendor tool. qBlank "
            "keeps retrying on its own.");
 }
 
@@ -186,7 +186,7 @@ DeviceProbeResult VideoCapture::Probe(const DeviceRef& device) {
   // The crossbar is a separate upstream filter that only joins the graph once
   // the capture pin is connected, so build the full chain before asking for it.
   ComPtr<FrameSink> sink = FrameSink::Create();
-  if (sink && SUCCEEDED(graph->AddFilter(sink.Get(), L"CapView Probe Sink"))) {
+  if (sink && SUCCEEDED(graph->AddFilter(sink.Get(), L"qBlank Probe Sink"))) {
     // Direct connection only. Falling back to intelligent connect here would
     // make the graph builder try every registered filter against every media
     // type the card offers, which takes seconds and is far more than is needed
@@ -377,7 +377,7 @@ bool VideoCapture::Start(const CaptureSettings& settings, std::string* error) {
     return fail(T("Sink-Filter konnte nicht erstellt werden",
                   "The sink filter could not be created"));
 
-  hr = graph_->AddFilter(sink_.Get(), L"CapView Sink");
+  hr = graph_->AddFilter(sink_.Get(), L"qBlank Sink");
   if (FAILED(hr))
     return fail(T("Sink-Filter konnte nicht eingefügt werden: ",
                   "The sink filter could not be added: ") +
