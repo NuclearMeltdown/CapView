@@ -245,9 +245,9 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
   // asks for once, or when the machine changed underneath it.
   LoadCachedEncoders();
 
-  // A previous update left its predecessor lying next to us; it can go now that
-  // nothing is running from it.
-  Updater::CleanUpPreviousBuild();
+  // The leftover of a previous update is cleared in wWinMain, before the name
+  // is sorted out and the settings are read -- both of which would otherwise
+  // work on the wrong file.
   VirtualCamera::CleanUpOldSources();
   if (config_.app.checkUpdatesOnStart) updater_.CheckAsync(true);
 

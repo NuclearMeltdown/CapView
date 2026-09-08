@@ -732,4 +732,53 @@ struct Config {
   std::string Serialize() const;
 };
 
+// A settings file lying next to the program under a name this build does not
+// use -- the leftovers of a rename, or of a copy someone kept.
+struct ForeignSettings {
+  std::wstring path;    // the full path
+  std::wstring stem;    // the file name without ".json"
+  std::string program;  // the name the file gives the program; older files say nothing
+
+  // The language those settings are in, as the Language enum, -1 when the file
+  // does not say. The question about this file has to be asked in it: whoever
+  // set the program to German has not agreed to read English to get their
+  // profiles back.
+  int language = -1;
+
+  // Last written, as a Windows file time. Shown in the question, because when
+  // each file was last touched is the one fact that actually tells the two
+  // apart.
+  unsigned long long modified = 0;
+};
+
+// Every settings file next to the executable that is ours but is not the one
+// this build writes, newest first. Recognised by content, so no list of former
+// names has to be kept correct for this to work.
+std::vector<ForeignSettings> FindForeignSettings();
+
+// The language stored in one settings file, as the Language enum, -1 when the
+// file cannot be read or does not say. For the one moment before the settings
+// are loaded, when something already has to be said in the right language.
+int SettingsLanguage(const std::wstring& path);
+
+// Asked once per foreign file: take those settings over, or start fresh?
+// `haveOwn` says whether there are settings under the current name as well --
+// with them, Discard means keeping the ones already there; without, it means
+// starting from defaults.
+enum class SettingsAnswer {
+  Postpone,  // no answer given -- change nothing, ask again next time
+  TakeOver,  // use the foreign file from now on
+  Discard,   // set the foreign file aside
+};
+
+using SettingsChoice = SettingsAnswer (*)(const ForeignSettings& found, bool haveOwn);
+
+// Settles which settings file this build uses. Call before anything reads one;
+// the answer costs nothing then, because nothing has been loaded yet that would
+// have to be thrown away.
+//
+// Returns the name the adopted settings were written under, empty when nothing
+// was adopted. Whatever loses is set aside as ".bak", never deleted.
+std::wstring AdoptSettings(SettingsChoice ask);
+
 }  // namespace cap

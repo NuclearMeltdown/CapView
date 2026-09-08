@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "common.h"
@@ -780,6 +781,26 @@ bool WriteWholeFileAtomic(const std::wstring& path, const std::string& data) {
   return true;
 }
 
+// True when this document is one of ours, whatever the file is called.
+//
+// Recognising it by name would mean keeping a list of every name the program
+// has ever had, in a place that has to be right years later. Recognising it by
+// content does not: the file says what it is. Newer ones say it outright, in
+// "program"; older ones -- everything written before the program started
+// stamping its name in -- say it by shape, and the shape is specific enough. A
+// version number plus these two objects is not something a stray .json from
+// another program happens to have.
+bool LooksLikeSettings(const json::Value& root, ForeignSettings* out) {
+  if (!root.IsObject() || !root["version"].IsNumber()) return false;
+  if (!root["app"].IsObject() || !root["record"].IsObject()) return false;
+  if (out) {
+    out->program = root["program"].AsString();
+    const json::Value& language = root["app"]["language"];
+    out->language = language.IsNumber() ? language.AsInt() : -1;
+  }
+  return true;
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------ FormatSel
@@ -834,6 +855,82 @@ void Config::SetActiveProfile(int index) {
 
 std::wstring Config::FilePath() {
   return AppFile(L"json");
+}
+
+std::vector<ForeignSettings> FindForeignSettings() {
+  const std::wstring folder = ExeDirectory();
+  const std::wstring mine = FileStem(Config::FilePath());
+
+  WIN32_FIND_DATAW found = {};
+  const HANDLE search = ::FindFirstFileW((folder + L"*.json").c_str(), &found);
+  if (search == INVALID_HANDLE_VALUE) return {};
+
+  // Sorted by when it was last written, newest first: if somebody has three of
+  // these lying around, the one they were using last is the interesting one.
+  // Files set aside earlier end in ".bak" and are not matched by the pattern.
+  std::vector<std::pair<unsigned long long, ForeignSettings>> dated;
+  do {
+    if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+    ForeignSettings entry;
+    entry.stem = FileStem(found.cFileName);
+    if (_wcsicmp(entry.stem.c_str(), mine.c_str()) == 0) continue;
+    entry.path = folder + found.cFileName;
+
+    std::string text;
+    if (!ReadWholeFile(entry.path, text)) continue;
+    if (!LooksLikeSettings(json::Parse(text), &entry)) continue;
+
+    ULARGE_INTEGER when = {};
+    when.LowPart = found.ftLastWriteTime.dwLowDateTime;
+    when.HighPart = found.ftLastWriteTime.dwHighDateTime;
+    entry.modified = when.QuadPart;
+    dated.emplace_back(when.QuadPart, std::move(entry));
+  } while (::FindNextFileW(search, &found));
+  ::FindClose(search);
+
+  std::sort(dated.begin(), dated.end(),
+            [](const auto& a, const auto& b) { return a.first > b.first; });
+  std::vector<ForeignSettings> out;
+  out.reserve(dated.size());
+  for (auto& d : dated) out.push_back(std::move(d.second));
+  return out;
+}
+
+int SettingsLanguage(const std::wstring& path) {
+  std::string text;
+  if (!ReadWholeFile(path, text)) return -1;
+  ForeignSettings probe;
+  if (!LooksLikeSettings(json::Parse(text), &probe)) return -1;
+  return probe.language;
+}
+
+std::wstring AdoptSettings(SettingsChoice ask) {
+  const std::vector<ForeignSettings> others = FindForeignSettings();
+  if (others.empty()) return std::wstring();
+
+  const ForeignSettings& other = others.front();
+  const std::wstring mine = Config::FilePath();
+  const bool haveOwn = ::GetFileAttributesW(mine.c_str()) != INVALID_FILE_ATTRIBUTES;
+
+  // Nobody but the user knows which of the two files has the evening's work in
+  // it, so nobody but the user answers this. The loser is set aside rather than
+  // removed, which makes the wrong answer survivable.
+  const SettingsAnswer answer = ask ? ask(other, haveOwn) : SettingsAnswer::Discard;
+  if (answer == SettingsAnswer::Postpone) return std::wstring();
+  if (answer == SettingsAnswer::Discard) {
+    SetAside(other.path);
+    return std::wstring();
+  }
+  if (haveOwn) SetAside(mine);
+  if (!::MoveFileExW(other.path.c_str(), mine.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+    return std::wstring();
+  }
+
+  // What the file calls the program if it says so, otherwise what it is called
+  // -- either way the name those settings were written under.
+  const std::wstring from = other.program.empty() ? other.stem : ToWide(other.program);
+  SetAdoptedFrom(from);
+  return from;
 }
 
 bool Config::Load(std::string* error) {

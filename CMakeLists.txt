@@ -86,6 +86,7 @@ add_executable(CapView WIN32
   src/vcam/virtual_camera.cpp
   src/ui/settings_host.cpp
   src/ui/settings_window.cpp
+  src/ui/startup_dialog.cpp
   src/ui/overlay.cpp
 
   "${CMAKE_BINARY_DIR}/capview.rc"
