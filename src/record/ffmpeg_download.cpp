@@ -31,7 +31,7 @@ struct WinHttpHandles {
 };
 
 bool OpenRequest(WinHttpHandles* h, const wchar_t* path, bool followRedirects) {
-  h->session = ::WinHttpOpen(L"CapView", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+  h->session = ::WinHttpOpen(kAppName, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                              WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
   if (!h->session) return false;
 

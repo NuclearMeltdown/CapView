@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+// What the program is called, and where its own files are. Everything that
+// spells out a name gets it from there -- see src/app_identity.h.
+#include "app_identity.h"
+
 // Short alias -- ComPtr shows up on almost every line of the DirectShow / D3D code.
 template <typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
@@ -49,8 +53,7 @@ std::string HrToString(HRESULT hr);
 
 // ------------------------------------------------------------------ misc utils
 
-// Directory containing the running executable, with trailing backslash.
-std::wstring ExeDirectory();
+// ExeDirectory, AppFile and the rest live in app_identity.h, included above.
 
 // What this build calls itself. Compared against the newest release tag on
 // GitHub, so it has to line up with how those are named -- "v1.1" there against

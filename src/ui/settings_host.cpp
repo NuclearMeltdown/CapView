@@ -16,7 +16,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 namespace cap {
 namespace {
 
-const wchar_t kClassName[] = L"CapViewSettingsWindow";
+const std::wstring kClassName = WindowClassName(L"SettingsWindow");
 
 }  // namespace
 
@@ -174,7 +174,7 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   wc.hIconSm = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON,
                                    ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON),
                                    LR_DEFAULTCOLOR);
-  wc.lpszClassName = kClassName;
+  wc.lpszClassName = kClassName.c_str();
   // Registering twice is not an error worth failing over; the second call just
   // tells us it is already there.
   ::RegisterClassExW(&wc);
@@ -204,7 +204,7 @@ bool SettingsHost::Create(HINSTANCE instance, HWND owner, ID3D11Device* device,
   // corner of the screen the way windows did before there was a taskbar. That is
   // both reported symptoms, and this one flag is both fixes. The owner is worth
   // keeping: it makes the settings stay above the preview and close with it.
-  hwnd_ = ::CreateWindowExW(WS_EX_APPWINDOW, kClassName, L"CapView", WS_OVERLAPPEDWINDOW,
+  hwnd_ = ::CreateWindowExW(WS_EX_APPWINDOW, kClassName.c_str(), kAppName, WS_OVERLAPPEDWINDOW,
                             x, y, w, h, owner, nullptr, instance, this);
   if (!hwnd_) {
     if (error) *error = T("Einstellungsfenster konnte nicht erstellt werden",

@@ -18,6 +18,8 @@
 
 #include <stdint.h>
 
+#include "app_identity.h"
+
 namespace cap {
 namespace vcam {
 
@@ -34,8 +36,11 @@ inline constexpr wchar_t kFilterClsidString[] = L"{A326E6EC-3F70-468B-A826-4F9D4
 // installer can recognise and remove it.
 inline constexpr wchar_t kLegacySourceClsidString[] = L"{A1E4F2C7-6B3D-4A58-9E21-7C0D5B8F3A46}";
 
-// What the camera is called in every application's device list.
-inline constexpr wchar_t kFilterName[] = L"CapView Virtual Camera";
+// What the camera is called in every application's device list. Follows the
+// program's name: the CLSID is what identifies the filter, and an installation
+// left over from an older name is removed rather than kept, so there is nothing
+// for the old wording to stay consistent with.
+inline constexpr wchar_t kFilterName[] = CAP_APP_NAME L" Virtual Camera";
 
 // The filter, carried inside CapView.exe as a plain binary resource and written
 // out when the camera is installed. One file ships; the DLL comes out of it.

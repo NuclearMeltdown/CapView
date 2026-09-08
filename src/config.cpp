@@ -833,7 +833,7 @@ void Config::SetActiveProfile(int index) {
 }
 
 std::wstring Config::FilePath() {
-  return ExeDirectory() + L"CapView.json";
+  return AppFile(L"json");
 }
 
 bool Config::Load(std::string* error) {
@@ -971,6 +971,9 @@ bool Config::Save(std::string* error) const {
 std::string Config::Serialize() const {
   json::Value root = json::Value::Object();
   root["version"] = 1;
+  // So a later build can tell at a glance whose file this is and what the
+  // program was called when it was written, without matching on the file name.
+  root["program"] = AppNameUtf8();
 
   json::Value a = json::Value::Object();
   a["theme"] = (int)app.theme;

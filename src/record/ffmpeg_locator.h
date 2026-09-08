@@ -79,7 +79,10 @@ void ApplyCachedProbe(FfmpegInfo* info, const std::vector<int>& available);
 bool RunFfmpeg(const std::string& exe, const std::wstring& args, std::string* output,
                DWORD* exitCode, DWORD timeoutMs);
 
-// Default recording folder: Videos\CapView.
-std::wstring DefaultRecordFolder();
+// Default recording folder: Videos\<program name>. The name can be given, which
+// is what a build does after taking over the settings of an earlier name: the
+// recordings stay in the folder they have always been in rather than quietly
+// moving to a folder named after the new one.
+std::wstring DefaultRecordFolder(const wchar_t* name = kAppName);
 
 }  // namespace cap

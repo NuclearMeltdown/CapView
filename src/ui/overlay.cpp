@@ -330,7 +330,7 @@ void DrawIdleScreen(unsigned long long icon, int iconPixels, const std::string& 
   // font: one is enough, and a name set in the same face as everything else
   // looks deliberate rather than like a logo dropped in.
   ImGui::SetWindowFontScale(1.6f);
-  centred("CapView", false);
+  centred(AppNameUtf8().c_str(), false);
   ImGui::SetWindowFontScale(1.0f);
 
   // Zeilenweise, und jede Zeile fuer sich zentriert. Ein \n in einem einzelnen

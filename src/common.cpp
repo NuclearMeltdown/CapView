@@ -74,7 +74,7 @@ void LogInit(bool toFile) {
     g_log_file = nullptr;
   }
   if (!toFile) return;
-  std::wstring path = ExeDirectory() + L"CapView.log";
+  const std::wstring path = AppFile(L"log");
   g_log_file = _wfopen(path.c_str(), L"w, ccs=UTF-8");
 }
 
@@ -143,16 +143,6 @@ bool EnsureFolder(const std::wstring& path) {
   if (slash == std::wstring::npos) return false;
   if (!EnsureFolder(path.substr(0, slash))) return false;
   return ::CreateDirectoryW(path.c_str(), nullptr) || ::GetLastError() == ERROR_ALREADY_EXISTS;
-}
-
-std::wstring ExeDirectory() {
-  wchar_t path[MAX_PATH * 2] = {};
-  DWORD n = ::GetModuleFileNameW(nullptr, path, (DWORD)std::size(path));
-  if (n == 0) return L".\\";
-  std::wstring s(path, n);
-  size_t slash = s.find_last_of(L"\\/");
-  if (slash == std::wstring::npos) return L".\\";
-  return s.substr(0, slash + 1);
 }
 
 ComScope::ComScope(DWORD model) {

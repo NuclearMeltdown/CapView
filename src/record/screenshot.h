@@ -40,7 +40,8 @@ std::wstring MakeScreenshotPath(const std::wstring& folder, ScreenshotFormat for
 // The same, for the two formats an HDR screenshot can take.
 std::wstring MakeHdrScreenshotPath(const std::wstring& folder, HdrShotFormat format);
 
-// Pictures\CapView.
-std::wstring DefaultScreenshotFolder();
+// Pictures\<program name>; see DefaultRecordFolder on why the name is an
+// argument.
+std::wstring DefaultScreenshotFolder(const wchar_t* name = kAppName);
 
 }  // namespace cap

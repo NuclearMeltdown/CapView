@@ -29,7 +29,7 @@ std::wstring TimestampedName(RecordContainer container) {
   SYSTEMTIME st;
   ::GetLocalTime(&st);
   wchar_t buf[64];
-  swprintf_s(buf, L"CapView_%04u-%02u-%02u_%02u-%02u-%02u.%s", st.wYear, st.wMonth, st.wDay,
+  swprintf_s(buf, L"%s_%04u-%02u-%02u_%02u-%02u-%02u.%s", kAppName, st.wYear, st.wMonth, st.wDay,
              st.wHour, st.wMinute, st.wSecond,
              container == RecordContainer::Mp4 ? L"mp4" : L"mkv");
   return buf;

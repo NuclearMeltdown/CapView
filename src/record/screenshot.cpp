@@ -295,7 +295,7 @@ bool SaveScreenshotAvif(const std::wstring& path, const std::wstring& ffmpegPath
   return true;
 }
 
-std::wstring DefaultScreenshotFolder() {
+std::wstring DefaultScreenshotFolder(const wchar_t* name) {
   PWSTR pictures = nullptr;
   std::wstring folder;
   if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Pictures, 0, nullptr, &pictures)) && pictures) {
@@ -304,7 +304,7 @@ std::wstring DefaultScreenshotFolder() {
   }
   if (folder.empty()) folder = ExeDirectory();
   if (!folder.empty() && folder.back() != L'\\') folder += L'\\';
-  return folder + L"CapView";
+  return folder + (name ? name : kAppName);
 }
 
 std::wstring MakeHdrScreenshotPath(const std::wstring& folder, HdrShotFormat format) {
@@ -323,7 +323,7 @@ std::wstring MakeScreenshotPath(const std::wstring& folder, ScreenshotFormat for
   SYSTEMTIME st;
   ::GetLocalTime(&st);
   wchar_t stamp[64];
-  swprintf_s(stamp, L"CapView_%04u-%02u-%02u_%02u-%02u-%02u", st.wYear, st.wMonth, st.wDay,
+  swprintf_s(stamp, L"%s_%04u-%02u-%02u_%02u-%02u-%02u", kAppName, st.wYear, st.wMonth, st.wDay,
              st.wHour, st.wMinute, st.wSecond);
 
   // Someone holding the key down produces several shots inside one second, and

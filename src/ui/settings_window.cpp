@@ -2,6 +2,7 @@
 
 #include "record/recorder.h"
 #include "vcam/virtual_camera.h"
+#include "vcam/vcam_shared.h"
 
 #include <shellapi.h>
 
@@ -677,10 +678,13 @@ void SettingsWindow::DrawUpdatesTab() {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    HelpMarker(T("Ersetzt CapView.exe. Die bisherige Version wird beiseite gelegt und beim "
-                 "nächsten Start entfernt, damit ein misslungenes Update nichts kaputt macht.",
-                 "Replaces CapView.exe. The previous build is moved aside and removed on the "
-                 "next start, so a failed update breaks nothing."));
+    HelpMarker(Format(T("Ersetzt %s.exe. Die bisherige Version wird beiseite gelegt und beim "
+                        "nächsten Start entfernt, damit ein misslungenes Update nichts kaputt "
+                        "macht.",
+                        "Replaces %s.exe. The previous build is moved aside and removed on the "
+                        "next start, so a failed update breaks nothing."),
+                      AppNameUtf8().c_str())
+                   .c_str());
   }
 
   if (st.state == UpdateStatus::State::Ready) {
@@ -2077,10 +2081,10 @@ void SettingsWindow::DrawImageTab() {
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  HelpMarker(T("Wie viele Bildzeilen die Konsole wirklich zeichnet. Nötig, sobald mehr "
+  HelpMarker(Format(T("Wie viele Bildzeilen die Konsole wirklich zeichnet. Nötig, sobald mehr "
                "ankommen: eine Karte, die erst bei 720p anfängt, oder ein Dongle mit "
                "eigenem Skalierer liefert 1080 Zeilen von einer Konsole, die 480 gezeichnet "
-               "hat. Ohne die Angabe rechnet CapView mit den Zeilen, die ankommen, und die "
+               "hat. Ohne die Angabe rechnet %s mit den Zeilen, die ankommen, und die "
                "Lücken sitzen zu dicht oder fallen ganz aus.\n\n"
                "PAL hat mehr Zeilen als NTSC — 576 gegen 480, halbhoch 288 gegen 240. "
                "Dieselbe Konsole liefert je nach Region eine andere Zahl.\n\n"
@@ -2093,7 +2097,7 @@ void SettingsWindow::DrawImageTab() {
                "How many picture lines the console really draws. Needed as soon as more "
                "arrive: a card that starts at 720p, or a dongle with a scaler of its own, "
                "hands over 1080 lines from a console that drew 480. Without the number "
-               "CapView counts the lines it receives, and the gaps land too close together "
+               "%s counts the lines it receives, and the gaps land too close together "
                "or not at all.\n\n"
                "PAL has more lines than NTSC — 576 against 480, half height 288 against "
                "240. The same console gives a different number by region.\n\n"
@@ -2101,7 +2105,9 @@ void SettingsWindow::DrawImageTab() {
                "so 240 or 480. The colour stays PAL, the lines do not.\n\n"
                "Automatic takes what the card reports. Where it delivers the real "
                "resolution that is correct -- this is for the cases where it cannot.\n\n"
-               "Vertical only. Horizontally it is \"Source width\" over at the crop."));
+               "Vertical only. Horizontally it is \"Source width\" over at the crop."),
+                    AppNameUtf8().c_str())
+                 .c_str());
 
   ImGui::SetNextItemWidth(-260.0f);
   ImGui::SliderFloat(T("Zeilenlücken", "Scanlines"), &img.scanlines, 0.0f, 0.5f, "%.2f");
@@ -2197,13 +2203,13 @@ void SettingsWindow::DrawImageTab() {
     TextDisabledWrapped(T("Analoger Eingang, trotzdem voller Bereich — Schwarz liegt nicht auf 16.",
                           "Analogue input, yet full range — black is not sitting on 16."));
     ImGui::SameLine();
-    HelpMarker(
+    HelpMarker(Format(
         T("An Composite, S-Video oder Tuner gilt BT.601, und die legt Schwarz auf 16. Kommt es "
           "stattdessen unten am Anschlag an, hat etwas davor den Bereich gestreckt, "
           "üblicherweise die Karte selbst.\n\n"
-          "Fürs Bild ist das kein Schaden: CapView misst den Bereich und stellt sich darauf "
+          "Fürs Bild ist das kein Schaden: %s misst den Bereich und stellt sich darauf "
           "ein. Was beim Strecken über die Enden hinausgefallen ist, ist aber weg, bevor "
-          "CapView das Bild sieht — kein Regler holt es zurück, und in der Aufnahme fehlt es "
+          "%s das Bild sieht — kein Regler holt es zurück, und in der Aufnahme fehlt es "
           "ebenso. Ob überhaupt etwas hinausgefallen ist, lässt sich von hier nicht "
           "feststellen.\n\n"
           "Umstellen lässt sich der Bereich nur im Treiber der Karte, im Reiter Quelle unter "
@@ -2213,14 +2219,16 @@ void SettingsWindow::DrawImageTab() {
           "Composite, S-Video and tuner inputs carry BT.601, which puts black on 16. When it "
           "arrives at the bottom rail instead, something upstream stretched the range, usually "
           "the card itself.\n\n"
-          "The picture is not harmed by that: CapView measures the range and adapts. But "
-          "whatever the stretch pushed past the ends is gone before CapView sees the frame — "
+          "The picture is not harmed by that: %s measures the range and adapts. But "
+          "whatever the stretch pushed past the ends is gone before %s sees the frame — "
           "nothing brings it back, and it is missing from recordings just the same. Whether "
           "anything was pushed past at all cannot be determined from here.\n\n"
           "Only the card's own driver can change the range, on the Source tab under "
           "\"Configure card ...\", usually as \"Colour Range\" or \"Video Range\". The label "
           "misleads easily: on some cards it means what is expected at the input, and then "
-          "\"Full\" is what passes the signal through untouched."));
+          "\"Full\" is what passes the signal through untouched."),
+        AppNameUtf8().c_str(), AppNameUtf8().c_str())
+                   .c_str());
   }
 }
 
@@ -2614,10 +2622,12 @@ void SettingsWindow::DrawDisplayTab() {
   ImGui::Checkbox(T("Bildschirmschoner und Standby verhindern", "Prevent screensaver and sleep"),
                   &app.preventSleep);
   ImGui::SameLine();
-  HelpMarker(T("Hält den Bildschirm wach, solange CapView läuft -- beim Zusehen drückt "
-               "niemand eine Taste.",
-               "Keeps the screen awake while CapView is running -- nobody presses a key "
-               "while watching."));
+  HelpMarker(Format(T("Hält den Bildschirm wach, solange %s läuft -- beim Zusehen drückt "
+                      "niemand eine Taste.",
+                      "Keeps the screen awake while %s is running -- nobody presses a key "
+                      "while watching."),
+                    AppNameUtf8().c_str())
+                 .c_str());
 
   // The toolbar's own Hide button was the only way to turn it off, and the
   // right-click menu the only way back. A setting that can be reached from one
@@ -2680,8 +2690,10 @@ void SettingsWindow::DrawDisplayTab() {
 
   ImGui::Spacing();
   ImGui::SeparatorText(T("Sonstiges", "Other"));
-  ImGui::Checkbox(T("Protokoll in CapView.log schreiben", "Write a log to CapView.log"),
-                  &app.logToFile);
+  ImGui::Checkbox(
+      Format(T("Protokoll in %s.log schreiben", "Write a log to %s.log"), AppNameUtf8().c_str())
+          .c_str(),
+      &app.logToFile);
   ImGui::SameLine();
   HelpMarker(T("Nur zur Fehlersuche. Wirkt beim nächsten Start.",
                "For troubleshooting only. Takes effect on the next start."));
@@ -3133,23 +3145,29 @@ void SettingsWindow::DrawVirtualCameraBlock() {
   }
   const auto status = (VirtualCamera::Install)vcamStatus_;
 
-  ImGui::TextWrapped(T("Gibt das Bild als Webcam an andere Programme weiter -- OBS, Discord, "
-                       "Teams, den Browser. Die Kamera heißt \"CapView Virtual Camera\" und "
-                       "steht ab dem Installieren dauerhaft in der Geräteliste. Läuft CapView "
-                       "gerade nicht, zeigt sie einen Hinweis statt eines Bildes.",
-                       "Offers the picture to other programs as a webcam -- OBS, Discord, "
-                       "Teams, the browser. The camera is called \"CapView Virtual Camera\" "
-                       "and stays in the device list once installed. While CapView is not "
-                       "running it shows a notice instead of a picture."));
+  ImGui::TextWrapped(
+      "%s", Format(T("Gibt das Bild als Webcam an andere Programme weiter -- OBS, Discord, "
+                     "Teams, den Browser. Die Kamera heißt \"%s\" und "
+                     "steht ab dem Installieren dauerhaft in der Geräteliste. Läuft %s "
+                     "gerade nicht, zeigt sie einen Hinweis statt eines Bildes.",
+                     "Offers the picture to other programs as a webcam -- OBS, Discord, "
+                     "Teams, the browser. The camera is called \"%s\" "
+                     "and stays in the device list once installed. While %s is not "
+                     "running it shows a notice instead of a picture."),
+                   ToUtf8(vcam::kFilterName).c_str(), AppNameUtf8().c_str())
+                .c_str());
   ImGui::Spacing();
 
   if (status != VirtualCamera::Install::Installed) {
     ImGui::TextWrapped(
+        "%s",
         status == VirtualCamera::Install::Stale
-            ? T("Die Kameraquelle ist registriert, zeigt aber ins Leere -- vermutlich wurde "
-                "CapView verschoben. Einmal neu installieren setzt das gerade.",
-                "The camera source is registered but points nowhere -- CapView was probably "
-                "moved. Installing once more puts that right.")
+            ? Format(T("Die Kameraquelle ist registriert, zeigt aber ins Leere -- vermutlich "
+                       "wurde %s verschoben. Einmal neu installieren setzt das gerade.",
+                       "The camera source is registered but points nowhere -- %s was probably "
+                       "moved. Installing once more puts that right."),
+                     AppNameUtf8().c_str())
+                  .c_str()
             : T("Einmalig zu installieren. Die Kameraquelle wird von jedem Programm "
                 "geladen, das die Kamera öffnet, muss also systemweit registriert werden "
                 "-- dafür fragt Windows nach Administratorrechten, das Benutzen danach "
@@ -3601,12 +3619,16 @@ void SettingsWindow::DrawProfilesTab(const DeviceProbeResult& caps) {
             "\"Automatic\", and what is not searched for is not detected either."));
     } else {
       ImGui::TextWrapped(
-          T("Wird diese Norm erkannt, schaltet CapView von selbst hierher — dasselbe Gerät und "
-            "denselben Eingang vorausgesetzt, und nicht während einer Aufnahme. Ein von Hand "
-            "gewähltes Profil bleibt, bis sich die Quelle wirklich ändert.",
-            "When this standard is detected, CapView switches here on its own — same device and "
-            "same input, and never during a recording. A profile chosen by hand stays until the "
-            "source really changes."));
+          "%s",
+          Format(
+              T("Wird diese Norm erkannt, schaltet %s von selbst hierher — dasselbe Gerät und "
+                "denselben Eingang vorausgesetzt, und nicht während einer Aufnahme. Ein von Hand "
+                "gewähltes Profil bleibt, bis sich die Quelle wirklich ändert.",
+                "When this standard is detected, %s switches here on its own — same device and "
+                "same input, and never during a recording. A profile chosen by hand stays until "
+                "the source really changes."),
+              AppNameUtf8().c_str())
+              .c_str());
     }
   }
 

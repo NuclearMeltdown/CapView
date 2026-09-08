@@ -54,6 +54,7 @@ set_target_properties(capview_vcam PROPERTIES
 
 add_executable(CapView WIN32
   src/main.cpp
+  src/app_identity.cpp
   src/common.cpp
   src/i18n.cpp
   src/app.cpp
@@ -147,6 +148,7 @@ add_executable(capview_probe
   src/tools/probe_main.cpp
   src/tools/mf_probe.cpp
   src/record/ffmpeg_locator.cpp
+  src/app_identity.cpp
   src/common.cpp
   src/i18n.cpp
   src/config.cpp

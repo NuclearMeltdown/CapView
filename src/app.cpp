@@ -23,8 +23,10 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 namespace cap {
 namespace {
 
-const wchar_t kWindowClass[] = L"CapViewMainWindow";
-const wchar_t kWindowTitle[] = L"CapView";
+// Both from the one name in app_identity.h, so a rename does not leave a window
+// class behind that still says what the program used to be called.
+const std::wstring kWindowClass = WindowClassName(L"MainWindow");
+const wchar_t* const kWindowTitle = kAppName;
 
 // How long without a frame before we call it "no signal".
 const double kNoSignalSeconds = 1.5;
@@ -174,8 +176,30 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
   // Unterschied steht in error: beim allerersten Start ist es leer.
   firstRun_ = !config_.Load(&configError) && configError.empty();
   LogInit(config_.app.logToFile);
-  CAP_LOG("CapView startet");
+  CAP_LOG("%s startet", AppNameUtf8().c_str());
   if (!configError.empty()) CAP_WARN("%s", configError.c_str());
+
+  // Settings inherited from a name this program no longer uses need one thing
+  // done to them: the folders they leave empty have to be written down.
+  //
+  // An empty folder means "the one named after the program", and that name has
+  // just changed -- so leaving them empty would quietly send new recordings to a
+  // new folder while every recording made so far stayed behind in the old one.
+  // Pinning them to what they resolved to yesterday keeps everything in one
+  // place. Anyone who wants the new folder can pick it; nobody has to go looking
+  // for files that moved on their own.
+  if (!AdoptedFrom().empty()) {
+    const wchar_t* was = AdoptedFrom().c_str();
+    if (config_.record.outputFolder.empty()) {
+      config_.record.outputFolder = ToUtf8(DefaultRecordFolder(was));
+    }
+    if (config_.record.screenshotFolder.empty()) {
+      config_.record.screenshotFolder = ToUtf8(DefaultScreenshotFolder(was));
+    }
+    config_.Save();
+    CAP_LOG("Einstellungen von %s übernommen; Ordner festgeschrieben",
+            ToUtf8(AdoptedFrom()).c_str());
+  }
 
   SetLanguage(config_.app.language);
   darkMode_ = ResolveDark(config_.app.theme);
@@ -185,12 +209,12 @@ bool App::Initialize(HINSTANCE instance, int showCmd) {
 
   std::string error;
   if (!d3d_.Initialize(hwnd_, &error)) {
-    ::MessageBoxW(nullptr, ToWide(error).c_str(), L"CapView", MB_ICONERROR | MB_OK);
+    ::MessageBoxW(nullptr, ToWide(error).c_str(), kAppName, MB_ICONERROR | MB_OK);
     return false;
   }
   if (!InitImGui()) return false;
   if (!renderer_.Initialize(&d3d_, &error)) {
-    ::MessageBoxW(nullptr, ToWide(error).c_str(), L"CapView", MB_ICONERROR | MB_OK);
+    ::MessageBoxW(nullptr, ToWide(error).c_str(), kAppName, MB_ICONERROR | MB_OK);
     return false;
   }
 
@@ -262,7 +286,7 @@ bool App::CreateMainWindow(HINSTANCE instance, int showCmd) {
   wc.hInstance = instance;
   wc.hCursor = ::LoadCursorW(nullptr, IDC_ARROW);
   wc.hbrBackground = nullptr;  // we paint every pixel ourselves
-  wc.lpszClassName = kWindowClass;
+  wc.lpszClassName = kWindowClass.c_str();
   // Large icon for Alt+Tab, small one for the title bar and taskbar.
   wc.hIcon = (HICON)::LoadImageW(instance, MAKEINTRESOURCEW(IDI_CAPVIEW), IMAGE_ICON,
                                  ::GetSystemMetrics(SM_CXICON),
@@ -276,7 +300,7 @@ bool App::CreateMainWindow(HINSTANCE instance, int showCmd) {
                   ToWide(T("Fensterklasse konnte nicht registriert werden.",
                            "The window class could not be registered."))
                       .c_str(),
-                  L"CapView", MB_ICONERROR);
+                  kAppName, MB_ICONERROR);
     return false;
   }
 
@@ -303,14 +327,14 @@ bool App::CreateMainWindow(HINSTANCE instance, int showCmd) {
     }
   }
 
-  hwnd_ = ::CreateWindowExW(0, kWindowClass, kWindowTitle, WS_OVERLAPPEDWINDOW, x, y, width,
+  hwnd_ = ::CreateWindowExW(0, kWindowClass.c_str(), kWindowTitle, WS_OVERLAPPEDWINDOW, x, y, width,
                             height, nullptr, nullptr, instance, this);
   if (!hwnd_) {
     ::MessageBoxW(
         nullptr,
         ToWide(T("Fenster konnte nicht erstellt werden.", "The window could not be created."))
             .c_str(),
-        L"CapView", MB_ICONERROR);
+        kAppName, MB_ICONERROR);
     return false;
   }
 
@@ -3688,7 +3712,8 @@ void App::DrawSettingsWindowed() {
 
   if (settings_.isOpen() != settingsHost_.visible()) {
     if (settings_.isOpen()) {
-      settingsHost_.Show(ToWide(T("CapView – Einstellungen", "CapView – Settings")));
+      settingsHost_.Show(std::wstring(kAppName) +
+                         ToWide(T(" – Einstellungen", " – Settings")));
     } else {
       settingsHost_.Hide();
     }
@@ -3806,7 +3831,7 @@ void App::DrawUpdatePrompt() {
     updatePromptQueued_ = true;
   }
 
-  const char* id = T("Update verfügbar###capview_update", "Update available###capview_update");
+  const char* id = T("Update verfügbar###app_update", "Update available###app_update");
   if (updatePromptQueued_) {
     ImGui::OpenPopup(id);
     updatePromptQueued_ = false;
@@ -3819,7 +3844,7 @@ void App::DrawUpdatePrompt() {
   if (!ImGui::BeginPopupModal(id, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
 
   const UpdateStatus st = updater_.status();
-  ImGui::Text(T("CapView %s ist verfügbar.", "CapView %s is available."),
+  ImGui::Text(T("%s %s ist verfügbar.", "%s %s is available."), AppNameUtf8().c_str(),
               st.latestVersion.c_str());
   ImGui::TextDisabled(T("Installiert ist %s.", "This build is %s."), Updater::currentVersion());
   ImGui::Spacing();

@@ -127,7 +127,7 @@ bool RunFfmpeg(const std::string& exe, const std::wstring& args, std::string* ou
 
 // ------------------------------------------------------------------ locating
 
-std::wstring DefaultRecordFolder() {
+std::wstring DefaultRecordFolder(const wchar_t* name) {
   PWSTR videos = nullptr;
   std::wstring folder;
   if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_Videos, 0, nullptr, &videos)) && videos) {
@@ -136,7 +136,7 @@ std::wstring DefaultRecordFolder() {
   }
   if (folder.empty()) folder = ExeDirectory();
   if (!folder.empty() && folder.back() != L'\\') folder += L'\\';
-  return folder + L"CapView";
+  return folder + (name ? name : kAppName);
 }
 
 FfmpegInfo LocateFfmpeg(const std::string& configuredPath) {
