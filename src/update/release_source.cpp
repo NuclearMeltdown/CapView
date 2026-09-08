@@ -70,6 +70,33 @@ bool EndsWith(const std::string& text, const char* tail) {
   return true;
 }
 
+// What counts as part of a word inside a label. The hyphen belongs to the word
+// so that "app" does not match halfway into "app-x64"; the dot does not, so a
+// file name in front of the word does not glue itself to it.
+bool IsLabelChar(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' ||
+         c == '_';
+}
+
+// A label carries a word for this program and a name for the person reading the
+// release page, because GitHub shows the label *instead of* the file name. A
+// label of "app-x64" leaves a download list reading "app-x64" and "migrator",
+// which tells a visitor nothing about what to click. So the label is written
+// "qBlank.exe (app-x64)" and the word is looked for inside it.
+//
+// Word, not substring: "app" must not match "app-x64", or the generic fallback
+// in PickProgram would take an ARM build on an x64 machine.
+bool HasLabel(const std::string& text, const char* word) {
+  const size_t length = std::strlen(word);
+  if (length == 0) return false;
+  for (size_t at = text.find(word); at != std::string::npos; at = text.find(word, at + 1)) {
+    const bool startsClean = at == 0 || !IsLabelChar(text[at - 1]);
+    const bool endsClean = at + length >= text.size() || !IsLabelChar(text[at + length]);
+    if (startsClean && endsClean) return true;
+  }
+  return false;
+}
+
 // "v1.2.3" against "1.2" and so on. Missing parts count as zero, so v1.1 is
 // newer than v1 and the same as v1.1.0.
 std::vector<int> Parts(const std::string& text) {
@@ -217,7 +244,7 @@ bool FetchLatestRelease(Release* out, FetchError* error, int* httpStatus) {
 
 const ReleaseAsset* PickLabelled(const Release& release, const char* label) {
   for (const ReleaseAsset& asset : release.assets) {
-    if (asset.label == label) return &asset;
+    if (HasLabel(asset.label, label)) return &asset;
   }
   return nullptr;
 }
@@ -231,7 +258,7 @@ const ReleaseAsset* PickProgram(const Release& release) {
   // so this lands on the right one even if the labels were forgotten entirely.
   const ReleaseAsset* best = nullptr;
   for (const ReleaseAsset& asset : release.assets) {
-    if (asset.label == "migrator") continue;
+    if (HasLabel(asset.label, "migrator")) continue;
     if (!EndsWith(asset.name, ".exe")) continue;
     if (!best || asset.size > best->size) best = &asset;
   }

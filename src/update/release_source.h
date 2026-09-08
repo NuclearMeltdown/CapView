@@ -42,7 +42,9 @@ enum class FetchError {
 
 struct ReleaseAsset {
   std::string name;   // the file name, whatever it happens to be
-  std::string label;  // what it is: "app", "migrator", ...
+  // What it is -- "app-x64", "migrator", ... -- somewhere inside a line written
+  // for a reader, because GitHub shows this in place of the file name.
+  std::string label;
   std::string url;
   long long size = 0;
 };
