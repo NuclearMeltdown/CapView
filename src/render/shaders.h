@@ -749,38 +749,89 @@ R"HLSL(// ----------------------------------------------------------------------
 // chroma band leaking into brightness, and that band is a good megahertz wide
 // on either side of it. A box is only zero at the point: on PAL the lower
 // chroma edge sits at seven tenths of the carrier, and there the difference of
-// two boxes measures 1.13 -- it was more than doubling exactly the thing two
-// filters upstream had just spent their effort removing. With triangles the
-// same point measures 0.24, and everything from eight tenths of the carrier
-// upward is under 0.02. The stopband is a region now instead of a point.
+// two boxes measures 0.62 against a passband peak of 0.81 -- it was passing
+// three quarters of exactly the thing two filters upstream had just spent their
+// effort removing. With triangles the same point measures 0.108 against a peak
+// of 0.545, and from eight tenths of the carrier upward it is under 0.03. The
+// stopband is a region now instead of a point.
 //
 // An ordinary unsharp mask has neither, rising with frequency all the way to
 // Nyquist, which is the one shape this pass must never have.
+//
+// And the triangles alone are still not enough, which took a picture to notice
+// rather than a derivation. A triangle's response is a squared sinc, and a
+// squared sinc has sidelobes -- on PAL the first one lands almost exactly on
+// Nyquist, where the difference measures 0.100, as much as the chroma edge. The
+// wide triangle is near a null of its own there and cancels none of it. So the
+// filter was lifting the finest pattern the sampling grid can hold by a quarter
+// at full strength, which in a flat saturated area is visible as a fine crawl
+// that no dot crawl filter can reach: it is not at the carrier, so neither the
+// four frame average nor the demodulator can see it, and it was being added
+// after both of them had run.
+//
+// The cure is one convolution: every weight below is the triangle smoothed with
+// [1, 2, 1] / 4, which is zero at Nyquist exactly and by construction. Measured
+// on the normalised weights, PAL: Nyquist 0.100 -> 0.000, the chroma edge at
+// seven tenths 0.108 -> 0.061, eight tenths 0.029 -> 0.013, and the passband
+// peak 0.545 -> 0.471, which the scale below takes back. NTSC never had the
+// Nyquist problem -- its carrier sits lower, so the sidelobe falls inside the
+// band rather than on the edge of it -- and gains the same in the stopband.
 //
 // Horizontal only, and that is not a shortcut. The band limit is a limit along
 // the line. Vertically the picture is limited by how many lines the standard
 // has, which no filter can undo, and reaching vertically would sharpen the line
 // structure and fight the deinterlacer in the pass after this one.
-// `carrier` is what CarrierEnergy below reads at this pixel, computed once in
-// main and handed to whoever needs it.
-float3 BandwidthRestore(float3 rgb, int x, int row, float carrier) {
+// `carrierMag` is the raw carrier amplitude CarrierEnergy below measures at this
+// pixel -- the amplitude, not the judgement it also returns, because the gate
+// further down needs to weigh it against the local excursion rather than against
+// a fixed threshold. Computed once in main and handed to whoever needs it.
+)HLSL"
+R"HLSL(float Triangle(float t, float slope) { return max(0.0, 1.0 - t * slope); }
+
+// The same triangle smoothed with [1, 2, 1] / 4. Written on the weight rather
+// than on the samples, which is the same filter and costs no extra fetches.
+float SmoothTriangle(float k, float slope) {
+  return (Triangle(abs(k - 1.0), slope) + 2.0 * Triangle(abs(k), slope) +
+          Triangle(abs(k + 1.0), slope)) * 0.25;
+}
+
+)HLSL"
+R"HLSL(float3 BandwidthRestore(float3 rgb, int x, int row, float carrierMag) {
   float width = max(gCarrierPeriod, 2.0);
   float slopeA = 1.0 / width;              // a triangle one carrier period wide
   float slopeB = 0.5 / width;              // and one of two
-  int r = (int)ceil(2.0 * width);          // where the wider of them dies out
+  int r = (int)ceil(2.0 * width) + 1;      // the wider of them, plus the smoothing
 
   float y = Luma(rgb);
   float sa = 0.0, na = 0.0, sb = 0.0, nb = 0.0;
-  float lo = y, hi = y;
+  float lo = y, hi = y;                    // the sample either side: the bound
+  float wlo = y, whi = y, step = 0.0;      // the narrow window: the measurement
+  float prev = 0.0;
+  bool havePrev = false;
   for (int k = -r; k <= r; ++k) {
     float l = Luma(FetchRgbAt(int2(x + k, row)));
     float t = abs(float(k));
-    float wa = max(0.0, 1.0 - t * slopeA);
-    float wb = max(0.0, 1.0 - t * slopeB);
-    // The excursion the limiter goes by is measured over the narrow window
-    // only. Over the wide one it would find the contrast of half a picture
-    // element away and stop limiting anything.
-    if (wa > 0.0) { lo = min(lo, l); hi = max(hi, l); }
+    float wa = SmoothTriangle(float(k), slopeA);
+    float wb = SmoothTriangle(float(k), slopeB);
+    // What the limiter at the end goes by: the sample either side, and no
+    // further. The narrow window was tried there first and is too wide to hold
+    // anything -- it is a carrier period, three samples on PAL, so a pixel three
+    // samples into a bright plateau still has the dark side of the edge inside
+    // it, the bound opens to the full step, and the overshoot lobe sits exactly
+    // there.
+    if (t <= 1.0) { lo = min(lo, l); hi = max(hi, l); }
+    // Over one carrier period, how far the line travels and the largest distance
+    // it covers between two neighbouring samples. Both are needed below, and
+    // only their ratio is used, so neither has to mean anything on its own. The
+    // width is stated rather than taken from `wa > 0`, so that changing the
+    // kernel above cannot quietly move the ruler this measures with.
+    if (t <= width) {
+      wlo = min(wlo, l);
+      whi = max(whi, l);
+      if (havePrev) step = max(step, abs(l - prev));
+      prev = l;
+      havePrev = true;
+    }
     sa += l * wa;
     na += wa;
     sb += l * wb;
@@ -789,11 +840,25 @@ float3 BandwidthRestore(float3 rgb, int x, int row, float carrier) {
   float narrow = sa / max(na, 1e-4);
   float wide = sb / max(nb, 1e-4);
 
-  // At the peak of that band the difference of the two triangles comes to about
-  // 0.52 of the signal, so this puts the top of the slider a little past double
-  // -- past that the limiter below is doing all the work anyway and the slider
-  // would only be lying about its range.
-  float add = (narrow - wide) * gBandwidth * 2.4;
+  // At the peak of that band the difference of the two windows comes to 0.471 of
+  // the signal, and this used to stand at 2.8 -- the top of the slider a little
+  // past double -- because the limiter below was cutting six sevenths of it away
+  // again and the number had to cover that. It no longer does, so the same
+  // slider position would now arrive four to five times too strong.
+  //
+  // Matching the two on the passband alone put this at 0.65, and that was the
+  // wrong band to match on. Sharpness is not read there. At equal passband the
+  // old filter carried three and a half times as much at 0.71 of the carrier and
+  // twelve times as much at 0.90, and that is the band an eye calls sharp -- so
+  // the two measured identical and looked nothing alike.
+  //
+  // Matched on 0.71 instead it takes about four, and that is the top of the
+  // useful range rather than a setting anyone wants: judged on picture it starts
+  // inventing carrier residue well before it. Half of that is the top of the
+  // slider, so the whole travel is usable. The old one was dead above a fifth --
+  // the clamp saturated and turning it further bought nothing but more of the
+  // pattern it drew -- and this is close to linear.
+  float add = (narrow - wide) * gBandwidth * 2.0;
 
   // And the part the shape of the filter cannot do. The band that composite
   // rolled off and the band its colour crosstalk lives in are the same band --
@@ -804,17 +869,100 @@ float3 BandwidthRestore(float3 rgb, int x, int row, float carrier) {
   // against two filters upstream, so do not lift. Where it does not, the
   // softness is genuinely rolloff and gets its full lift back.
   //
-  // This costs nothing in the case it is for. A soft edge is soft precisely
-  // because it has little at the carrier -- that is the same statement twice.
-  add *= 1.0 - carrier;
+  // What that question must not be is an absolute one, and it was. CarrierEnergy
+  // answers `saturate(mag * 12)`, a threshold set for a different job -- whether
+  // there is enough carrier detail here to suspect the *colour* over -- and a
+  // pattern has to be strong before that is worth doing. A flat saturated area
+  // carries a residue far below it: the decoder's notch left a little carrier
+  // behind, there is nothing else in that band because the area is flat, and the
+  // gate read it as near zero and opened all the way. The filter then lifted the
+  // one thing in the neighbourhood, which was the residue, by its full amount.
+  // On an even purple that is the entire visible pattern -- switch the filter off
+  // and it is gone, because the filter is what drew it -- and in a yellow letter
+  // it is a residue you have to look for turned into one you do not.
+  //
+  // The scale-free question instead: what share of the local excursion *is*
+  // carrier? `mag` is the amplitude of that component, so a line carrying
+  // nothing but carrier spans two of it, and the share reads a half. Real detail
+  // spans many times its own carrier content and reads a few hundredths. The
+  // reading no longer depends on how strong the pattern is in absolute terms --
+  // which is the whole point, because on a flat area it is weak and it is still
+  // all there is.
+  //
+  // No flat part to the ramp, which is the part that took measuring. Full lift
+  // up to a fifth and closed at a half was the obvious shape and it is the wrong
+  // one: it hands a free pass to everything under the plateau, and a fifth of
+  // the local excursion being carrier is already most of what a flat area has.
+  // Splitting the static picture into places where the source is flat -- where
+  // whatever comes back is invented, because there was no detail to restore --
+  // and places where it has structure, and asking each separately: a plateau at
+  // any height lifts the flat half by nearly as much as no gate at all, while a
+  // ramp that starts at zero costs the structured half about a tenth and takes
+  // the flat half from 1.71 down to 1.30. Nothing here is free of carrier, so
+  // nothing should be exempt from the question.
+  float share = carrierMag / max(whi - wlo, 1e-4);
+  add *= saturate((0.24 - share) / 0.24);
 
-  // Bounded by how far the picture actually moves around here. An unsharp of
-  // any kind rings at a hard edge, and a game picture is mostly hard edges; a
-  // quarter of the local excursion is the usual ceiling for overshoot and it is
-  // where it stops being visible as a light line beside a dark one.
-  float lim = (hi - lo) * 0.25;
-  add = clamp(add, -lim, lim);
-  return rgb + add;
+  // And the question the limiter cannot answer, because by the time it runs the
+  // lift already exists: was anything lost here at all?
+  //
+  // A rolloff has a width. Brightness limited to where the subcarrier sits
+  // cannot cross from black to white inside one sample -- it needs two or three,
+  // and that spread is the entire thing this filter undoes. So a transition that
+  // *does* cross in one sample was never rolled off. It was drawn after the band
+  // limit, or it survived the chain intact, and either way there is nothing
+  // underneath it to put back. Lifting the band there does not restore contrast,
+  // it manufactures it, and the visible result is the one edge case the limiter
+  // is blind to: the pixel beside a dark outline gets pulled down towards the
+  // outline, which is inside its neighbours' range the whole way, so nothing
+  // stops it and the outline simply comes out a sample wider on each side.
+  //
+  // `step / (whi - wlo)` is that width, measured rather than assumed: the share
+  // of the local travel that one sample already covers. A third or so for an
+  // edge the chain actually softened, one whole for an edge that is already
+  // hard. Below half, full lift; from there it closes, and by three quarters
+  // this does nothing at all.
+  add *= saturate((0.75 - step / max(whi - wlo, 1e-4)) * 4.0);
+
+  // Bounded by what the line actually holds around here -- and bounded against
+  // the neighbourhood, not against the size of the correction, which is the
+  // whole of the difference.
+  //
+  // A ceiling on |add| does not know which way the pixel is being pushed. On the
+  // dark side of an edge the lift is negative and a symmetric ceiling lets it
+  // run below everything nearby; on the bright side it runs above. That pair is
+  // exactly what a halo is: a shadow beside the edge and a bright line on the
+  // other side of it. It stood at a quarter of the local excursion here, which
+  // at a black to white edge permits a quarter of full scale in each direction,
+  // several times what is visible.
+  //
+  // Sharpen() further down has always been bounded the other way -- clamped into
+  // the min and max of its own immediate neighbours, itself included -- and does
+  // not ring. This is that rule, on the axis this filter works along.
+  //
+  // Drawn straight through the neighbours, though, it stops being a safety net
+  // and becomes the operator. Fit the slider on both so they reach the same
+  // sharpening in the passband and it takes 1.30 with the bound hard against the
+  // neighbours against 0.20 without one: six sevenths of the correction is being
+  // cut away, so the output is sitting *on* the bound nearly everywhere. That is
+  // not filtering any more, it is snapping each pixel to whichever neighbour is
+  // nearer -- a decision taken per pixel, which writes a new signal at pixel
+  // rate, which is broadband. On a flat saturated area the thing it snaps to is
+  // the carrier residue. Measured at the subcarrier's own frequency the filter
+  // was adding 32 times the power the source has there, and that floor is the
+  // whole of the fine pattern visible on an even purple or inside a yellow
+  // letter -- switch the filter off and it goes, because the filter drew it.
+  //
+  // So keep the bound and allow a fixed overshoot past it. Where the line is
+  // flat the excursions are far under the allowance, the bound never engages at
+  // all, and there is nothing to decide and nothing broadband. Where there is an
+  // edge it still caps the halo, at the allowance and no further. At 6/255 that
+  // floor drops from 32 to 2.7 and no pixel anywhere overshoots by more than the
+  // allowance; dropping the bound entirely reaches 1.6, but then 1.6% of the
+  // picture runs past 12/255 and the worst of it reaches 33.
+  float slack = 6.0 / 255.0;
+  float lifted = clamp(y + add, lo - slack, hi + slack);
+  return rgb + (lifted - y);
 }
 
 // ---------------------------------------------------------------------------
@@ -831,7 +979,14 @@ float3 BandwidthRestore(float3 rgb, int x, int row, float carrier) {
 // one pass rather than two: the local mean is subtracted afterwards instead of
 // beforehand, using the fact that the sum of (l - mean)*cos is the sum of l*cos
 // minus mean times the sum of cos.
-float CarrierEnergy(int x, int row) {
+//
+// Returns both halves of the answer. `.y` is the judgement above, for softening
+// the colour. `.x` is the amplitude it was formed from, because the bandwidth
+// filter asks a different question of the same measurement -- not "is there
+// enough of this to act on" but "what share of what is here is this", which
+// needs the number before a threshold was put on it.
+)HLSL"
+R"HLSL(float2 CarrierEnergy(int x, int row) {
   const float kTwoPi = 6.28318531;
   float w = kTwoPi / max(gCarrierPeriod, 1.5);
   int r = (int)floor(gCarrierPeriod + 0.5);   // two cycles, near enough
@@ -852,7 +1007,7 @@ float CarrierEnergy(int x, int row) {
     wc += hann * c;
     wq += hann * s;
   }
-  if (nrm <= 0.0) return 0.0;
+  if (nrm <= 0.0) return float2(0.0, 0.0);
   float mean = sl / nrm;
   float re = (ac - mean * wc) / nrm;
   float im = (aq - mean * wq) / nrm;
@@ -863,7 +1018,7 @@ float CarrierEnergy(int x, int row) {
   // pinstripe -- the patterns that produce the rainbow in the first place --
   // reach several hundredths, so a twelvefold scale saturates on exactly the
   // material this is for and leaves plain pictures alone.
-  return saturate(mag * 12.0);
+  return float2(mag, saturate(mag * 12.0));
 }
 
 float4 main(VSOut i) : SV_Target {
@@ -910,7 +1065,7 @@ float4 main(VSOut i) : SV_Target {
   // for the two filters below that both want to know. Seventeen taps with a
   // sine and a cosine in each, so asking twice would be paying twice for the
   // same answer.
-  float carrier = 0.0;
+  float2 carrier = float2(0.0, 0.0);
   if (gBandwidth > 0.0 || (gChromaSoft > 0 && gAdaptChroma != 0)) {
     carrier = CarrierEnergy(p.x, p.y);
   }
@@ -919,7 +1074,7 @@ float4 main(VSOut i) : SV_Target {
   // runs up towards the carrier, and the pattern the filters above remove sits
   // in the top of it. Lifting a picture that still had the pattern in it would
   // hand them a harder job than they started with.
-  if (gBandwidth > 0.0) rgb = BandwidthRestore(rgb, p.x, p.y, carrier);
+  if (gBandwidth > 0.0) rgb = BandwidthRestore(rgb, p.x, p.y, carrier.x);
 
   if (gChromaSoft > 0) {
     float3 soft = SoftenChroma(rgb, p.x, p.y);
@@ -927,7 +1082,7 @@ float4 main(VSOut i) : SV_Target {
     // carrier to have invented some of it. Everywhere else the colour is as
     // real as composite ever gets it, and blurring that sideways is pure loss
     // -- which is what the slider did at every setting before this.
-    rgb = gAdaptChroma != 0 ? lerp(rgb, soft, carrier) : soft;
+    rgb = gAdaptChroma != 0 ? lerp(rgb, soft, carrier.y) : soft;
   }
 
   // Out of its curve and into linear light, once per pixel rather than once per
