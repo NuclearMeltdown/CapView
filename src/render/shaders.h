@@ -297,6 +297,31 @@ float LumaFrameAt(int2 p, int frame) {
   return LoadPlane0(int3(q, 0), frame).x;
 }
 
+// The same fetch, but keeping the colour. The motion test below asks only how
+// far each sample moved between frames, and a difference does not care what
+// the values are centred on, so the offsets that YuvToRgb subtracts are left
+// out and only the scales are kept: a step of a given size in any of the three
+// numbers is then a step of that size in the picture, whichever one it came
+// from. Weighted with the matrix's own coefficients rather than constants, so
+// this follows the picture from BT.601 to BT.709 the way everything else does.
+//
+// On a packed format all three arrive in the Load that used to fetch the
+// brightness alone, which is what makes looking at colour affordable here at
+// all; NV12 and the planar forms pay one or two more fetches for it.
+float3 GateSampleAt(int2 p, int frame) {
+  p.x = clamp(p.x, 0, gSrcWidth - 1);
+  p.y = clamp(p.y, 0, gSrcHeight - 1);
+  int2 q = p;
+  if (gBottomUp != 0) q.y = gSrcHeight - 1 - q.y;
+
+  if (gIsYuv == 0) return LoadPlane0(int3(q, 0), frame).rgb * gYScale;
+
+  float3 yuv = FetchYuv(q, frame);
+  return float3(yuv.x * gYScale,
+                yuv.y * gCScale * gCoef.w,
+                yuv.z * gCScale * gCoef.x);
+}
+
 // Composite carries colour at roughly a quarter of the bandwidth it carries
 // brightness, so a picture decoded from it has no fine colour detail in it to
 // begin with. Averaging the colour sideways therefore costs nothing real, and it
@@ -406,17 +431,39 @@ float TemporalGate(int x, int row) {
   // on a horizontally smoothed picture, over seven samples, which is a little
   // over two cycles of the colour subcarrier: the shimmer averages itself away
   // before it is ever asked about, and real movement comes through untouched.
-  float s0 = 0.0, s1 = 0.0, s2 = 0.0, s3 = 0.0;
+  //
+  // And it is asked of the colour as well as the brightness, which it was not
+  // at first. Written on brightness alone this missed the one thing it most
+  // needed to catch. A caption in yellow with a red outline on a dark ground
+  // moves its colour far more than its brightness: from the ground to the
+  // outline the red channel steps by four fifths of the range while the
+  // brightness steps by a quarter of it, because red carries less than a third
+  // of the brightness. So the gate read a quarter, called it standing still,
+  // and let the average smear an outline that had plainly moved.
+  //
+  // Measured on a pulsing menu caption, four frames at a time: the pixels that
+  // ghosted showed 7/255 to a test on brightness while the correction let
+  // through at those same pixels was up to 60/255. Reading all three the worst
+  // ghost drops from 54 to 30 out of 255 and the area that shows one at all
+  // from 3.8 % to 0.8 %, at a cost of 0.95 to 0.92 in how much of the
+  // correction a standing picture keeps. That last number is the one to watch:
+  // it is the crawl removal this filter exists for, and it barely moved.
+  float3 s0 = float3(0.0, 0.0, 0.0), s1 = s0, s2 = s0, s3 = s0;
   for (int dx = -3; dx <= 3; ++dx) {
     int2 q = int2(x + dx, row);
 )HLSL"
-R"HLSL(    s0 += LumaFrameAt(q, 0);
-    s1 += LumaFrameAt(q, 1);
-    s2 += LumaFrameAt(q, 2);
-    s3 += LumaFrameAt(q, 3);
+R"HLSL(    s0 += GateSampleAt(q, 0);
+    s1 += GateSampleAt(q, 1);
+    s2 += GateSampleAt(q, 2);
+    s3 += GateSampleAt(q, 3);
   }
-  float mhi = max(max(s0, s1), max(s2, s3)) * 0.142857;
-  float mlo = min(min(s0, s1), min(s2, s3)) * 0.142857;
+  float3 chi = max(max(s0, s1), max(s2, s3)) * 0.142857;
+  float3 clo = min(min(s0, s1), min(s2, s3)) * 0.142857;
+  // Whichever of the three moved furthest, not their sum: a shift that shows
+  // in one channel is a shift, and averaging it with two that stood still
+  // would talk it back down to nothing.
+  float3 d = chi - clo;
+  float moved = max(d.x, max(d.y, d.z));
   // Where the gate lets go, which is the whole trade and therefore a setting.
   //
   // Held on: five levels out of 255 of slack, then full suppression twenty-odd
@@ -428,7 +475,7 @@ R"HLSL(    s0 += LumaFrameAt(q, 0);
   // Let go early: no slack at all and gone within four levels. Moving edges
   // come out clean; slow parts of the picture keep some of their crawl,
   // where the demodulator below picks the work back up.
-  return 1.0 - saturate((mhi - mlo - gMotionSlack) * gMotionSlope);
+  return 1.0 - saturate((moved - gMotionSlack) * gMotionSlope);
 }
 
 // The spatial half of the same job, for everything the temporal filter cannot
