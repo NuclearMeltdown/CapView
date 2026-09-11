@@ -1171,11 +1171,24 @@ float4 main(VSOut i) : SV_Target {
   if (gGamut != 0) rgb = Bt2020ToBt709(rgb);
 
   // The divider drawn last, so it is a fixed value rather than a colour that
-  // went through a transfer curve: half of diffuse white either way, which is
-  // grey on an SDR screen and stays grey on an HDR one. One source pixel wide,
-  // so it scales with the picture instead of getting thinner as the window
-  // grows and vanishing on a big screen.
-  if (raw && (float)p.x >= edge - 1.0) rgb = float3(0.5, 0.5, 0.5);
+  // went through a transfer curve: diffuse white, which stays white on an HDR
+  // screen too. A single grey line disappeared into grey material, so the white
+  // core carries a darkened pixel on either side -- against a bright picture the
+  // dark edges hold it, against a dark one the core does, and there is no
+  // content it can match on both counts at once.
+  //
+  // Measured in source pixels, so it scales with the picture instead of getting
+  // thinner as the window grows, and laid across the boundary rather than inside
+  // the left half: the line marks where the two halves meet, so it should not
+  // belong to one of them.
+  if (gCompareSplit >= 0.0) {
+    const float dx = (float)p.x - edge;
+    if (dx >= -1.0 && dx < 0.0) {
+      rgb = float3(1.0, 1.0, 1.0);
+    } else if (dx >= -2.0 && dx < 1.0) {
+      rgb *= 0.25;
+    }
+  }
 
   // Not clamped: the target is floating point and limited range material
   // legitimately reaches past both ends after expansion.
