@@ -49,6 +49,8 @@ compositing and streaming are not. For those, use OBS.
 - Contrast adaptive sharpening; brightness, contrast, saturation, hue.
 - Aspect override, integer scaling, square pixels, quarter turns, line doubling for 240p and 288p.
 - **Native pixel grid**: one output pixel per console pixel, where the card samples a line 720 times and a SNES drew 256.
+- **Freeze** (**F11**) holds the source, so a slider can be judged on a still picture.
+- **A/B compare** (**F12**) splits the picture, composite filters off on the left.
 
 **Crop and colour range** · [wiki](../../wiki/Cropping-and-geometry)
 - Dragged on the picture or found by **Detect** (**F8**).
@@ -103,11 +105,13 @@ compositing and streaming are not. For those, use OBS.
 - Capture audio is the master clock — constant frame rate, 1 ms drift over 15 seconds.
 - 60 to 50 Hz mid-recording **cuts the file and continues in a new one**.
 - Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass under one set of names.
+- Free space shown as remaining recording time; a recording will not start on a full drive and stops itself before one fills up.
 
 **Screenshots** · [wiki](../../wiki/Screenshots)
 - At source resolution, taken **before the interface is drawn**.
 - PNG and JPEG through Windows Imaging Component — **no ffmpeg needed**.
 - HDR sources can keep their range as JPEG XR or AVIF.
+- **Ctrl+F10** puts the shot on the clipboard instead of on disk.
 
 **Virtual camera** · [wiki](../../wiki/Virtual-camera)
 - Offered to other programs as **qBlank Virtual Camera**, at the source's own resolution and rate.
@@ -134,13 +138,14 @@ compositing and streaming are not. For those, use OBS.
 
 | Key | Action | | Key | Action |
 |---|---|---|---|---|
-| Enter / Esc | Fullscreen on / off | | F7 | Detect video standard |
-| F1 | Statistics | | F8 | Detect border |
-| F2 | Settings | | F9 | Start / stop recording |
-| F5 | Restart capture | | F10 | Screenshot |
-| Shift+F5 | Reinitialise card | | M | Mute |
-| F6 | Measure colour range | | `+` `-` / wheel | Volume |
-| | | | Ctrl+1 … Ctrl+9 | Switch profile |
+| Enter / Esc | Fullscreen on / off | | F9 | Start / stop recording |
+| F1 | Statistics | | F10 | Screenshot |
+| F2 | Settings | | Ctrl+F10 | Screenshot to clipboard |
+| F5 | Restart capture | | F11 | Freeze |
+| Shift+F5 | Reinitialise card | | F12 | Compare filters |
+| F6 | Measure colour range | | M | Mute |
+| F7 | Detect video standard | | `+` `-` / wheel | Volume |
+| F8 | Detect border | | Ctrl+1 … Ctrl+9 | Switch profile |
 
 Right click opens the menu. All except Esc, the profile digits and Alt+F4 are
 reassignable under *Settings → Keys*. [Shortcuts](../../wiki/Shortcuts)
