@@ -34,6 +34,18 @@ bool SaveScreenshotHdr(const std::wstring& path, const uint16_t* halfRgba, int w
 bool SaveScreenshot(const std::wstring& path, const uint8_t* pixels, int width, int height,
                     ScreenshotFormat format, int jpegQuality, std::string* error);
 
+// The same picture, but onto the clipboard instead of into a file: paste it
+// into a chat, a forum post or an image editor without a detour over disk.
+//
+// It goes on as CF_DIB, twenty-four bit and bottom-up, which is the one shape
+// every program that takes a picture from the clipboard understands. A
+// thirty-two bit DIB would carry an alpha channel that half of them read as
+// transparency and the other half ignore, and video has no alpha to carry.
+// There is no HDR form of this: the clipboard has no way to say what the
+// numbers on it mean, so the tone mapped picture is what gets copied.
+bool CopyScreenshotToClipboard(HWND owner, const uint8_t* pixels, int width, int height,
+                               std::string* error);
+
 // Timestamped name in `folder`, with a counter when the same second is hit
 // twice. Creates the folder. Returns empty when the folder cannot be made.
 std::wstring MakeScreenshotPath(const std::wstring& folder, ScreenshotFormat format);

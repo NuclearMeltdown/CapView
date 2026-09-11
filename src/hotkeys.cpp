@@ -15,6 +15,10 @@ Hotkeys::Hotkeys() {
   (*this)[HotkeyAction::ReinitCard].shift = true;
   (*this)[HotkeyAction::Record].vk = VK_F9;
   (*this)[HotkeyAction::Screenshot].vk = VK_F10;
+  // Dieselbe Taste mit Strg, wie das Kopieren ueberall sonst: gleiches Bild,
+  // anderes Ziel.
+  (*this)[HotkeyAction::ScreenshotClipboard].vk = VK_F10;
+  (*this)[HotkeyAction::ScreenshotClipboard].ctrl = true;
   // Der Zuschnitt wird im Zweifel mehrmals hintereinander gesucht -- die
   // Messung braucht ein richtiges Bild, und wann eines anliegt, weiss nur der,
   // der hinsieht. F8 liegt frei und in derselben Reihe wie das uebrige, was
@@ -51,6 +55,8 @@ const char* HotkeyActionName(HotkeyAction action) {
     case HotkeyAction::ReinitCard: return T("Karte neu einlesen", "Reinitialise card");
     case HotkeyAction::Record: return T("Aufnahme starten/stoppen", "Start/stop recording");
     case HotkeyAction::Screenshot: return T("Screenshot", "Screenshot");
+    case HotkeyAction::ScreenshotClipboard:
+      return T("Screenshot in die Zwischenablage", "Screenshot to clipboard");
     case HotkeyAction::DetectCrop: return T("Rand suchen", "Detect border");
     case HotkeyAction::DetectStandard: return T("Videonorm suchen", "Detect video standard");
     case HotkeyAction::RemeasureRange: return T("Wertebereich neu messen", "Measure range again");
@@ -70,6 +76,7 @@ const char* HotkeyActionKey(HotkeyAction action) {
     case HotkeyAction::ReinitCard: return "reinitCard";
     case HotkeyAction::Record: return "record";
     case HotkeyAction::Screenshot: return "screenshot";
+    case HotkeyAction::ScreenshotClipboard: return "screenshotClipboard";
     case HotkeyAction::DetectCrop: return "detectCrop";
     case HotkeyAction::DetectStandard: return "detectStandard";
     case HotkeyAction::RemeasureRange: return "remeasureRange";

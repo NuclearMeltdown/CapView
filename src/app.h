@@ -144,11 +144,16 @@ class App {
   void CollectEncoderProbe();
 
   void ToggleRecording();
-  // Grabs the next rendered frame and writes it to disk.
-  void RequestScreenshot() { screenshotPending_ = true; }
+  // Grabs the next rendered frame and writes it to disk, or puts it on the
+  // clipboard instead. Both take the same shot at the same moment; only the
+  // destination differs.
+  void RequestScreenshot(bool toClipboard = false) {
+    screenshotPending_ = true;
+    screenshotToClipboard_ = toClipboard;
+  }
   // `includeUi` false grabs the picture itself at source resolution; true grabs
   // the finished window, overlay and all, at window resolution.
-  void WriteScreenshot(bool includeUi);
+  void WriteScreenshot(bool includeUi, bool toClipboard);
   void DrawToolbarStrip();
   void OpenFolderInExplorer(std::string* configured, const std::wstring& fallback);
   // Starts or stops the microphone to match the settings and what is going on.
@@ -371,6 +376,7 @@ class App {
   double lastSerializeCheck_ = 0.0;
 
   bool screenshotPending_ = false;
+  bool screenshotToClipboard_ = false;
   // Whether the bar was drawn this frame; the picture layout follows it.
   bool toolbarVisible_ = false;
 

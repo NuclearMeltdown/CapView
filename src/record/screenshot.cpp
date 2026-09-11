@@ -103,6 +103,74 @@ bool SaveScreenshot(const std::wstring& path, const uint8_t* pixels, int width, 
   return true;
 }
 
+bool CopyScreenshotToClipboard(HWND owner, const uint8_t* pixels, int width, int height,
+                               std::string* error) {
+  auto fail = [&](const char* what) {
+    if (error) *error = what;
+    return false;
+  };
+
+  if (!pixels || width <= 0 || height <= 0) return fail(T("Kein Bild.", "No picture."));
+
+  const size_t stride = ((size_t)width * 3 + 3) & ~(size_t)3;
+  const size_t image = stride * (size_t)height;
+
+  HGLOBAL handle = ::GlobalAlloc(GMEM_MOVEABLE, sizeof(BITMAPINFOHEADER) + image);
+  if (!handle) return fail(T("Kein Speicher.", "Out of memory."));
+
+  uint8_t* block = (uint8_t*)::GlobalLock(handle);
+  if (!block) {
+    ::GlobalFree(handle);
+    return fail(T("Kein Speicher.", "Out of memory."));
+  }
+
+  BITMAPINFOHEADER* header = (BITMAPINFOHEADER*)block;
+  *header = {};
+  header->biSize = sizeof(BITMAPINFOHEADER);
+  header->biWidth = width;
+  header->biHeight = height;  // positive: the rows below run bottom up
+  header->biPlanes = 1;
+  header->biBitCount = 24;
+  header->biCompression = BI_RGB;
+  header->biSizeImage = (DWORD)image;
+
+  uint8_t* rows = block + sizeof(BITMAPINFOHEADER);
+  for (int y = 0; y < height; ++y) {
+    const uint8_t* src = pixels + (size_t)y * (size_t)width * 4;
+    uint8_t* dst = rows + (size_t)(height - 1 - y) * stride;
+    for (int x = 0; x < width; ++x) {
+      dst[(size_t)x * 3 + 0] = src[(size_t)x * 4 + 2];  // B
+      dst[(size_t)x * 3 + 1] = src[(size_t)x * 4 + 1];  // G
+      dst[(size_t)x * 3 + 2] = src[(size_t)x * 4 + 0];  // R
+    }
+  }
+  ::GlobalUnlock(handle);
+
+  // Another program can be holding the clipboard for the moment it takes to
+  // read what is on it, and the answer to that is to come back rather than to
+  // report a failure the user cannot act on.
+  bool opened = false;
+  for (int attempt = 0; attempt < 5 && !opened; ++attempt) {
+    opened = ::OpenClipboard(owner) != FALSE;
+    if (!opened) ::Sleep(20);
+  }
+  if (!opened) {
+    ::GlobalFree(handle);
+    return fail(T("Zwischenablage ist belegt.", "The clipboard is busy."));
+  }
+
+  ::EmptyClipboard();
+  const bool ok = ::SetClipboardData(CF_DIB, handle) != nullptr;
+  ::CloseClipboard();
+
+  // On success the clipboard owns the block; on failure it never took it.
+  if (!ok) {
+    ::GlobalFree(handle);
+    return fail(T("Zwischenablage abgelehnt.", "The clipboard refused it."));
+  }
+  return true;
+}
+
 bool SaveScreenshotHdr(const std::wstring& path, const uint16_t* halfRgba, int width, int height,
                        int stride, float paperWhiteNits, std::string* error) {
   auto fail = [&](const char* what) {

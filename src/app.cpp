@@ -1271,7 +1271,7 @@ void App::DrawToolbarStrip() {
   }
 }
 
-void App::WriteScreenshot(bool includeUi) {
+void App::WriteScreenshot(bool includeUi, bool toClipboard) {
   RecordSettings& rec = config_.record;
 
   std::vector<uint8_t> pixels;
@@ -1295,8 +1295,9 @@ void App::WriteScreenshot(bool includeUi) {
   if (!includeUi) {
     // Keeping the range only means anything when there is a range to keep, so
     // the setting and the source both have to say so. Otherwise this is an
-    // ordinary screenshot and takes the ordinary path.
-    wide = config_.app.screenshotHdr &&
+    // ordinary screenshot and takes the ordinary path. The clipboard is always
+    // the ordinary path: there is no way to hand a wide range over it.
+    wide = !toClipboard && config_.app.screenshotHdr &&
            renderer_.hdrTransfer() != VideoRenderer::Transfer::Sdr;
     if (wide) {
       if (!renderer_.GrabStillHalf(&halfPixels, &width, &height, &halfStride)) {
@@ -1307,6 +1308,19 @@ void App::WriteScreenshot(bool includeUi) {
       Toast(T("Kein Bild zum Speichern.", "No picture to save."));
       return;
     }
+  }
+
+  if (toClipboard) {
+    std::string clipError;
+    if (!CopyScreenshotToClipboard(hwnd_, pixels.data(), width, height, &clipError)) {
+      Toast(T("Kopieren fehlgeschlagen: ", "Copy failed: ") + clipError);
+      CAP_ERR("Screenshot in die Zwischenablage fehlgeschlagen: %s", clipError.c_str());
+      return;
+    }
+    Toast(T("In der Zwischenablage", "On the clipboard") +
+          Format(" (%dx%d)", width, height) + note);
+    CAP_LOG("Screenshot in die Zwischenablage kopiert (%dx%d)", width, height);
+    return;
   }
 
   const std::wstring folder =
@@ -5136,7 +5150,7 @@ void App::RenderFrame() {
   // other setting takes the same shot one step later; see below.
   if (screenshotPending_ && !config_.record.screenshotIncludeUi) {
     screenshotPending_ = false;
-    WriteScreenshot(false);
+    WriteScreenshot(false, screenshotToClipboard_);
   }
 
   ImGui_ImplDX11_NewFrame();
@@ -5156,7 +5170,7 @@ void App::RenderFrame() {
   // window: under the flip model its contents are undefined after the present.
   if (screenshotPending_) {
     screenshotPending_ = false;
-    WriteScreenshot(true);
+    WriteScreenshot(true, screenshotToClipboard_);
   }
 
   // Beide Messwerte jedes Bild, unabhaengig davon, ob das Panel offen ist: das
@@ -5759,6 +5773,10 @@ void App::DrawContextMenu() {
     }
   }
   if (ImGui::MenuItem(T("Screenshot", "Screenshot"), sc(HotkeyAction::Screenshot))) RequestScreenshot();
+  if (ImGui::MenuItem(T("Screenshot in die Zwischenablage", "Screenshot to clipboard"),
+                      sc(HotkeyAction::ScreenshotClipboard))) {
+    RequestScreenshot(true);
+  }
 
   // Der schwarze Rand ist etwas, das man sieht, und das Suchen danach gehoert
   // deshalb dorthin, wo man hinsieht, statt in einen Reiter des
@@ -5865,6 +5883,9 @@ bool App::HandleKeyDown(WPARAM key) {
       return true;
     case HotkeyAction::Screenshot:
       RequestScreenshot();
+      return true;
+    case HotkeyAction::ScreenshotClipboard:
+      RequestScreenshot(true);
       return true;
     case HotkeyAction::DetectCrop:
       DetectCrop();
