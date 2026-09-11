@@ -37,6 +37,13 @@ std::wstring TimestampedName(RecordContainer container) {
 
 }  // namespace
 
+double EstimatedBytesPerSecond(const RecordSettings& settings, int audioTracks) {
+  const double kbps = (double)settings.bitrateKbps + 192.0 * (double)std::max(audioTracks, 0);
+  // Container overhead is left out: a few bytes of index per frame against
+  // twenty megabit of picture is below the error of the bitrate itself.
+  return kbps * 1000.0 / 8.0;
+}
+
 Recorder::~Recorder() {
   Stop();
 }

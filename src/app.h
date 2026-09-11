@@ -164,6 +164,10 @@ class App {
   // die Anzeige anhaelt.
   void ToggleFreeze();
   void ToggleCompare();
+  // Fragt den freien Platz auf dem Aufnahmelaufwerk ab, hoechstens einmal je
+  // Sekunde. Die Einstellungen zeigen ihn an, die laufende Aufnahme haengt
+  // daran.
+  void UpdateDiskSpace();
   void DrawToolbarStrip();
   void OpenFolderInExplorer(std::string* configured, const std::wstring& fallback);
   // Starts or stops the microphone to match the settings and what is going on.
@@ -587,6 +591,18 @@ class App {
   int pendingHeight_ = 0;
   double pendingFps_ = 0.0;
   double pendingSince_ = -1.0;
+  // Platz auf dem Ziellaufwerk. Nachgesehen wird im Sekundentakt und nicht je
+  // Bild: die Zahl aendert sich langsam, der Systemaufruf geht auf die Platte.
+  // Siehe UpdateDiskSpace, und den Wachdienst in FeedRecorder.
+  double lastDiskCheck_ = -1000.0;
+  uint64_t diskFreeBytes_ = 0;
+  bool diskFreeKnown_ = false;
+  // Was eine Sekunde Aufnahme nach den Einstellungen kostet. Geschaetzt, solange
+  // nichts laeuft; waehrend einer Aufnahme gewinnt die gemessene Schreibrate.
+  double diskBytesPerSecond_ = 0.0;
+  // Ob vor dem knappen Platz schon gewarnt wurde. Je Aufnahme einmal -- eine
+  // Meldung je Sekunde waere keine Warnung mehr, sondern ein Dauerzustand.
+  bool diskWarned_ = false;
   // lParam of the key message being handled, for telling a real key press apart
   // from a synthesised one in the log.
   uint64_t lastKeyLParam_ = 0;

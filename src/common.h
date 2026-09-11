@@ -71,6 +71,20 @@ inline const char* kAppVersion = QBLANK_VERSION;
 // Creates a directory and every missing parent. True when it exists afterwards.
 bool EnsureFolder(const std::wstring& path);
 
+// Bytes still free on the volume `path` lies on, for the user the program runs
+// as -- a quota counts, which is what a recording actually runs into. False
+// when the path cannot be reached at all; the folder itself need not exist yet,
+// the nearest existing parent answers for it.
+bool DiskFreeBytes(const std::wstring& path, uint64_t* freeBytes);
+
+// "412 GB", "3,7 TB". Binary prefixes, because that is what Explorer shows and
+// two different numbers for the same disk is worse than either convention.
+std::string FormatBytes(uint64_t bytes);
+
+// "4 h 32 min", "18 min", "44 s". Rounded the way someone reads a clock rather
+// than the way a stopwatch runs.
+std::string FormatDuration(double seconds);
+
 template <typename T>
 T Clamp(T v, T lo, T hi) {
   return v < lo ? lo : (v > hi ? hi : v);

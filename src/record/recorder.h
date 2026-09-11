@@ -45,6 +45,16 @@ struct RecordStats {
   std::string error;
 };
 
+// Roughly what a second of recording costs on disk, for the remaining time
+// estimate. The video bitrate is what the encoder is asked for; every audio
+// track is the 192 kbit/s the command line fixes. A running recording has a
+// measured rate and does not need this -- this is for the number shown before
+// anything is running, where there is nothing to measure.
+//
+// Under RateControl::Quality the bitrate is a ceiling rather than a target, so
+// the estimate is a worst case there and the file usually turns out smaller.
+double EstimatedBytesPerSecond(const RecordSettings& settings, int audioTracks);
+
 class Recorder {
  public:
   Recorder() = default;

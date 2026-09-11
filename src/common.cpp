@@ -145,6 +145,64 @@ bool EnsureFolder(const std::wstring& path) {
   return ::CreateDirectoryW(path.c_str(), nullptr) || ::GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
+bool DiskFreeBytes(const std::wstring& path, uint64_t* freeBytes) {
+  if (freeBytes) *freeBytes = 0;
+  if (path.empty()) return false;
+
+  std::wstring probe = path;
+  while (!probe.empty()) {
+    ULARGE_INTEGER avail = {};
+    // Der erste der drei Werte und nicht der zweite: er ist das, was diesem
+    // Benutzer zur Verfuegung steht, und gegen den laeuft eine Aufnahme. Wo ein
+    // Kontingent gesetzt ist, sind die beiden verschieden.
+    if (::GetDiskFreeSpaceExW(probe.c_str(), &avail, nullptr, nullptr)) {
+      if (freeBytes) *freeBytes = (uint64_t)avail.QuadPart;
+      return true;
+    }
+
+    // Nach oben, bis ein Verzeichnis antwortet: der Aufnahmeordner muss noch
+    // nicht angelegt sein, wenn jemand in den Einstellungen nachsieht.
+    const size_t slash = probe.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) return false;
+    if (slash < 3) {
+      // An der Wurzel angekommen. "C:" allein meint das aktuelle Verzeichnis
+      // dieses Laufwerks und nicht die Wurzel, deshalb der Schraegstrich -- und
+      // antwortet die Wurzel nicht, gibt es nichts mehr zu fragen.
+      probe = probe.substr(0, slash) + L"\\";
+      ULARGE_INTEGER root = {};
+      if (!::GetDiskFreeSpaceExW(probe.c_str(), &root, nullptr, nullptr)) return false;
+      if (freeBytes) *freeBytes = (uint64_t)root.QuadPart;
+      return true;
+    }
+    probe.resize(slash);
+  }
+  return false;
+}
+
+std::string FormatBytes(uint64_t bytes) {
+  static const char* kUnits[] = {"B", "KB", "MB", "GB", "TB", "PB"};
+  double value = (double)bytes;
+  int unit = 0;
+  while (value >= 1024.0 && unit + 1 < (int)(sizeof(kUnits) / sizeof(kUnits[0]))) {
+    value /= 1024.0;
+    ++unit;
+  }
+  if (unit == 0) return Format("%llu B", (unsigned long long)bytes);
+  // Eine Nachkommastelle nur, solange sie etwas aussagt: bei 412 GB ist die
+  // dritte Stelle Rauschen, bei 3,7 TB ist sie die Antwort.
+  return Format(value < 10.0 ? "%.1f %s" : "%.0f %s", value, kUnits[unit]);
+}
+
+std::string FormatDuration(double seconds) {
+  if (!(seconds > 0.0)) return "0 s";
+  if (seconds < 60.0) return Format("%.0f s", seconds);
+  const long long total = (long long)(seconds + 0.5);
+  const long long hours = total / 3600;
+  const long long minutes = (total % 3600) / 60;
+  if (hours <= 0) return Format("%lld min", minutes);
+  return Format("%lld h %lld min", hours, minutes);
+}
+
 ComScope::ComScope(DWORD model) {
   HRESULT hr = ::CoInitializeEx(nullptr, model);
   // RPC_E_CHANGED_MODE means the thread is already initialised in a different

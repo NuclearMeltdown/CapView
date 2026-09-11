@@ -171,6 +171,17 @@ class SettingsWindow {
   void SetVirtualCameraState(bool running, const std::vector<VirtualCamera::Consumer>& consumers);
   void SetCarrierPeriod(float samples) { carrierPeriod_ = samples > 1.5f ? samples : 3.045f; }
 
+  // Platz auf dem Ziellaufwerk, von der App gemessen statt hier: sie sieht
+  // ohnehin waehrend der Aufnahme hin, und ein Systemaufruf je gezeichnetem
+  // Bild waere fuer eine Zahl, die sich langsam aendert, reine Verschwendung.
+  // `bytes` 0 bei unbekanntem Ziel. `bytesPerSecond` kommt ebenfalls von dort,
+  // weil nur die App weiss, wie viele Tonspuren gerade zusammenkaemen.
+  void SetDiskFree(uint64_t bytes, bool known, double bytesPerSecond) {
+    diskFree_ = bytes;
+    diskKnown_ = known;
+    diskBytesPerSecond_ = bytesPerSecond;
+  }
+
   void SetHdrState(bool displayCapable, bool outputActive, float displayPeak, int sourceTransfer) {
     hdrDisplayCapable_ = displayCapable;
     hdrOutputActive_ = outputActive;
@@ -302,6 +313,10 @@ class SettingsWindow {
   // depends on the video standard and the captured width, neither of which the
   // settings know.
   float carrierPeriod_ = 3.045f;
+  // Siehe SetDiskFree.
+  uint64_t diskFree_ = 0;
+  bool diskKnown_ = false;
+  double diskBytesPerSecond_ = 0.0;
   // Which tab is open, carried across the two ImGui contexts by hand.
   ImGuiContext* tabContext_ = nullptr;
   int activeTab_ = 0;

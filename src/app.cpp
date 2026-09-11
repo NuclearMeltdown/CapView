@@ -50,6 +50,10 @@ const double kSnowSeconds = 2.0;
 const double kRetrySeconds = 2.0;
 const double kRetrySlowSeconds = 10.0;
 const int kRetryBackoffAfter = 5;
+// Wo eine Aufnahme nicht mehr anfaengt und eine laufende aufhoert. Ein fester
+// Boden neben der Restzeit: unter ein paar hundert Megabyte wird Windows selbst
+// unruhig, und die letzten Bytes eines Dateisystems sind die langsamsten.
+const uint64_t kDiskFloorBytes = 256ull * 1024 * 1024;
 // Hide the pointer after this much stillness in fullscreen.
 const double kCursorIdleSeconds = 2.0;
 // How long the volume readout stays on screen after a change.
@@ -1111,6 +1115,19 @@ void App::StartRecording() {
   }
   settings.outputFolder = ToUtf8(folder);
 
+  // Gar nicht erst anfangen, wenn der Platz schon jetzt nicht reicht: ffmpeg
+  // wuerde starten, seinen Kopf schreiben und sterben, und liegen bliebe eine
+  // Datei von ein paar Kilobyte, die aussieht wie eine Aufnahme.
+  uint64_t freeNow = 0;
+  if (DiskFreeBytes(folder, &freeNow) && freeNow < kDiskFloorBytes) {
+    renderer_.SetReadbackEnabled(false);
+    audio_.SetTapEnabled(false);
+    Toast(Format(T("Zu wenig Speicherplatz — nur noch %s frei.",
+                   "Not enough disk space — only %s free."),
+                 FormatBytes(freeNow).c_str()));
+    return;
+  }
+
   const VideoFormatInfo format = renderer_.sourceFormat();
   std::string error;
   Recorder::AudioSource mainTrack;
@@ -1194,6 +1211,11 @@ void App::StartRecording() {
   }
   config_.active().image.compare = false;
 
+  // Die Platzwarnung gilt je Aufnahme, und die naechste Abfrage soll nicht die
+  // Zahl von vor einer Sekunde benutzen, um sofort zu warnen oder zu schweigen.
+  diskWarned_ = false;
+  lastDiskCheck_ = -1000.0;
+
   const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.outputWidth(),
                                   renderer_.outputHeight(), recordFps, mainTrack, micTrack,
                                   config_.active().audio.micTrackMode, &error);
@@ -1236,6 +1258,40 @@ std::wstring App::ResolveOutputFolder(std::string* configured, const std::wstrin
     return fallback;
   }
   return {};
+}
+
+void App::UpdateDiskSpace() {
+  // Nur wenn jemand hinsieht oder etwas davon abhaengt. Ein Laufwerk im
+  // Sekundentakt zu befragen, waehrend niemand die Zahl braucht, weckt eine
+  // schlafende Platte fuer nichts.
+  if (!settings_.isOpen() && !recorder_.recording()) return;
+
+  // Wie viele Tonspuren in der Datei landen wuerden -- jede kostet ihre
+  // 192 kbit/s. Dieselbe Rechnung wie in BuildCommandLine: die Mischung ist
+  // eine eigene Spur, und "beide" heisst Mischung *und* die zwei einzelnen.
+  const bool haveMain = audio_.running() && audio_.tapSampleRate() > 0;
+  const bool haveMic = mic_.running() && mic_.sampleRate() > 0;
+  int tracks = (haveMain ? 1 : 0) + (haveMic ? 1 : 0);
+  if (haveMain && haveMic) {
+    const MicTrackMode mode = config_.active().audio.micTrackMode;
+    if (mode == MicTrackMode::Mixed) tracks = 1;
+    if (mode == MicTrackMode::Both) tracks = 3;
+  }
+  diskBytesPerSecond_ = EstimatedBytesPerSecond(config_.record, tracks);
+
+  const double now = ImGui::GetTime();
+  if (now - lastDiskCheck_ > 1.0) {
+    lastDiskCheck_ = now;
+    // Absichtlich nicht ueber ResolveOutputFolder: das legt Ordner an und meldet
+    // sich mit Einblendungen, und beides hat eine Abfrage im Sekundentakt nicht
+    // zu tun. DiskFreeBytes geht selbst bis zum naechsten vorhandenen Elternteil
+    // hoch, der Ordner muss also noch gar nicht existieren.
+    const std::wstring folder = config_.record.outputFolder.empty()
+                                    ? DefaultRecordFolder()
+                                    : ToWide(config_.record.outputFolder);
+    diskFreeKnown_ = DiskFreeBytes(folder, &diskFreeBytes_);
+  }
+  settings_.SetDiskFree(diskFreeBytes_, diskFreeKnown_, diskBytesPerSecond_);
 }
 
 void App::SyncMicrophone(bool aboutToRecord) {
@@ -4789,6 +4845,42 @@ void App::FeedRecorder() {
     }
   }
 
+  // Der Platz auf dem Laufwerk. Eine volllaufende Platte bricht ffmpeg mitten
+  // im Schreiben ab, und was dann liegen bleibt, haengt vom Format ab: MKV
+  // uebersteht das meistens, MP4 ohne seinen Index am Ende selten. Also lieber
+  // eine Minute zu frueh sauber beendet als eine Datei, die keiner aufmacht.
+  if (diskFreeKnown_) {
+    // Gemessen schlaegt geschaetzt, sobald es etwas zu messen gibt: was dieser
+    // Encoder auf dieser Quelle wirklich schreibt, kann von der eingestellten
+    // Bitrate weit weg sein -- im Qualitaetsmodus ist es das immer.
+    const RecordStats stats = recorder_.stats();
+    double rate = diskBytesPerSecond_;
+    if (stats.seconds > 3.0 && stats.bytesWritten > 0) {
+      rate = (double)stats.bytesWritten / stats.seconds;
+    }
+    const double left = rate > 1.0 ? (double)diskFreeBytes_ / rate : 0.0;
+
+    // Ein fester Boden zusaetzlich zur Zeit: bei kleiner Bitrate reichen 30 s
+    // rechnerisch noch lange, waehrend Windows schon keinen Platz mehr fuer
+    // seine eigenen Schreibpuffer hat.
+    if (diskFreeBytes_ < kDiskFloorBytes || (rate > 1.0 && left < 20.0)) {
+      CAP_WARN("Aufnahme: Platte fast voll (%s frei), beendet",
+               FormatBytes(diskFreeBytes_).c_str());
+      StopRecording();
+      Toast(T("Aufnahme beendet — Speicherplatz fast aufgebraucht.",
+              "Recording stopped — the disk is nearly full."));
+      return;
+    }
+    // Einmal je Aufnahme: eine Warnung, die im Sekundentakt wiederkommt, ist
+    // keine Warnung mehr.
+    if (!diskWarned_ && rate > 1.0 && left < 120.0) {
+      diskWarned_ = true;
+      Toast(Format(T("Nur noch %s frei — etwa %s Aufnahme.",
+                     "Only %s free — about %s of recording."),
+                   FormatBytes(diskFreeBytes_).c_str(), FormatDuration(left).c_str()));
+    }
+  }
+
   // ffmpeg died on its own: stop cleanly rather than filling a dead pipe.
   if (recorder_.failed()) {
     const RecordStats stats = recorder_.stats();
@@ -5634,6 +5726,7 @@ void App::DrawUi() {
       renderer_.detectedInterlace() == VideoRenderer::InterlaceVerdict::Interlaced);
   settings_.SetScanlineRoom(renderer_.scanlineRoom());
   settings_.SetLevels(audio_.inputPeak(), mic_.peak(), mic_.running());
+  UpdateDiskSpace();
   if (settings_.takeCropPickRequest()) BeginCropPick();
   if (settings_.takeDeviceConfigRequest()) OpenDeviceConfig();
   if (settings_.takeCropDetectRequest()) DetectCrop();

@@ -2945,6 +2945,24 @@ void SettingsWindow::DrawRecordTab(FfmpegInfo* ffmpeg) {
   FolderRow("recfolder", kPickRecordFolder, folderBuffer_, sizeof(folderBuffer_),
             &rec.outputFolder, DefaultRecordFolder());
 
+  // Was auf das Laufwerk noch draufgeht. Die Zeit ist die eigentliche Auskunft:
+  // "412 GB frei" beantwortet die Frage nicht, die jemand vor einer Aufnahme
+  // hat, "noch 4 h 32 min" schon.
+  if (diskKnown_) {
+    const double seconds = diskBytesPerSecond_ > 1.0 ? (double)diskFree_ / diskBytesPerSecond_ : 0.0;
+    std::string line = Format(T("%s frei", "%s free"), FormatBytes(diskFree_).c_str());
+    if (seconds > 0.0) {
+      line += Format(T(" — reicht für etwa %s Aufnahme", " — about %s of recording"),
+                     FormatDuration(seconds).c_str());
+    }
+    ImGui::TextDisabled("%s", line.c_str());
+    ImGui::SameLine();
+    HelpMarker(T("Geschätzt aus der eingestellten Bitrate. Bei Qualitätsmodus ist die Bitrate nur "
+                 "die Obergrenze, es reicht also meist länger.",
+                 "Estimated from the configured bitrate. In quality mode the bitrate is only a "
+                 "ceiling, so it usually lasts longer."));
+  }
+
   ImGui::Checkbox(T("Bei Größe aufteilen", "Split at size"), &rec.splitFiles);
   ImGui::SameLine();
   HelpMarker(T("Nur für FAT32 nötig. NTFS und exFAT haben kein 4-GB-Limit. Beim Teilen entsteht "
