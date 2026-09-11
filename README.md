@@ -84,6 +84,8 @@ compositing and streaming are not. For those, use OBS.
 
 ![Left: the Super Mario World title screen at 240p, magnified. Right: the same picture with scanlines at 0.35, a dark gap between each pair of picture lines](docs/crt-scanlines.png)
 
+![Three panels magnified to the pixel: mask off, aperture grille with its vertical stripes, and a shadow mask whose triads step sideways every other row](docs/crt-mask.png)
+
 **High dynamic range** · [wiki](../../wiki/High-dynamic-range)
 - P010 and P016 read against PQ (ST 2084) or HLG (BT.2100).
 - BT.2390 tone mapping on an ordinary screen, scRGB on an HDR screen.
