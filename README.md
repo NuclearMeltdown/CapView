@@ -58,6 +58,8 @@ compositing and streaming are not. For those, use OBS.
 - Counted in source pixels; dropped or kept per picture size when the source changes.
 - Range and matrix measured from the image. **F6** measures again.
 
+![The crop editor over the running picture: handles on all four edges, and a toolbar carrying the four values, the resulting size, Apply and Cancel](docs/crop-configure.jpg)
+
 **Deinterlacing** · [wiki](../../wiki/Deinterlacing) — interlacing is measured, not believed.
 
 | Mode | Vertical movement | |
@@ -78,6 +80,8 @@ compositing and streaming are not. For those, use OBS.
 - Derived in the shader from the subcarrier period: right for PAL, PAL 60, NTSC, NTSC 4.43, PAL M and PAL N at any width. SECAM approximated.
 
 ![Left: a GameCube over composite with the filter off, dot crawl beading along every letter edge and across the colour bars. Right: the same frame under the four-frame average, clean](docs/composite-before-after.png)
+
+![The live picture under F12: a white line down the middle, the filters off on the left half and on on the right](docs/compare-split.jpg)
 
 **Cathode ray tube** — off by default, display only.
 - Scanline gaps follow the **source's** line grid, not the screen's, and are absent where there is no room.
@@ -132,7 +136,7 @@ compositing and streaming are not. For those, use OBS.
 - Compares the build against the newest GitHub release.
 - Installs by renaming, so a failed update leaves the program as it was.
 
-![The Picture tab: scaling and sharpening, the deinterlacer, the crop with its Detect button, and the composite filter with its two controls](docs/settings-picture.png)
+![The Picture tab: the deinterlacer, the crop with its Detect and Configure buttons, the composite filter with its controls, and the A/B compare with its divider](docs/settings-picture.png)
 
 ## Shortcuts
 
