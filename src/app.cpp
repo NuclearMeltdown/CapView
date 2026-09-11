@@ -1010,6 +1010,25 @@ void App::ToggleRecording() {
   }
 }
 
+void App::ToggleFreeze() {
+  // Waehrend einer Aufnahme gibt es kein Standbild: die Aufnahme und die
+  // virtuelle Kamera holen ihr Bild aus derselben Textur wie die Anzeige, ein
+  // Standbild landete also in der Datei.
+  if (recorder_.recording()) {
+    Toast(T("Während der Aufnahme geht kein Standbild.",
+            "No freeze while recording."));
+    return;
+  }
+  frozen_ = !frozen_;
+  if (!frozen_) {
+    // Was waehrend des Standbilds in der Verzoegerungsleitung stehen geblieben
+    // ist, ist inzwischen so alt wie das Standbild lang war. Es auszugeben
+    // hiesse, beim Fortsetzen erst einmal die Vergangenheit abzuspielen.
+    delayLine_.Clear();
+  }
+  Toast(frozen_ ? T("Standbild", "Frozen") : T("Standbild aus", "Running again"));
+}
+
 void App::StartRecording() {
   if (recorder_.recording()) return;
 
@@ -1150,6 +1169,15 @@ void App::StartRecording() {
   recordSourceFps_ = recordFps;
   pendingSince_ = -1.0;
   if (config_.active().image.deinterlace != Deinterlace::Off) recordFps *= 2.0;
+
+  // Ein Standbild wuerde in die Datei wandern, weil Aufnahme und virtuelle
+  // Kamera hinter denselben Durchgaengen abgreifen wie die Anzeige. Also faellt
+  // es hier weg, statt die Aufnahme zu verweigern: wer aufnimmt, meint das
+  // ganze Bild von jetzt. Erst hier, weil alles davor noch abbrechen kann.
+  if (frozen_) {
+    frozen_ = false;
+    delayLine_.Clear();
+  }
 
   const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.outputWidth(),
                                   renderer_.outputHeight(), recordFps, mainTrack, micTrack,
@@ -5039,7 +5067,13 @@ void App::RenderFrame() {
                 QpcToSeconds(now - captureStartQpc_) * 1000.0, view.size);
       }
       renderer_.SetSourceFormat(sink->format(), nullptr);
-      if (delayLine_.active()) {
+      // Das Standbild haelt hier an und nirgends sonst: die Bilder werden
+      // weiter abgeholt, damit der Zulauf nicht auflaeuft und die Statistik
+      // stimmt, nur in die Textur geht keines mehr. Alles dahinter -- Filter,
+      // Skalierung, Regler -- laeuft am stehenden Bild weiter.
+      if (frozen_) {
+        // nichts hochladen
+      } else if (delayLine_.active()) {
         // Mit der Ankunftszeit und nicht mit `now`: die Verzoegerungsleitung
         // soll das Bild um die eingestellte Zeit nach seinem Eintreffen
         // herausgeben, nicht nach dem Zeichendurchgang, der es aufgegriffen hat.
@@ -5050,7 +5084,7 @@ void App::RenderFrame() {
         displayedArrivalQpc_ = sink->lastArrivalQpc();
       }
     }
-    if (delayLine_.active()) {
+    if (!frozen_ && delayLine_.active()) {
       FrameView delayed;
       if (delayLine_.Pop(&delayed, now)) {
         renderer_.UploadFrame(delayed);
@@ -5778,6 +5812,17 @@ void App::DrawContextMenu() {
     RequestScreenshot(true);
   }
 
+  // Das hilft beim Einstellen und aendert nur die Anzeige, deshalb steht es
+  // hier und nicht in den Einstellungen: man greift danach, waehrend man
+  // auf das Bild sieht.
+  if (ImGui::MenuItem(T("Standbild", "Freeze"), sc(HotkeyAction::Freeze), frozen_)) {
+    ToggleFreeze();
+  }
+  WrappedTooltip(T("Hält das Bild an, damit man Filter in Ruhe einstellen kann. Die Filter "
+                   "laufen weiter, nur die Quelle steht.",
+                   "Holds the picture so filters can be set in peace. The filters keep "
+                   "running; only the source stands still."));
+
   // Der schwarze Rand ist etwas, das man sieht, und das Suchen danach gehoert
   // deshalb dorthin, wo man hinsieht, statt in einen Reiter des
   // Einstellungsfensters. Zumal die Messung nur so gut ist wie das Bild, das
@@ -5886,6 +5931,9 @@ bool App::HandleKeyDown(WPARAM key) {
       return true;
     case HotkeyAction::ScreenshotClipboard:
       RequestScreenshot(true);
+      return true;
+    case HotkeyAction::Freeze:
+      ToggleFreeze();
       return true;
     case HotkeyAction::DetectCrop:
       DetectCrop();

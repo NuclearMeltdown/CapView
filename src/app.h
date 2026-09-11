@@ -154,6 +154,15 @@ class App {
   // `includeUi` false grabs the picture itself at source resolution; true grabs
   // the finished window, overlay and all, at window resolution.
   void WriteScreenshot(bool includeUi, bool toClipboard);
+  // Haelt an, was in die Textur geht -- der Zulauf laeuft weiter, die Filter
+  // auch. Ein Standbild ist zum Hinsehen da: an einem stehenden Bild laesst
+  // sich ein Regler beurteilen, an einem laufenden nicht.
+  //
+  // Waehrend einer Aufnahme geht das nicht. Aufnahme und virtuelle Kamera holen
+  // ihr Bild aus derselben Textur wie die Anzeige, ein Standbild wuerde also
+  // auch in die Datei und in die Kamera gefrieren -- was niemand meint, wenn er
+  // die Anzeige anhaelt.
+  void ToggleFreeze();
   void DrawToolbarStrip();
   void OpenFolderInExplorer(std::string* configured, const std::wstring& fallback);
   // Starts or stops the microphone to match the settings and what is going on.
@@ -377,6 +386,9 @@ class App {
 
   bool screenshotPending_ = false;
   bool screenshotToClipboard_ = false;
+  // Standbild: siehe ToggleFreeze. Kein Profilwert, sondern ein Zustand -- ein
+  // angehaltenes Bild soll einen Neustart nicht ueberleben.
+  bool frozen_ = false;
   // Whether the bar was drawn this frame; the picture layout follows it.
   bool toolbarVisible_ = false;
 

@@ -22,6 +22,7 @@ enum class HotkeyAction {
   Record,
   Screenshot,
   ScreenshotClipboard,
+  Freeze,
   DetectCrop,
   DetectStandard,
   RemeasureRange,
