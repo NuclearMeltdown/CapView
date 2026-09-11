@@ -235,6 +235,10 @@ footer .made{margin-top:18px}
       <tr><td><strong>Synchronous demodulator</strong></td><td>Reconstructs the subcarrier out of the brightness and subtracts it, so moving content is covered too. Removes 81&nbsp;% of the pattern at a window of nine samples.</td><td>17&nbsp;% of horizontal sharpness.</td></tr>
     </table>
     <div class="note">The two are told about each other: the averaging reports how much of the job it did, and the demodulator only handles the rest. Turning both up used to make the picture worse than either alone.</div>
+    <figure>
+      <img src="compare-split.jpg" alt="A GameCube picture split down the middle by a white line: the composite filters off on the left half, on on the right">
+      <figcaption><strong>F12</strong> splits the live picture &mdash; filters off on the left, on on the right &mdash; so a setting is judged against the source it is meant to fix rather than against memory. The split is measured in the source's own grid and stays put when the window is resized, and <strong>F11</strong> holds the source still for the ones that are easier to see on a frozen picture.</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -289,13 +293,28 @@ footer .made{margin-top:18px}
 
 <section class="reveal">
   <div class="wrap">
-    <h2><span class="num">06</span>Everything else</h2>
+    <h2><span class="num">06</span>Set up on the picture itself</h2>
+    <p class="lead">One window for everything, on a Direct3D device of its own so it can sit on a second monitor while the picture runs on the first. Controls that cannot apply to the source are absent rather than greyed out &mdash; and what a setting is doing is written under it, not left to be guessed.</p>
+    <figure>
+      <img src="settings-picture.png" alt="The Picture tab of the settings window: the deinterlacer, the crop with its Detect and Configure buttons, the native pixel grid, and the composite filter with its controls">
+      <figcaption>The Picture tab. Under the demodulator is the reading it is working to &mdash; 81&nbsp;% of the pattern gone for 17&nbsp;% of the sharpness at a window of nine samples &mdash; and the crop says which picture sizes it already has values for.</figcaption>
+    </figure>
+    <figure>
+      <img src="crop-configure.jpg" alt="The crop editor: white handles on all four edges of the picture and a toolbar with the four values, the resulting size, Apply and Cancel">
+      <figcaption>The crop is dragged on the running picture rather than typed into four boxes, and <strong>F8</strong> finds the border on its own &mdash; measured across two seconds, so a fade to black is not read as the picture shrinking. The numbers are source pixels, and they are kept per picture size: a console switched from 480 to 576 lines gets its own.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="reveal">
+  <div class="wrap">
+    <h2><span class="num">07</span>Everything else</h2>
     <div class="grid">
-      <div class="card"><h3>Recording</h3><p>H.264, H.265 or AV1 through NVENC, Quick Sync, AMF, x264 or x265. The audio is the master clock, so the output is constant frame rate and does not drift — measured at 1&nbsp;ms over 15&nbsp;seconds.</p></div>
+      <div class="card"><h3>Recording</h3><p>H.264, H.265 or AV1 through NVENC, Quick Sync, AMF, x264 or x265. The audio is the master clock, so the output is constant frame rate and does not drift — measured at 1&nbsp;ms over 15&nbsp;seconds. The free space on the drive is shown as the recording time it is worth, and a recording stops itself before the drive fills up.</p></div>
       <div class="card"><h3>Encoder controls</h3><p>Rate control, preset, tuning, look-ahead, adaptive quantisation and multipass, under one set of names translated into each vendor's own.</p></div>
       <div class="card"><h3>Virtual camera</h3><p>Offer the picture to OBS, Discord or a browser at the source's own resolution and frame rate &mdash; and to anything that cannot take that, at whatever it asks for instead.</p></div>
       <div class="card"><h3>High dynamic range</h3><p>PQ and HLG are decoded to linear light, tone mapped with BT.2390 for an ordinary screen or passed through as scRGB for an HDR one.</p></div>
-      <div class="card"><h3>Screenshots</h3><p>PNG or JPEG at source resolution through Windows Imaging Component, so no ffmpeg is needed. JPEG&nbsp;XR keeps the HDR range and needs none either; AVIF does. A switch grabs the finished window instead, interface and all.</p></div>
+      <div class="card"><h3>Screenshots</h3><p>PNG or JPEG at source resolution through Windows Imaging Component, so no ffmpeg is needed. JPEG&nbsp;XR keeps the HDR range and needs none either; AVIF does. A switch grabs the finished window instead, interface and all, and <strong>Ctrl+F10</strong> puts the shot on the clipboard rather than on disk.</p></div>
       <div class="card"><h3>Colour range, measured</h3><p>Full or limited is read off the picture rather than inferred from the pixel format, and the numbers behind the verdict are on show: lowest and highest sample, and how much of the picture sits below 16. It holds until the format changes &mdash; and <strong>F6</strong> measures it again for the one thing that changes without touching the format, an option in the card's own driver.</p></div>
       <div class="card"><h3>Profiles</h3><p>Device, input, capture format and every picture and audio setting, one per source, on Ctrl+1 to Ctrl+9 &mdash; or on none at all: a profile can name the video standard that means it, and the standard the search settles on then picks the profile.</p></div>
     </div>
@@ -304,7 +323,7 @@ footer .made{margin-top:18px}
 
 <section class="reveal">
   <div class="wrap">
-    <h2><span class="num">07</span>What it is not</h2>
+    <h2><span class="num">08</span>What it is not</h2>
     <p class="lead">Scenes, overlays, compositing and streaming are not here and are not planned. For those, use OBS — and note that a card grants its capture pin to one process at a time, so the two cannot hold the same card at once.</p>
     <table>
       <tr><th>Requirement</th><th></th></tr>
