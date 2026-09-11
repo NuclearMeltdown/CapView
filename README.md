@@ -10,9 +10,14 @@
 
 ![The viewer in fullscreen showing a console at 1080p60, with the statistics overlay reading a frame age of 1.2 ms](docs/viewer.jpg)
 
-- **~1 ms** from a frame arriving to the present that hands it over, 1080p60 sustained (StarTech PEXHDCAP60L).
-- Viewer, recorder, screenshots, microphone track, virtual camera.
-- No scenes, overlays, compositing or streaming. For those, use OBS.
+qBlank displays the output of a capture card with as little delay as the
+hardware allows, so the captured signal can be played on rather than only
+watched. Measured on a StarTech PEXHDCAP60L: **1080p60 sustained, around 1 ms
+from a frame arriving to the present that hands it to the compositor.**
+
+It is meant for using a capture card to play. Recording, screenshots, a
+microphone track and a virtual camera are included; scenes, overlays,
+compositing and streaming are not. For those, use OBS.
 
 > **The [wiki](../../wiki) is the documentation** — one page per feature, what the
 > code does and what was measured. This page is the list.
