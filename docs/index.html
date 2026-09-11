@@ -120,6 +120,16 @@ figure img{
 }
 figcaption{margin-top:12px;font-size:.87rem;color:var(--dim);line-height:1.55}
 
+/* close-ups of the interface: shown at their own size, never blown up, and
+   allowed the full width of a phone so the labels stay readable */
+figure.ui img{max-width:436px;margin-left:auto;margin-right:auto;background:var(--bg-raised)}
+figure.ui figcaption{max-width:560px;margin-left:auto;margin-right:auto}
+@media (max-width:520px){
+  figure.ui{margin-left:-24px;margin-right:-24px}
+  figure.ui img{border-radius:0;border-left:0;border-right:0}
+  figure.ui figcaption{padding:0 24px}
+}
+
 /* the one number worth shouting about */
 .metric{
   display:flex;gap:40px;flex-wrap:wrap;justify-content:center;
@@ -236,8 +246,16 @@ footer .made{margin-top:18px}
     </table>
     <div class="note">The two are told about each other: the averaging reports how much of the job it did, and the demodulator only handles the rest. Turning both up used to make the picture worse than either alone.</div>
     <figure>
-      <img src="compare-split.jpg" alt="A GameCube picture split down the middle by a white line: the composite filters off on the left half, on on the right">
+      <img src="compare-split.jpg" alt="A GameCube title screen split down the middle by a white line: the composite filters off on the left half, on on the right">
       <figcaption><strong>F12</strong> splits the live picture &mdash; filters off on the left, on on the right &mdash; so a setting is judged against the source it is meant to fix rather than against memory. The split is measured in the source's own grid and stays put when the window is resized, and <strong>F11</strong> holds the source still for the ones that are easier to see on a frozen picture.</figcaption>
+    </figure>
+    <figure>
+      <img src="compare-dotcrawl.jpg" alt="The same title screen magnified across the divider: the logo and the lettering beaded with dot crawl on the left half, clean on the right">
+      <figcaption>The same divider, close up. A title screen is where it shows worst: large flat colour against a hard edge, standing still long enough for the crawl to walk through it. Left of the line is what the cable delivers.</figcaption>
+    </figure>
+    <figure class="ui">
+      <img src="settings-composite.png" alt="The Composite filter section of the settings: colour shimmer, the four-frame average with its conditions, the demodulator at step 9 of 9, restore bandwidth, and the A/B compare with its divider">
+      <figcaption>The section that does it. Under the demodulator is the reading it is working to &mdash; 81&nbsp;% of the pattern gone for 17&nbsp;% of the sharpness at a window of nine samples &mdash; and the last two rows are the split above.</figcaption>
     </figure>
   </div>
 </section>
@@ -249,6 +267,10 @@ footer .made{margin-top:18px}
     <figure>
       <img src="deinterlace-before-after.png" alt="Left: a kart driving past a 480i barrier, woven, the chevrons torn into interlacing combs. Right: the same moment through YADIF, clean">
       <figcaption>480i from a GameCube, the same moment in two runs of one replay. Left, weaving: combing on everything that moves. Right, YADIF. A 240p or 288p console whose fields hold the same lines is detected separately and handled without interpolation at all.</figcaption>
+    </figure>
+    <figure class="ui">
+      <img src="settings-fields-crop.png" alt="The Fields and Crop sections of the settings: Measured: interlaced above the deinterlacer, and the four crop values with Configure, Detect and Reset">
+      <figcaption><em>Measured: interlaced</em> is the reading, not the media type &mdash; and the deinterlacer can be left on while a 240p console is plugged in, because it only runs where the measurement says it is needed. Under it, the crop: four numbers in source pixels, and the picture sizes they are already stored for.</figcaption>
     </figure>
   </div>
 </section>
@@ -287,6 +309,10 @@ footer .made{margin-top:18px}
       <img src="crt-mask.png" alt="Three panels magnified to the pixel: mask off, an aperture grille with its vertical stripes, and a shadow mask whose triads step sideways every other row">
       <figcaption>Magnified to the pixel, because a triad is three of them. An aperture grille is vertical stripes, the way a Trinitron worked; a shadow mask steps its triads sideways every other line. Both stop at half strength &mdash; past that the brightness compensation has to lift the peak far enough to clip the channels apart from one another, and what arrives is a colour cast rather than a stronger effect.</figcaption>
     </figure>
+    <figure class="ui">
+      <img src="settings-crt-colour.png" alt="The Cathode ray tube and Colour sections of the settings: source lines, scanlines and mask, and under them the range and matrix with the measurement they were taken from">
+      <figcaption>Three controls, and directly under them the colour range &mdash; measured from the picture rather than assumed from the input: full range, 53.41&nbsp;% of the samples below 16, and a line saying what that means for an analogue source.</figcaption>
+    </figure>
     <div class="note">Both pictures were made by running the shader's own <code>Scanline()</code> and <code>Mask()</code> over a still, rather than photographed off the screen: the effects are display-only by design, so a screenshot taken inside qBlank does not contain them.</div>
   </div>
 </section>
@@ -294,11 +320,7 @@ footer .made{margin-top:18px}
 <section class="reveal">
   <div class="wrap">
     <h2><span class="num">06</span>Set up on the picture itself</h2>
-    <p class="lead">One window for everything, on a Direct3D device of its own so it can sit on a second monitor while the picture runs on the first. Controls that cannot apply to the source are absent rather than greyed out &mdash; and what a setting is doing is written under it, not left to be guessed.</p>
-    <figure>
-      <img src="settings-picture.png" alt="The Picture tab of the settings window: the deinterlacer, the crop with its Detect and Configure buttons, the native pixel grid, and the composite filter with its controls">
-      <figcaption>The Picture tab. Under the demodulator is the reading it is working to &mdash; 81&nbsp;% of the pattern gone for 17&nbsp;% of the sharpness at a window of nine samples &mdash; and the crop says which picture sizes it already has values for.</figcaption>
-    </figure>
+    <p class="lead">The sections above are one window, on a Direct3D device of its own so it can sit on a second monitor while the picture runs on the first. Controls that cannot apply to the source are absent rather than greyed out &mdash; and what a setting is doing is written under it, not left to be guessed. Where a value is easier to see than to type, it is set on the picture instead.</p>
     <figure>
       <img src="crop-configure.jpg" alt="The crop editor: white handles on all four edges of the picture and a toolbar with the four values, the resulting size, Apply and Cancel">
       <figcaption>The crop is dragged on the running picture rather than typed into four boxes, and <strong>F8</strong> finds the border on its own &mdash; measured across two seconds, so a fade to black is not read as the picture shrinking. The numbers are source pixels, and they are kept per picture size: a console switched from 480 to 576 lines gets its own.</figcaption>
