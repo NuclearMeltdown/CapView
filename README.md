@@ -60,6 +60,8 @@ compositing and streaming are not. For those, use OBS.
 
 ![The crop editor over the running picture: handles on all four edges, and a toolbar carrying the four values, the resulting size, Apply and Cancel](docs/crop-configure.jpg)
 
+![The Fields and Crop sections of the settings: Measured: interlaced above the deinterlacer, the four crop values with Configure, Detect and Reset, and the picture sizes the crop is already stored for](docs/settings-fields-crop.png)
+
 **Deinterlacing** · [wiki](../../wiki/Deinterlacing) — interlacing is measured, not believed.
 
 | Mode | Vertical movement | |
@@ -81,7 +83,9 @@ compositing and streaming are not. For those, use OBS.
 
 ![Left: a GameCube over composite with the filter off, dot crawl beading along every letter edge and across the colour bars. Right: the same frame under the four-frame average, clean](docs/composite-before-after.png)
 
-![The live picture under F12: a white line down the middle, the filters off on the left half and on on the right](docs/compare-split.jpg)
+![A title screen under F12, magnified across the divider: the logo and the lettering beaded with dot crawl on the left half, clean on the right](docs/compare-dotcrawl.jpg)
+
+![The Composite filter section of the settings: colour shimmer, the four-frame average with its conditions, the demodulator at step 9 of 9 reading 81 % gone for 17 % softer, restore bandwidth, and the A/B compare with its divider](docs/settings-composite.png)
 
 **Cathode ray tube** — off by default, display only.
 - Scanline gaps follow the **source's** line grid, not the screen's, and are absent where there is no room.
@@ -91,6 +95,8 @@ compositing and streaming are not. For those, use OBS.
 ![Left: the Super Mario World title screen at 240p, magnified. Right: the same picture with scanlines at 0.35, a dark gap between each pair of picture lines](docs/crt-scanlines.png)
 
 ![Three panels magnified to the pixel: mask off, aperture grille with its vertical stripes, and a shadow mask whose triads step sideways every other row](docs/crt-mask.png)
+
+![The Cathode ray tube and Colour sections of the settings: source lines, scanlines and mask above the range and matrix, with the measurement under them — full range, 53.41 % below 16, and the note that an analogue input is not sitting on 16](docs/settings-crt-colour.png)
 
 **High dynamic range** · [wiki](../../wiki/High-dynamic-range)
 - P010 and P016 read against PQ (ST 2084) or HLG (BT.2100).
@@ -135,8 +141,6 @@ compositing and streaming are not. For those, use OBS.
 **Updates** · [wiki](../../wiki/Updates)
 - Compares the build against the newest GitHub release.
 - Installs by renaming, so a failed update leaves the program as it was.
-
-![The Picture tab: the deinterlacer, the crop with its Detect and Configure buttons, the composite filter with its controls, and the A/B compare with its divider](docs/settings-picture.png)
 
 ## Shortcuts
 
