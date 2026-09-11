@@ -23,6 +23,7 @@ enum class HotkeyAction {
   Screenshot,
   ScreenshotClipboard,
   Freeze,
+  Compare,
   DetectCrop,
   DetectStandard,
   RemeasureRange,

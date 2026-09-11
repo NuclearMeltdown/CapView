@@ -163,6 +163,7 @@ class App {
   // auch in die Datei und in die Kamera gefrieren -- was niemand meint, wenn er
   // die Anzeige anhaelt.
   void ToggleFreeze();
+  void ToggleCompare();
   void DrawToolbarStrip();
   void OpenFolderInExplorer(std::string* configured, const std::wstring& fallback);
   // Starts or stops the microphone to match the settings and what is going on.

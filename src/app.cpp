@@ -1029,6 +1029,20 @@ void App::ToggleFreeze() {
   Toast(frozen_ ? T("Standbild", "Frozen") : T("Standbild aus", "Running again"));
 }
 
+void App::ToggleCompare() {
+  // Aus demselben Grund wie beim Standbild: der Schnitt liegt im ersten
+  // Durchgang, und die Aufnahme holt ihr Bild hinter diesem Durchgang ab. Eine
+  // halb gefilterte Datei will niemand.
+  if (recorder_.recording()) {
+    Toast(T("Während der Aufnahme geht kein Vergleich.", "No compare while recording."));
+    return;
+  }
+  ImageSettings& img = config_.active().image;
+  img.compare = !img.compare;
+  Toast(img.compare ? T("Vergleich: links ohne Filter", "Compare: filters off on the left")
+                    : T("Vergleich aus", "Compare off"));
+}
+
 void App::StartRecording() {
   if (recorder_.recording()) return;
 
@@ -1170,14 +1184,15 @@ void App::StartRecording() {
   pendingSince_ = -1.0;
   if (config_.active().image.deinterlace != Deinterlace::Off) recordFps *= 2.0;
 
-  // Ein Standbild wuerde in die Datei wandern, weil Aufnahme und virtuelle
-  // Kamera hinter denselben Durchgaengen abgreifen wie die Anzeige. Also faellt
-  // es hier weg, statt die Aufnahme zu verweigern: wer aufnimmt, meint das
+  // Beide Sehhilfen wuerden in die Datei wandern, weil Aufnahme und virtuelle
+  // Kamera hinter denselben Durchgaengen abgreifen wie die Anzeige. Also fallen
+  // sie hier weg, statt die Aufnahme zu verweigern: wer aufnimmt, meint das
   // ganze Bild von jetzt. Erst hier, weil alles davor noch abbrechen kann.
   if (frozen_) {
     frozen_ = false;
     delayLine_.Clear();
   }
+  config_.active().image.compare = false;
 
   const bool ok = recorder_.Start(settings, ffmpeg_, renderer_.outputWidth(),
                                   renderer_.outputHeight(), recordFps, mainTrack, micTrack,
@@ -4347,6 +4362,9 @@ ImageSettings App::EffectiveImage(const Profile& profile) const {
     img.bandwidthRestore = 0.0f;
     // Das native Raster rechnet das Abtasten einer analogen Zeile zurueck.
     img.nativeWidth = 0;
+    // Und damit hat der Vergleich nichts mehr zu vergleichen: uebrig bliebe ein
+    // Strich quer durch ein Bild, das links und rechts dasselbe zeigt.
+    img.compare = false;
   } else if (!ConnectorMixesLumaAndChroma()) {
     // Analog, aber Helligkeit und Farbe kommen getrennt an -- S-Video auf zwei
     // Leitungen, Component auf drei. Damit faellt alles weg, was Uebersprechen
@@ -5812,8 +5830,8 @@ void App::DrawContextMenu() {
     RequestScreenshot(true);
   }
 
-  // Das hilft beim Einstellen und aendert nur die Anzeige, deshalb steht es
-  // hier und nicht in den Einstellungen: man greift danach, waehrend man
+  // Beides hilft beim Einstellen und aendert nur die Anzeige, deshalb stehen
+  // sie hier und nicht in den Einstellungen: man greift danach, waehrend man
   // auf das Bild sieht.
   if (ImGui::MenuItem(T("Standbild", "Freeze"), sc(HotkeyAction::Freeze), frozen_)) {
     ToggleFreeze();
@@ -5822,6 +5840,14 @@ void App::DrawContextMenu() {
                    "laufen weiter, nur die Quelle steht.",
                    "Holds the picture so filters can be set in peace. The filters keep "
                    "running; only the source stands still."));
+  if (ImGui::MenuItem(T("Filter vergleichen", "Compare filters"), sc(HotkeyAction::Compare),
+                      config_.active().image.compare)) {
+    ToggleCompare();
+  }
+  WrappedTooltip(T("Teilt das Bild: links ohne Composite-Filter, rechts mit. Die Trennlinie "
+                   "steht unter Bild → Composite.",
+                   "Splits the picture: composite filters off on the left, on on the right. "
+                   "The divider is under Picture → Composite."));
 
   // Der schwarze Rand ist etwas, das man sieht, und das Suchen danach gehoert
   // deshalb dorthin, wo man hinsieht, statt in einen Reiter des
@@ -5934,6 +5960,9 @@ bool App::HandleKeyDown(WPARAM key) {
       return true;
     case HotkeyAction::Freeze:
       ToggleFreeze();
+      return true;
+    case HotkeyAction::Compare:
+      ToggleCompare();
       return true;
     case HotkeyAction::DetectCrop:
       DetectCrop();

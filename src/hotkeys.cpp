@@ -19,9 +19,10 @@ Hotkeys::Hotkeys() {
   // anderes Ziel.
   (*this)[HotkeyAction::ScreenshotClipboard].vk = VK_F10;
   (*this)[HotkeyAction::ScreenshotClipboard].ctrl = true;
-  // Liegt auf der naechsten freien Taste derselben Reihe und aendert nur, was
-  // zu sehen ist.
+  // Die beiden Vergleichshilfen liegen nebeneinander auf den zwei Tasten, die
+  // in der Reihe noch frei sind. Beide aendern nur, was zu sehen ist.
   (*this)[HotkeyAction::Freeze].vk = VK_F11;
+  (*this)[HotkeyAction::Compare].vk = VK_F12;
   // Der Zuschnitt wird im Zweifel mehrmals hintereinander gesucht -- die
   // Messung braucht ein richtiges Bild, und wann eines anliegt, weiss nur der,
   // der hinsieht. F8 liegt frei und in derselben Reihe wie das uebrige, was
@@ -61,6 +62,7 @@ const char* HotkeyActionName(HotkeyAction action) {
     case HotkeyAction::ScreenshotClipboard:
       return T("Screenshot in die Zwischenablage", "Screenshot to clipboard");
     case HotkeyAction::Freeze: return T("Standbild", "Freeze");
+    case HotkeyAction::Compare: return T("Filter vergleichen", "Compare filters");
     case HotkeyAction::DetectCrop: return T("Rand suchen", "Detect border");
     case HotkeyAction::DetectStandard: return T("Videonorm suchen", "Detect video standard");
     case HotkeyAction::RemeasureRange: return T("Wertebereich neu messen", "Measure range again");
@@ -82,6 +84,7 @@ const char* HotkeyActionKey(HotkeyAction action) {
     case HotkeyAction::Screenshot: return "screenshot";
     case HotkeyAction::ScreenshotClipboard: return "screenshotClipboard";
     case HotkeyAction::Freeze: return "freeze";
+    case HotkeyAction::Compare: return "compare";
     case HotkeyAction::DetectCrop: return "detectCrop";
     case HotkeyAction::DetectStandard: return "detectStandard";
     case HotkeyAction::RemeasureRange: return "remeasureRange";

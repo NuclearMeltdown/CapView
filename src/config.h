@@ -463,6 +463,14 @@ struct ImageSettings {
   // enough at the carrier frequency for the decoder to have invented colour out
   // of it, and leaves genuine colour detail alone everywhere else.
   bool adaptiveChroma = false;
+  // Die halbe Anzeige ohne die Filter oben, damit sich beurteilen laesst, was
+  // sie tun. Der Schnitt liegt im Quellraster und nicht im Fenster: so folgt er
+  // dem Bild, wenn es gedreht oder beschnitten ist, statt quer darueber zu
+  // liegen. Links das Rohbild, rechts das gefilterte -- und nur die Kette aus
+  // diesem Abschnitt ist betroffen, Schaerfen, Skalierung und Roehrenmaske
+  // laufen ueber beide Haelften, sonst waere der Vergleich keiner.
+  bool compare = false;
+  float compareSplit = 0.5f;  // 0..1, Anteil der Breite links vom Schnitt
   AspectMode aspect = AspectMode::Source;
   // Whether the aspect above reaches past the window. The display gets it for
   // free -- it simply draws into a rectangle of the right shape -- but a

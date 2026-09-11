@@ -2049,6 +2049,40 @@ void SettingsWindow::DrawImageTab() {
                    "Horizontal only: vertically the picture is limited by the line count, "
                    "and no filter changes that."));
     }  // Composite-only
+
+    // Der A/B-Vergleich steht am Ende dieses Abschnitts, weil er genau ihn
+    // betrifft: links laeuft nichts von dem, was darueber eingestellt ist,
+    // rechts alles. Was danach kommt -- Schaerfen, Zeilen, Maske -- laeuft ueber
+    // beide Haelften, sonst verglichen sich zwei Bilder statt zweier Filter.
+    ImGui::Spacing();
+    bool compare = img.compare;
+    if (ImGui::Checkbox(T("Mit und ohne vergleichen", "Compare with and without"), &compare)) {
+      img.compare = compare;
+    }
+    ImGui::SameLine();
+    HelpMarker(T("Teilt das Bild: links das Signal, wie die Karte es liefert, rechts mit den "
+                 "Filtern aus diesem Abschnitt.\n\n"
+                 "Die Trennlinie liegt im Raster der Quelle und dreht sich deshalb mit dem "
+                 "Bild.\n\n"
+                 "Geht nicht während einer Aufnahme und wird beim Start einer Aufnahme "
+                 "abgeschaltet: Aufnahme und virtuelle Kamera greifen hinter demselben "
+                 "Durchgang ab und bekämen sonst ein halb gefiltertes Bild.",
+                 "Splits the picture: on the left the signal as the card delivers it, on the "
+                 "right with the filters from this section.\n\n"
+                 "The divider sits in the source's own grid, so it turns with the picture.\n\n"
+                 "Not available while recording, and switched off when one starts: the "
+                 "recording and the virtual camera tap the same pass and would otherwise get "
+                 "a half filtered picture."));
+
+    ImGui::BeginDisabled(!img.compare);
+    ImGui::Indent();
+    float split = img.compareSplit * 100.0f;
+    ImGui::SetNextItemWidth(-260.0f);
+    if (ImGui::SliderFloat(T("Trennlinie", "Divider"), &split, 0.0f, 100.0f, "%.0f %%")) {
+      img.compareSplit = Clamp(split / 100.0f, 0.0f, 1.0f);
+    }
+    ImGui::Unindent();
+    ImGui::EndDisabled();
   }
 
   // Bildröhre. Anzeigeeffekte und keine Signalbearbeitung: sie landen weder in

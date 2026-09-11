@@ -92,7 +92,11 @@ cbuffer ConvertCB : register(b0) {
   int   gMotionComp;      // 1 = follow the movement when averaging noise away
   int   gAdaptChroma;     // 1 = soften colour only where brightness invites it
   float gBandwidth;       // 0..1, how much of the rolled off luma band to restore
-  float gPad0;
+  // A/B comparison: the share of the cropped width left of the divider, where
+  // this whole pass is skipped so the two halves can be looked at side by side.
+  // Negative = off, which is why it is not simply zero: zero is a legitimate
+  // setting and means the divider sits on the left edge.
+  float gCompareSplit;
 
   float4 gCoef;           // Cr->R, Cb->G, Cr->G, Cb->B
 };
@@ -1074,62 +1078,79 @@ float4 main(VSOut i) : SV_Target {
   int2 p = int2(i.pos.xy);
   float3 rgb = FetchRgbAt(p);
 
+  // The A/B divider, and the only place it can sit. Everything that moves the
+  // picture around -- cropping, rotation, scaling -- happens in the passes after
+  // this one, so a divider measured in the window would slide off the picture
+  // the moment any of them changed. Measured across the cropped width in the
+  // source's own grid it stays where it was put and turns with the picture.
+  const float edge = (float)gCropLeft + gCompareSplit * (float)gOutWidth;
+  const bool raw = gCompareSplit >= 0.0 && (float)p.x < edge;
+
   // Everything that cleans the signal happens here, before any deinterlacer has
   // touched it. That is the entire reason this pass exists. A cleanup that runs
   // afterwards has to work out which source line the pixel in front of it came
   // from, and for a mode that interpolates there is no single answer -- so it
   // subtracts a pattern that pixel never carried, which is not a cleanup but a
   // new artefact. Doing it first removes the question.
-  // The two halves have to be told about each other. Both work out how much
-  // pattern is present from the *captured* pixels, so where the four frame
-  // average has already taken it away, the demodulator would go and subtract it
-  // a second time -- putting an inverted copy back. That is why turning both up
-  // made the picture worse than either one alone.
   //
-  // So the temporal half reports how much of the job it did, and the
-  // demodulator only handles the rest. Still picture: the average does it all,
-  // at no cost in sharpness. Moving picture: the average steps back and the
-  // demodulator takes over.
-  float handled = 0.0;
-  if (gTemporal > 0.0 && gHistCount >= 3) {
-    handled = TemporalGate(p.x, p.y) * gTemporal;
-    rgb += TemporalDelta(p.x, p.y) * handled;
-  }
+  // And it is the whole of it, which is why the comparison cuts here and
+  // nowhere else: one branch takes out every composite artefact this program
+  // knows how to take out, so skipping it shows the signal as the card handed
+  // it over. What comes later -- sharpening, scanlines, the mask -- runs over
+  // both halves, or the two sides would differ in more than the one thing the
+  // comparison is about.
+  if (!raw) {
+    // The two halves have to be told about each other. Both work out how much
+    // pattern is present from the *captured* pixels, so where the four frame
+    // average has already taken it away, the demodulator would go and subtract
+    // it a second time -- putting an inverted copy back. That is why turning
+    // both up made the picture worse than either one alone.
+    //
+    // So the temporal half reports how much of the job it did, and the
+    // demodulator only handles the rest. Still picture: the average does it all,
+    // at no cost in sharpness. Moving picture: the average steps back and the
+    // demodulator takes over.
+    float handled = 0.0;
+    if (gTemporal > 0.0 && gHistCount >= 3) {
+      handled = TemporalGate(p.x, p.y) * gTemporal;
+      rgb += TemporalDelta(p.x, p.y) * handled;
+    }
 
-  // Following the movement, over exactly the part of the picture the average
-  // above has just let go of. The two are complements by construction: this
-  // gets (1 - handled), which is what is moving, and it is band limited away
-  // from the carrier, so the part it does take cannot disturb the crawl work on
-  // either side of it. Where the picture stands still `handled` is one and this
-  // does nothing, which is right -- there the free filter has already won.
-  if (gMotionComp != 0 && gHistCount >= 3) {
-    rgb += MotionCompDelta(p.x, p.y) * (1.0 - handled);
-  }
+    // Following the movement, over exactly the part of the picture the average
+    // above has just let go of. The two are complements by construction: this
+    // gets (1 - handled), which is what is moving, and it is band limited away
+    // from the carrier, so the part it does take cannot disturb the crawl work
+    // on either side of it. Where the picture stands still `handled` is one and
+    // this does nothing, which is right -- there the free filter has won.
+    if (gMotionComp != 0 && gHistCount >= 3) {
+      rgb += MotionCompDelta(p.x, p.y) * (1.0 - handled);
+    }
 
-  if (gDotNotch > 0.0) rgb += DotDemodDelta(p.x, p.y) * (1.0 - handled);
+    if (gDotNotch > 0.0) rgb += DotDemodDelta(p.x, p.y) * (1.0 - handled);
 
-  // One reading of how much of this pixel sits at the carrier's own frequency,
-  // for the two filters below that both want to know. Seventeen taps with a
-  // sine and a cosine in each, so asking twice would be paying twice for the
-  // same answer.
-  float2 carrier = float2(0.0, 0.0);
-  if (gBandwidth > 0.0 || (gChromaSoft > 0 && gAdaptChroma != 0)) {
-    carrier = CarrierEnergy(p.x, p.y);
-  }
+    // One reading of how much of this pixel sits at the carrier's own frequency,
+    // for the two filters below that both want to know. Seventeen taps with a
+    // sine and a cosine in each, so asking twice would be paying twice for the
+    // same answer.
+    float2 carrier = float2(0.0, 0.0);
+    if (gBandwidth > 0.0 || (gChromaSoft > 0 && gAdaptChroma != 0)) {
+      carrier = CarrierEnergy(p.x, p.y);
+    }
 
-  // After all three of those, and not before any of them: the band this lifts
-  // runs up towards the carrier, and the pattern the filters above remove sits
-  // in the top of it. Lifting a picture that still had the pattern in it would
-  // hand them a harder job than they started with.
-  if (gBandwidth > 0.0) rgb = BandwidthRestore(rgb, p.x, p.y, carrier.x);
+    // After all three of those, and not before any of them: the band this lifts
+    // runs up towards the carrier, and the pattern the filters above remove sits
+    // in the top of it. Lifting a picture that still had the pattern in it would
+    // hand them a harder job than they started with.
+    if (gBandwidth > 0.0) rgb = BandwidthRestore(rgb, p.x, p.y, carrier.x);
 
-  if (gChromaSoft > 0) {
-    float3 soft = SoftenChroma(rgb, p.x, p.y);
-    // Softening the colour only where the brightness carries enough at the
-    // carrier to have invented some of it. Everywhere else the colour is as
-    // real as composite ever gets it, and blurring that sideways is pure loss
-    // -- which is what the slider did at every setting before this.
-    rgb = gAdaptChroma != 0 ? lerp(rgb, soft, carrier.y) : soft;
+    if (gChromaSoft > 0) {
+      float3 soft = SoftenChroma(rgb, p.x, p.y);
+      // Softening the colour only where the brightness carries enough at the
+      // carrier to have invented some of it. Everywhere else the colour is as
+      // real as composite ever gets it, and blurring that sideways is pure loss
+      // -- which is what the slider did at every setting before this.
+      rgb = gAdaptChroma != 0 ? lerp(rgb, soft, carrier.y) : soft;
+    }
   }
 
   // Out of its curve and into linear light, once per pixel rather than once per
@@ -1148,6 +1169,13 @@ float4 main(VSOut i) : SV_Target {
     rgb *= 1000.0 / 203.0;          // reference white of that display, in units of paper white
   }
   if (gGamut != 0) rgb = Bt2020ToBt709(rgb);
+
+  // The divider drawn last, so it is a fixed value rather than a colour that
+  // went through a transfer curve: half of diffuse white either way, which is
+  // grey on an SDR screen and stays grey on an HDR one. One source pixel wide,
+  // so it scales with the picture instead of getting thinner as the window
+  // grows and vanishing on a big screen.
+  if (raw && (float)p.x >= edge - 1.0) rgb = float3(0.5, 0.5, 0.5);
 
   // Not clamped: the target is floating point and limited range material
   // legitimately reaches past both ends after expansion.
